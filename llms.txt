@@ -3,7 +3,7 @@
 > Hacknet 的 BepInEx / Pathfinder 插件：用游戏自身的原生机制一键入侵全网，带控制面板与脚本驱动。
 > 本文件面向要理解或修改本仓库的编码 agent。规范见 https://llmstxt.org
 
-当前 v1.16.0。构建产物直投游戏插件目录，无需手动拷贝：
+当前 v1.17.0。构建产物直投游戏插件目录，无需手动拷贝：
 
 ```
 D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
@@ -20,7 +20,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    MD5 只回答「部署是否新鲜」。副产品判据：改源码 MD5 必变，只改注释/文档 MD5 不变（注释不进 IL）。
 3. **`gh release create` 绝不自动执行** —— 等用户显式发令。`git push` 可以直接做。
 
-**十二个最容易踩的坑**（都带行号，可直接 grep）
+**十三个最容易踩的坑**（都带行号，可直接 grep）
 
 1. `Computer.portsOpen` 恒为 0 —— Pathfinder 用 Harmony Prefix 接管 `openPort`/`openPorts`
    并 `return false`，状态改存 `PortState.Cracked`。任何读 `portsOpen` 的判断都是错的，
@@ -67,6 +67,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    的 `while (visibleNodes.Remove(index)) {}`（**循环**，visibleNodes 可能有重复下标），
    且必须先断开（官方三处摘节点都在断开之后）。绝不可设 `comp.disabled`：
    `NetworkMap.Update` 每帧对 disabled 节点调 `bootupTick`，`bootTimer` 缺省 0 → 下一帧就恢复 false。
+13. **面板文案不能硬编码中文** —— 面板走 `GuiData.smallfont`，非 CJK locale 下它是内置 `Font16.xnb`（6 KB，无汉字字形），画中文只有方块。汉字只在 `Content/Locales/zh-cn/Fonts/zh-cn_Font16.xnb`（701 KB），且仅当 locale 为 CJK 时才被 `LocaleFontLoader` 装进 `GuiData`。故文案走 `Loc.T()` 查表（游戏 `LocaleTerms.Loc` → 本表 → 英文原文）。判定用 `StartsWith("zh")` 而**不是** `LocaleActivator.ActiveLocaleIsCJK()` —— 后者含 ja/ko，日文玩家拿到中文比拿到英文更糟。
 
 另附一条反直觉事实：**Hacknet 没有绝对路径**。`getFolderAtPath`（`Programs.cs:1582-1593`）
 按 `/` 切分后把空段整个跳过，`/log` 与 `log` 都按「当前目录下的 log 子文件夹」解析。

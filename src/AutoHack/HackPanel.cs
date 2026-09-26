@@ -217,7 +217,7 @@ internal static class HackPanel
         // ── 标题栏 ──────────────────────────────────────────────
         var status = Status(run, c);
         Fill(new Rectangle(px + 12, py + 15, 6, 6), status.Color);
-        DrawText("AUTOHACK", px + 24, py + 9, c.Text, 1.3f);
+        DrawText(Loc.T("AUTOHACK"), px + 24, py + 9, c.Text, 1.3f);
 
         if (state.Collapsed)
         {
@@ -272,7 +272,7 @@ internal static class HackPanel
                 action = PanelAction.Start;
             }
         }
-        else if (PrimaryButton(state.IdBase + 6, new Rectangle(left, y, ContentWidth, ButtonHeight), "RUN", c.Accent, c.Ink))
+        else if (PrimaryButton(state.IdBase + 6, new Rectangle(left, y, ContentWidth, ButtonHeight), Loc.T("RUN"), c.Accent, c.Ink))
         {
             action = PanelAction.Start;
         }
@@ -286,24 +286,24 @@ internal static class HackPanel
     {
         var half = ContentWidth / 2;
 
-        Section("SCOPE", left, y, c);
+        Section(Loc.T("SCOPE"), left, y, c);
         y += SectionHeight;
 
         if (Segment(state.IdBase + 10, new Rectangle(left, y, half - 2, SegmentHeight),
-                state.Scope == HackScope.Network, "NETWORK SWEEP", c))
+                state.Scope == HackScope.Network, Loc.T("NETWORK SWEEP"), c))
         {
             state.Scope = HackScope.Network;
         }
 
         if (Segment(state.IdBase + 11, new Rectangle(left + half + 2, y, ContentWidth - half - 2, SegmentHeight),
-                state.Scope == HackScope.Connected, "CURRENT NODE", c))
+                state.Scope == HackScope.Connected, Loc.T("CURRENT NODE"), c))
         {
             state.Scope = HackScope.Connected;
         }
 
         y += SegmentHeight + Gap;
 
-        Section("PORT INTERVAL", left, y, c);
+        Section(Loc.T("PORT INTERVAL"), left, y, c);
         var value = state.PortDelay.ToString("0.00", CultureInfo.InvariantCulture) + " s";
         DrawText(value, left + ContentWidth - Measure(value, 1f).X, y, state.PortDelay <= 0.15f ? c.Warn : c.Text, 1f);
         y += SectionHeight;
@@ -314,12 +314,12 @@ internal static class HackPanel
 
         y += SliderHeight + Gap;
 
-        Section("SPEED", left, y, c);
+        Section(Loc.T("SPEED"), left, y, c);
         var speedHint = state.Speed switch
         {
-            HackSpeed.Instant => "same frame",
-            HackSpeed.Fast => "fast",
-            _ => "normal",
+            HackSpeed.Instant => Loc.T("same frame"),
+            HackSpeed.Fast => Loc.T("fast"),
+            _ => Loc.T("normal"),
         };
         DrawText(speedHint, left + ContentWidth - Measure(speedHint, 0.9f).X, y, c.Dim, 0.9f);
         y += SectionHeight;
@@ -327,39 +327,39 @@ internal static class HackPanel
         // 三档：Normal 保留真人节奏，Fast 压缩非端口步，Instant 把非端口步合并到同帧。
         var third = ContentWidth / 3;
         if (Segment(state.IdBase + 13, new Rectangle(left, y, third - 2, SegmentHeight),
-                state.Speed == HackSpeed.Normal, "NORMAL", c))
+                state.Speed == HackSpeed.Normal, Loc.T("NORMAL"), c))
         {
             state.Speed = HackSpeed.Normal;
         }
 
         if (Segment(state.IdBase + 14, new Rectangle(left + third, y, third - 2, SegmentHeight),
-                state.Speed == HackSpeed.Fast, "FAST", c))
+                state.Speed == HackSpeed.Fast, Loc.T("FAST"), c))
         {
             state.Speed = HackSpeed.Fast;
         }
 
         if (Segment(state.IdBase + 15, new Rectangle(left + third * 2, y, ContentWidth - third * 2, SegmentHeight),
-                state.Speed == HackSpeed.Instant, "INSTANT", c))
+                state.Speed == HackSpeed.Instant, Loc.T("INSTANT"), c))
         {
             state.Speed = HackSpeed.Instant;
         }
 
         y += SegmentHeight + Gap;
 
-        state.UseCredentials = Check(state.IdBase + 16, left, y, ColumnWidth, state.UseCredentials, "use known creds", c);
-        state.AllNodes = Check(state.IdBase + 17, left + ColumnWidth + 8, y, ColumnWidth, state.AllNodes, "whole map", c);
+        state.UseCredentials = Check(state.IdBase + 16, left, y, ColumnWidth, state.UseCredentials, Loc.T("use known creds"), c);
+        state.AllNodes = Check(state.IdBase + 17, left + ColumnWidth + 8, y, ColumnWidth, state.AllNodes, Loc.T("whole map"), c);
         y += CheckRowHeight;
 
-        state.SkipOwned = Check(state.IdBase + 18, left, y, ColumnWidth, state.SkipOwned, "skip owned", c);
-        state.ClearLogs = Check(state.IdBase + 19, left + ColumnWidth + 8, y, ColumnWidth, state.ClearLogs, "wipe target logs", c);
+        state.SkipOwned = Check(state.IdBase + 18, left, y, ColumnWidth, state.SkipOwned, Loc.T("skip owned"), c);
+        state.ClearLogs = Check(state.IdBase + 19, left + ColumnWidth + 8, y, ColumnWidth, state.ClearLogs, Loc.T("wipe target logs"), c);
         y += CheckRowHeight;
 
-        state.ConnectFirst = Check(state.IdBase + 20, left, y, ColumnWidth, state.ConnectFirst, "connect first", c);
-        state.Disconnect = Check(state.IdBase + 21, left + ColumnWidth + 8, y, ColumnWidth, state.Disconnect, "anti-trace dc", c);
+        state.ConnectFirst = Check(state.IdBase + 20, left, y, ColumnWidth, state.ConnectFirst, Loc.T("connect first"), c);
+        state.Disconnect = Check(state.IdBase + 21, left + ColumnWidth + 8, y, ColumnWidth, state.Disconnect, Loc.T("anti-trace dc"), c);
         y += CheckRowHeight;
 
-        state.UploadMarker = Check(state.IdBase + 22, left, y, ColumnWidth, state.UploadMarker, "upload marker", c);
-        state.ClearOwnLogs = Check(state.IdBase + 23, left + ColumnWidth + 8, y, ColumnWidth, state.ClearOwnLogs, "wipe my logs", c);
+        state.UploadMarker = Check(state.IdBase + 22, left, y, ColumnWidth, state.UploadMarker, Loc.T("upload marker"), c);
+        state.ClearOwnLogs = Check(state.IdBase + 23, left + ColumnWidth + 8, y, ColumnWidth, state.ClearOwnLogs, Loc.T("wipe my logs"), c);
         y += CheckRowHeight;
 
         next = y + Gap;
@@ -371,7 +371,7 @@ internal static class HackPanel
     /// </summary>
     private static PanelAction DrawTools(HackPanelState state, int left, ref int y, Palette c)
     {
-        Section("TOOLS", left, y, c);
+        Section(Loc.T("TOOLS"), left, y, c);
         var top = y + SectionHeight;
 
         var width = (ContentWidth - ToolGap * (ToolColumns - 1)) / ToolColumns;
@@ -387,7 +387,7 @@ internal static class HackPanel
                 width,
                 ToolButtonHeight);
 
-            if (PrimaryButton(state.IdBase + 30 + i, rect, label, danger ? c.Warn : c.Raised, danger ? c.Ink : c.Text))
+            if (PrimaryButton(state.IdBase + 30 + i, rect, Loc.T(label), danger ? c.Warn : c.Raised, danger ? c.Ink : c.Text))
             {
                 action = PanelAction.Tool(verb);
             }
@@ -402,7 +402,7 @@ internal static class HackPanel
         var right = left + ContentWidth;
         var ratio = run.Total == 0 ? 0f : Math.Min(1f, run.Done / (float)run.Total);
 
-        DrawText(run.Phase ?? "ENGAGING", left, y, c.Accent, 1f);
+        DrawText(run.Phase ?? Loc.T("ENGAGING"), left, y, c.Accent, 1f);
         var percent = (int)(ratio * 100) + "%";
         DrawText(percent, right - Measure(percent, 1f).X, y, c.Text, 1f);
         y += PhaseRowHeight;
@@ -426,7 +426,7 @@ internal static class HackPanel
     {
         var right = left + ContentWidth;
 
-        Section($"LAST RUN  {run.Outcomes.Count} NODE(S)", left, y, c);
+        Section(Loc.LastRun(run.Outcomes.Count), left, y, c);
         y += SectionHeight;
 
         for (var i = 0; i < Math.Min(run.Outcomes.Count, MaxOutcomeRows); i++)
@@ -437,19 +437,19 @@ internal static class HackPanel
 
         if (run.Outcomes.Count > MaxOutcomeRows)
         {
-            DrawText($"+{run.Outcomes.Count - MaxOutcomeRows} more", left, y, c.Dim, 1f);
+            DrawText(Loc.More(run.Outcomes.Count - MaxOutcomeRows), left, y, c.Dim, 1f);
             y += OutcomeRowHeight;
         }
 
         next = y + Gap;
-        return PrimaryButton(state.IdBase + 6, new Rectangle(left, next, ContentWidth, ButtonHeight), "RUN AGAIN", c.Accent, c.Ink);
+        return PrimaryButton(state.IdBase + 6, new Rectangle(left, next, ContentWidth, ButtonHeight), Loc.T("RUN AGAIN"), c.Accent, c.Ink);
     }
 
     private static void Outcome(TargetOutcome outcome, int left, int right, int y, Palette c)
     {
         DrawText(Ellipsize(outcome.Name, ContentWidth - 110), left, y, outcome.Escalated ? c.Ok : c.Warn, 1f);
 
-        var stats = $"{outcome.Opened}/{outcome.Total} ports" + (outcome.Escalated ? "  admin" : "");
+        var stats = Loc.Ports(outcome.Opened, outcome.Total) + (outcome.Escalated ? Loc.AdminTag() : string.Empty);
         DrawText(stats, right - Measure(stats, 1f).X, y, outcome.Escalated ? c.Ok : c.Dim, 1f);
     }
 
@@ -688,9 +688,9 @@ internal static class HackPanel
 
     private static (string Text, Color Color) Status(HackRun run, Palette c) => run switch
     {
-        { Finished: false } => ($"RUNNING {run.Done}/{run.Total}", c.Ok),
-        { Finished: true } => ($"DONE {run.Outcomes.Count} NODE(S)", c.Warn),
-        _ => ("READY", c.Dim),
+        { Finished: false } => (Loc.Running(run.Done, run.Total), c.Ok),
+        { Finished: true } => (Loc.Done(run.Outcomes.Count), c.Warn),
+        _ => (Loc.T("READY"), c.Dim),
     };
 
     // ── 基础绘制 ────────────────────────────────────────────────

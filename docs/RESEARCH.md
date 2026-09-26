@@ -2704,3 +2704,48 @@ while (oS.netMap.visibleNodes.Contains(oS.netMap.nodes.IndexOf(computer)));
   `HackEngine.cs`（`SilentDisconnect`）、`HackRun.cs`（`Leave` 改为委托）、
   `HackTypes.cs`（两个缺省 + 两组反向别名）、`HackPanel.cs`（两个属性缺省 +
   三个按钮）、`AutoHackPlugin.cs`（版本 + help）。
+
+## 25. v1.17.0：面板文案中英双语
+
+### 25.1 为什么不能硬编码中文
+
+面板自绘，走 `GuiData.smallfont`（`HackPanel.cs:733`）。这个字段指向哪个字体取决于 locale：
+
+| locale | 字体 | 体积 |
+| --- | --- | --- |
+| en-us（缺省） | 内置 `Content/Font16.xnb` | 6,150 B |
+| zh-cn | `Content/Locales/zh-cn/Fonts/zh-cn_Font16.xnb` | 701,546 B |
+
+百倍差距来自汉字字形表。en-us 下字体无汉字，`SpriteFont.DrawString` 遇到缺字形画 default character，硬编码中文只会得到一片方块。
+
+切换发生在启动时：`Game1.cs:319` `LocaleActivator.ActivateLocale(code, Content)` → `LocaleFontLoader.LoadFontConfigForLocale` → 末尾赋 `GuiData.UITinyfont`/`UISmallfont`，并经 `GuiData.ActivateFontConfig(FontCongifOption)`（`GuiData.cs:181-191`）设 `smallfont`/`tinyfont`/`font`/`detailfont` 四个。**注意这四个与「`UISmallfont`/`UITinyfont` 从不赋值」是两码事** —— 后者是面板注释里那条老坑，指的是面板若去读 `UISmallfont` 会 NRE；而 `smallfont` 是会被本地化整体替换的。
+
+游戏自己会为 CJK 调布局：`tinyFontCharHeight` 按 `ActiveLocaleIsCJK()` 分档（15/17/19 vs 10/14/16），并给 `smallFont.LineSpacing += 2`（`LocaleFontLoader.cs:31-34`）；`Button.cs:146` 另有 `num2 = CJK ? 4f : 0f` 的行高余量。
+
+### 25.2 判定条件：认 `zh`，不认 CJK
+
+`LocaleActivator.ActiveLocaleIsCJK()`（`LocaleActivator.cs:86`）回答的是「当前字体里有没有汉字」，`zh`/`ja`/`ko` 都算。但这里要问的是「该给玩家看哪份文案」—— 日文玩家拿到中文比拿到英文更糟。故 `Loc.cs` 用 `Settings.ActiveLocale.StartsWith("zh")`。
+
+### 25.3 查表次序
+
+1. `LocaleTerms.Loc(english)`（`LocaleTerms.cs:53-64`）—— 游戏自己的词表，未命中时原样返回，故比较返回值是否变化即知有无命中；
+2. `Loc.Chinese` 本表；
+3. 英文原文。
+
+把游戏词表放第一位是为了将来官方补译时自动跟随。实测 zh-cn 的 `Hacknet_UI_Terms.txt`（528 条，UTF-16 + TAB 分隔）只覆盖 UI 通用词（`Disconnect`→断开、`Delete`→删除、`Back`→返回、`Exit`→退出、`Complete`→完成、`Failed`→失败），面板专有词（`RUN`/`SCOPE`/`SPEED`/`NORMAL`/`FAST`/`INSTANT`/`TOOLS`/`NETWORK`）**全部未收录**，故本表是主力。
+
+### 25.4 语序：带数字的文案不拼接
+
+中英语序不同（`3 NODE(S)` vs `3 个节点`），故 `Loc.Running`/`Done`/`LastRun`/`More`/`Ports` 每种语言各留一份完整格式串，而不是拼接 `T(...)` 的碎片 —— 后者一旦语序不同就拼不成句。`AdminTag()` 同理（`  admin` vs `  管理员`）。
+
+### 25.5 实现
+
+新增 `src/AutoHack/Loc.cs`（约 120 行）。`HackPanel.cs` 的 30 处字面量改为 `Loc.T(...)`；`Tools` 数组保留英文原文、**绘制时**才查表 —— 该数组是 `static readonly`，静态初始化可能早于 locale 生效。
+
+标题跟随语言（`AUTOHACK` → 自动入侵）。终端 help 文本保持英文：那是命令行输出、走 `os.write` 的等宽字体，不在面板内，本轮不扩散范围。
+
+布局零改动：`Width = 396`、`ContentWidth = 372`，汉字 16px/字 → 每行 23 字；`ColumnWidth = 182` → 每行 10 字。最长标签「清除目标日志」6 字 = 96px，余量充足。
+
+### 25.6 交付
+
+87552 B / `6b54d30232caf8f5817cc2c99ffb60b1`。构建 0 警告 0 错误。产物内 29 条中文串全部命中（UTF-16LE），英文原文同时保留 —— 双语共存，非硬替换。

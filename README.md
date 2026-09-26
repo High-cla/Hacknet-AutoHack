@@ -42,11 +42,12 @@ autohack -h                                     # 帮助
 
 | 控件 | 作用 |
 |---|---|
-| `NETWORK SWEEP` / `CURRENT NODE` | 目标范围：地图上全部可连接服务器 / 仅当前连接节点 |
+| `NETWORK SWEEP` / `CURRENT NODE` | 目标范围：沿网络连线可达的服务器 / 仅当前连接节点 |
+| `whole map` | 全网扫描口径：勾选 = 地图全表（含不在连线上的机器），缺省不勾 = 沿连线广度优先 |
 | `PORT INTERVAL` 滑条 | 每个端口的破解间隔，`0.05`–`5` 秒，默认 `0.6`；支持滚轮微调，`≤0.15` 时数值转为警示色 |
 | `wipe logs` | 是否在执行后清空目标日志 |
 | `connect first` | 每个目标先 `connect` 再动手（缺省开） |
-| `upload marker` | 是否上传 `~/autohack.txt` 标记 |
+| `upload marker` | 是否上传 `~/autohack.txt` 标记（缺省**关**） |
 | `anti-trace dc` | 每个目标跑完 `dc`：追踪只在连着目标时推进，断开即中止（缺省开） |
 | `skip owned nodes` | 全网扫描时跳过已拿下的肉鸡，不重复入侵（缺省开） |
 | — | 永远提不了权的机器（端口表容量 ≤ `portsToCrack`）在全网扫描时一律跳过，见下 |
@@ -68,13 +69,19 @@ autohack -h                                     # 帮助
 
 | 参数 | 说明 |
 |---|---|
-| `here` | 仅当前已连接的节点（缺省 = 地图上全部可连接服务器） |
+| `here` | 仅当前已连接的节点（缺省 = 沿网络连线可达的服务器） |
 | `delay=秒` | 每个端口的破解间隔，默认 `0.6`，范围 `0.05`–`5` |
 | `nologs` | 不清除目标日志 |
-| `nomark` | 不上传标记文件 |
+| `nomark` | 不上传标记文件（**已是缺省**） |
+| `mark` | 上传标记文件 |
+| `allnodes` | 全网扫描改扫地图全表，不再只沿连线展开 |
 | `direct` | 跳过 connect / probe，直接就地破解（不再回显这两条指令） |
 | `stay` | 跑完**不**断开连接（缺省断开 = 回显并执行 `dc`，可中止追踪） |
 | `redo` | 全网扫描时**连已控节点一起重打**（缺省跳过肉鸡及永远提不了权的机器） |
+
+> `allnodes` 与缺省口径的差额实测（同一存档 147 节点）：沿连线广度优先 **7** 个目标，地图全表 **110** 个。
+> 差额是「可以直接敲 IP 连上、但不在连线上」的机器 —— `Programs.connect` 遍历的是
+> `netMap.nodes` 全表，本来就不检查 `links`（见「关键设计决策」#4c）。
 
 ## 行为：终端里看到什么
 
@@ -88,6 +95,7 @@ autohack -h                                     # 帮助
 | `10.0.0.5@> solve ABCDEF` | `Firewall.attemptSolve`（**游戏自身**入口，同玩家敲 `solve`）。解序列由游戏生成并公开在 `Firewall.solution` |
 | `10.0.0.5@> porthack` | 达门槛时 `Computer.giveAdmin(玩家IP)` |
 | `10.0.0.5@> dc` | 断开前先 `Computer.admin = null`，再 `Programs.disconnect`（原生）。**同时**解除延迟反扑与中止追踪：前者见下，后者因 `TraceTracker.Update` 见 `connectedComp == null` 立刻置 `active = false` |
+| `[autohack] trace killed - timer stopped.` | `TraceTracker.stop()` —— 直接毙掉追踪（非指令，故无回显）。断开已让它失效，这步是确定性的兜底 |
 | `10.0.0.5@> rm /log/Connection:_from_10.0.0.1` | 逐条抹除该目标的 `/log` 文件。因断开自身会追加一条记录，清痕排在 `dc` **之后**，此时已不在目标上，故改为一行状态：`[autohack] <名> :: wiped 3 log file(s)` |
 | `[autohack] <名> :: proxy bypassed` | 跳板解除（非指令，故无回显） |
 | `[autohack] <名> :: 3/5 ports, admin=yes` | 收尾战果行（非指令） |
@@ -155,16 +163,37 @@ src/AutoHack/
 **4. 为什么端口状态必须读 Pathfinder 的端口表，而不是原版 `portsOpen`。**
 Pathfinder 用 `[HarmonyPrefix]` 接管了 `Computer.openPort(int, string)` 并 **return false 跳过原版实现**，端口状态改存自己的 `PortState.Cracked`（`ConditionalWeakTable` 里的 `PortTable`）。因此原版 `portsOpen` 数组永不更新 —— 直接读它会**恒为 0**，提权判断将永不成立。**读**状态一律走框架 API：`GetAllPortStates()` / `state.Cracked` / `state.PortNumber` / `Record.OriginalPortNumber` / `CountOpenPorts()`，**没有任何一条**读原版 `portsOpen` 的路径（该字段在装框架的游戏里恒为 0，读它就是 bug）。**写**状态则走游戏自身的签名 `Computer.openPort(int portNum, string ipFrom)`（传 `Record.OriginalPortNumber`）—— 它正是原生破解程序完成时的调用形态，也是 Pathfinder Prefix 接管的那个重载；只要不在它之后去读 `portsOpen`，两者完全同路。详见 `docs/RESEARCH.md`。
 
+**4c. 全网扫描两套口径，「沿连线」为缺省（v1.10）。**
+`Programs.connect`（`Programs.cs:231-322`）在 `os.netMap.nodes` 里按 ip/name 线性查找，
+**全程不检查 `visibleNodes`，也不看 `links`** —— 地图上任何节点都是「敲 IP 就能连」的。
+`visibleNodes` 只是原版 `scan` 维护的「已发现」展示标记，不是连接许可。
+
+据此有两套口径，用 `whole map` 开关／`allnodes` 参数切换：
+
+| 口径 | 实现 | 实测（存档 147 节点） |
+|---|---|---|
+| **沿连线广度优先（缺省）** | `ReachableComputers`：多源种子（玩家机 + 已发现节点）沿 `Computer.links` 展开 | **7** 个目标 |
+| 地图全表 | `ConnectableComputers`：遍历 `netMap.nodes`，只排除玩家机 | **110** 个目标 |
+
+缺省取保守口径，是因为它只碰图上确有通路的机器；但要注意这条通路判据比游戏实际的
+连接能力**更窄** —— 差额那 103 台正是「可以直接敲 IP 连上」却被连线图漏掉的机器。
+两者都只排除玩家机，`disabled`／已控／永远提不了权的机器统一由 `ResolveTargets` 过滤。
+
+广度优先还会把新展开的节点按原生 `scan` 的后效委托 `NetworkMap.discoverNode`
+（`NetworkMap.cs:415`）标为已发现，不做自绘的「伪发现」。
+
 **4b. 提权走原生门禁，不绕过（v1.9 修正）。**
 游戏自己的 porthack 有硬门禁（`OS.cs:1908-1930`）：已攻破端口数必须**超过** `portsNeededForCrack`，**且** `firewall == null || firewall.solved` —— 缺其一就写 `Target Machine Rejecting Syndicated UDP Traffic` 并拒绝启动 `PortHackExe`。旧版直接调 `Computer.giveAdmin` 把整条门禁跳过去了，等于从未用过原生的提权与防火墙机制。现在：
 - `CanEscalate` 逐条对齐该门禁（含防火墙）；
 - 防火墙走游戏自身的 `Firewall.attemptSolve(solution)`（`Firewall.cs:101-116`），同玩家敲 `solve`；**不用 `Programs.solve`** —— 它内层先跑 `doDots(30, 60)`，每点 `Thread.Sleep(60)`，合计约 1.8 秒阻塞游戏线程。解序列由游戏生成并公开在 `Firewall.solution`，不必等 `analyze` 的逐趟收敛跑完；
 - 追加 `CanEverEscalate`：**端口表容量 ≤ 门槛**的机器永远开不满、永远提不了权（门槛由 `openPortsForSecurityLevel` 定义为 `security - 1`，`Computer.cs:200-204`）。实测存档里既有 `portsToCrack="9999998"` 的剧情保护机，也有门槛 8/6 而端口表只有 4~5 个的机器；这类机器此前每次全网扫描都被连上、逐个破端口、再提权失败 —— 即「每一次判断都是要入侵」。全网扫描现在直接剔除（显式点名仍尊重玩家）。
 
-**5. 跳板直接收敛到终态，追踪必须靠断开。**
+**5. 跳板收敛到终态，追踪直接毙掉。**
 两者性质不同，处置也必须不同。
 - **跳板（`proxyActive`）**：把 `proxyOverloadTicks` 置 0、`proxyActive` 置 false —— 与 ShellExe 过载跑满的终态（`ShellExe.cs:96-99`）逐字节相同。游戏**没有**更快的路径：终端 `ComShell.exe -o` 启动的就是同一个逐帧扣减的 ShellExe，跑满要 `BASE_PROXY_TICKS = 30f` 秒（`Computer.cs:27`）。跳过等待无副作用 —— 全游戏 12 处 `AchievementsManager.Unlock` 里唯一与追踪相关的是 `TraceTracker.cs:70` 的 `trace_close`，与跳板无关（v1.5 曾误判「跳过会丢成就」，v1.7 已订正）。**唯一刻意不重演**的是过载循环里那句 `hostileActionTaken()`（`ShellExe.cs:105`）：它不参与跳板失效，只负责点燃追踪。
-- **追踪（`TraceTracker`）**：不能直接置 `active = false`，因为追踪的推进条件写在 `TraceTracker.Update` —— `connectedComp` 为空或已换目标即自动失效（`TraceTracker.cs:60-66`）。断开连接正是触发该条件的手段，且会正常走完 `trace_close` 成就与警告闪烁。故此处走原生路径：`Programs.disconnect("dc")`。
+- **追踪（`TraceTracker`）**：走游戏自身的 `TraceTracker.stop()`（`TraceTracker.cs:116-119`，即 `active = false; trackSpeedFactor = 1f;`）——**直接毙掉，零每帧开销**。`TraceTracker.Update` 开头就是 `if (!active) return;`（:53-56），停是彻底的，没有「暂停」形态。这也是游戏自己的做法：`SecurityTraceExe.Killed()`（`SecurityTraceExe.cs:26`）关程序时这么干，`OS.thisComputerIPReset()`（`OS.cs:1793-1796`）换 IP 时也是直接置 `active = false`。
+  - **不照抄 `TraceKillExe` 的「每帧把 `timeSinceFreezeRequest` 置 0」**：那是它作为 GUI 程序的职责 —— 玩家开着它时要看到 `SUPPRESSION ACTIVE` 的持续效果，故必须逐帧续期。mod 要的是「立即终止」这一动作，照抄只会白白常驻一个每帧补丁。
+  - 断开连接仍是每一步的收尾（`dc`），它让 `TraceTracker` 自己失效（`connectedComp` 为空，`TraceTracker.cs:60-66`）并顺带走完成就与警告闪烁；`stop()` 是随后确定性的兜底，覆盖 `stay` 模式与「断开后才被点燃」的窗口（如目标机带 tracker，经 `TrackerCompleteSequence` 延迟 10~20 秒启动，`OS.cs:950-958`）。
 
 **5b. 命令线程与游戏线程的分工（v1.8 修正）。**
 `autohack run` 由 `OS.execute` 在**派生线程**上执行（OS.cs:1754-1767，日志里的 `Spawning thread for command autohack` 就是它），而它触碰的每一样东西 —— 连接状态、`netMap.visibleNodes`、`Computer.files` —— 都属于游戏线程。故命令入口**只解析参数并入队**，真正的 `HackRun` 构造推迟到首帧的 `OS.Update`。构造里要遍历 `netMap.nodes` 解析目标集合，而游戏线程每帧都在动那张表。调度容器用按 OS 键控的 `ConcurrentDictionary`：`TryAdd` 同时充当「同一终端只允许一条运行」的原子互斥。
@@ -179,7 +208,7 @@ Pathfinder 用 `[HarmonyPrefix]` 接管了 `Computer.openPort(int, string)` 并 
 ```
 [Info : BepInEx] Loading [AutoUpdater 5.3.4]
 [Info : BepInEx] Loading [PathfinderAPI 5.3.4]   ← Pathfinder 先，安装属性扫描 hook
-[Info : BepInEx] Loading [AutoHack 1.9.0]        ← 本插件后，能被扫描到
+[Info : BepInEx] Loading [AutoHack 1.10.0]        ← 本插件后，能被扫描到
 [Info : AutoHack] AutoHack loaded (GUI).
 [Info : AutoHack] self-check OK: 'autohack' is registered and autocompletes.
 ```
@@ -189,7 +218,7 @@ Pathfinder 用 `[HarmonyPrefix]` 接管了 `Computer.openPort(int, string)` 并 
 ### 静态验证（反编译产物）
 
 ```
-[BepInPlugin("com.highcla.autohack", "AutoHack", "1.9.0")]
+[BepInPlugin("com.highcla.autohack", "AutoHack", "1.10.0")]
 [Command("autohack", true, false)]
 
 Echo:   os.write("\n" + os.terminal.prompt + command);
@@ -207,8 +236,8 @@ Hopeless: Ports(comp).Count <= comp.portsNeededForCrack                      // 
 Clean:   root.searchForFolder("log").files.Clear()  -> 回显 "rm /log/<名>"（连着时）
 Proxy:   HackEngine.BypassProxy(target) -> proxyOverloadTicks = 0f; proxyActive = false  // 同 ShellExe 过载终态
 Neutral: HackEngine.SuppressCounterattack(target) -> comp.admin = null             // 断开前解除反扑
-Trace:   os.traceTracker.active -> Programs.disconnect("dc")                        // 断开即中止
-Targets: ConnectableComputers(os) -> os.netMap.nodes 全表                          // 同 Programs.connect 判据
+Trace:   os.traceTracker.stop() -> active = false; trackSpeedFactor = 1f           // 直接毙掉，零每帧开销
+Targets: ReachableComputers(os) -> BFS over links (缺省) / ConnectableComputers -> 全表 (allnodes)
 ```
 
 面板侧（v1.5.0 自绘 UI）：
@@ -269,6 +298,18 @@ SkippedHopeless        6    跳过计数（决策/属性/报告/面板/终端）
 HackStepKind.SolveFirewall 2  新步骤
 Disconnect @1693 -> CleanLogs @1697   清痕排在本目标最后（断开自身会写 /log）
 原生控件 / UISmallfont / hostileActionTaken   0 / 0 / 0
+```
+
+v1.10 反编译产物逐项核对（`decompiled/autohack-v10/AutoHack.decompiled.cs`，1963 行）：
+
+```
+KillTrace               8    新步骤：决策 + 枚举 + 执行 + 回显 + 收尾兜底
+traceTracker.stop       1    走游戏自身的 stop()，不照抄 TraceKill 的每帧续期
+ReachableComputers      2    缺省口径（沿 links 广度优先）恢复
+ConnectableComputers    2    allnodes 口径（netMap.nodes 全表）
+AllNodes                7    开关（选项/面板/解析/决策 + allnodes 别名）
+ShellTrap / forkBombClients  0 / 0   已撤（ActiveHackers 仅剧情脚本填充，反制不了普通追踪）
+hostileActionTaken / UISmallfont / doButton   0 / 0 / 0
 ```
 
 ### 未验证

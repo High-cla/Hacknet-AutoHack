@@ -200,6 +200,11 @@ internal sealed class HackRun
             case HackStepKind.Disconnect:
                 Leave(os, target, step.Command ?? "dc");
                 break;
+
+            case HackStepKind.KillTrace:
+                Phase = "KILLING TRACE";
+                KillTrace(os);
+                break;
         }
     }
 
@@ -224,6 +229,19 @@ internal sealed class HackRun
         Neutralize(os, target);
         Echo(os, command);
         Programs.disconnect(["dc"], os);
+    }
+
+    /// <summary>
+    /// 终止进行中的追踪。排在断开之后：断开已让 TraceTracker 自己失效
+    /// （connectedComp 为空），此处只是把「确实停掉了」这件事写进终端；
+    /// 若断开没生效（如 stay 模式），这里就是唯一的止血点。
+    /// </summary>
+    private static void KillTrace(OS os)
+    {
+        if (HackEngine.KillTrace(os))
+        {
+            os.write("[autohack] trace killed - timer stopped.");
+        }
     }
 
     /// <summary>解除目标的延迟反扑，仅在实际解除时回显一行（这不是终端指令，故不走 Echo）。</summary>
@@ -311,20 +329,12 @@ internal sealed class HackRun
     }
 
     /// <summary>
-    /// 若追踪仍在推进则断开连接中止它。
-    /// 追踪的推进条件写在 TraceTracker.Update：connectedComp 为空（或已换目标）即
-    /// active = false，因此断开是确定性的中止手段 —— 不需要 TraceKill.exe 那样的冻结。
+    /// 收尾兜底：跑完仍被追踪时直接毙掉。
+    /// 正常情况下每个目标的 KillTrace 步已停掉它，这里覆盖「最后一步之后才被点燃」
+    /// 的窗口 —— 例如目标机带 tracker、断开时经
+    /// <c>TrackerCompleteSequence</c>（OS.cs:950-958）延迟 10~20 秒启动的那种。
     /// </summary>
-    private static void AbortTrace(OS os)
-    {
-        if (os?.traceTracker is not { active: true } || os.connectedComp == null)
-        {
-            return;
-        }
-
-        Leave(os, os.connectedComp, "dc");
-        os.write("[autohack] trace was active - disconnected to abort it.");
-    }
+    private static void AbortTrace(OS os) => KillTrace(os);
 
     /// <summary>
     /// 展开动作序列：连接 → 侦察 → 解跳板 → 逐端口攻破 → 提权 → 投放 → 清痕 → 断开。
@@ -377,6 +387,10 @@ internal sealed class HackRun
             {
                 steps.Add(new HackStep(HackStepKind.Disconnect, target, default, "dc"));
             }
+
+            // 断开已让 TraceTracker 自己失效；这一步是确定性的兜底 ——
+            // stay 模式（不断开）下它是唯一的止血点。走 stop()，零每帧开销。
+            steps.Add(new HackStep(HackStepKind.KillTrace, target, default, null));
 
             // 清痕必须是本目标的最后一步：提权、投放、**以及断开**都会向目标 /log
             // 追加记录（Computer.disconnecting 写 "&lt;ip&gt; Disconnected"，

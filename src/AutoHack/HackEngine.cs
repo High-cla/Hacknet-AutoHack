@@ -312,7 +312,7 @@ internal static class HackEngine
         var pool = options.Scope switch
         {
             HackScope.Connected => os.connectedComp is { } connected ? [connected] : [],
-            HackScope.Network => ConnectableComputers(os),
+            HackScope.Network => options.AllNodes ? ConnectableComputers(os) : ReachableComputers(os),
             _ => options.Targets
                     .Select(id => ComputerLookup.Find(id))
                     .Where(comp => comp != null)
@@ -360,16 +360,145 @@ internal static class HackEngine
     }
 
     /// <summary>
-    /// 全部可连接的服务器 —— 「扫描所有可连接的服务器」的目标集合。
+    /// 广度优先：从玩家机与已发现的节点出发，沿 <c>Computer.links</c> 连线展开可达的服务器。
+    /// <b>这是全网扫描的缺省口径</b>（更保守，只碰图上确有通路的机器）；
+    /// 要扫地图全表用 <see cref="ConnectableComputers"/>（<c>allnodes</c> 开关）。
+    ///
+    /// 多源种子：玩家机 + 玩家已发现的机器。只从玩家机出发是不够的 —— 实测存档里
+    /// <c>&lt;links&gt;</c> 图极稀疏（玩家机 links 仅 "0 1"、其后节点多半为空），
+    /// 那样反而比 visibleNodes 看到的更少。以「已知」为起点向外展开，
+    /// 既保证结果永不退化，又能越过原版 scan 的一跳极限。
+    ///
+    /// 展开出的新节点按原生 scan 的后效委托 <c>NetworkMap.discoverNode</c> 标为已发现
+    /// （NetworkMap.cs:415），不做自绘的「伪发现」。
+    /// </summary>
+    internal static Computer[] ReachableComputers(OS os)
+    {
+        var map = os?.netMap;
+        if (map?.nodes == null || map.nodes.Count == 0)
+        {
+            return Array.Empty<Computer>();
+        }
+
+        var seen = new HashSet<int>();
+        var frontier = new Queue<int>();
+
+        // visibleNodes 是 List<int>，逐次 Contains 会退化成 O(V·E)；
+        // 先摊平成哈希集，供展开循环做 O(1) 判「已发现」。
+        var discovered = map.visibleNodes == null
+            ? new HashSet<int>()
+            : new HashSet<int>(map.visibleNodes);
+        Seed(map, seen, frontier, os.thisComputer == null ? -1 : map.nodes.IndexOf(os.thisComputer));
+        if (map.visibleNodes != null)
+        {
+            foreach (var index in map.visibleNodes)
+            {
+                Seed(map, seen, frontier, index);
+            }
+        }
+
+        if (seen.Count == 0)
+        {
+            return Array.Empty<Computer>();
+        }
+
+        var found = new List<Computer>();
+        while (frontier.Count > 0)
+        {
+            var comp = map.nodes[frontier.Dequeue()];
+            if (comp == null || comp.disabled)
+            {
+                continue;
+            }
+
+            if (!ReferenceEquals(comp, os.thisComputer))
+            {
+                found.Add(comp);
+            }
+
+            if (comp.links == null)
+            {
+                continue;
+            }
+
+            foreach (var next in comp.links)
+            {
+                if (next < 0 || next >= map.nodes.Count || !seen.Add(next))
+                {
+                    continue;
+                }
+
+                var neighbor = map.nodes[next];
+                if (neighbor == null || neighbor.disabled)
+                {
+                    continue;
+                }
+
+                if (discovered.Add(next))
+                {
+                    map.discoverNode(neighbor);
+                }
+
+                frontier.Enqueue(next);
+            }
+        }
+
+        return found.ToArray();
+    }
+
+    /// <summary>广度优先的种子入队：忽略越界下标并去重。</summary>
+    private static void Seed(NetworkMap map, HashSet<int> seen, Queue<int> frontier, int index)
+    {
+        if (index >= 0 && index < map.nodes.Count && seen.Add(index))
+        {
+            frontier.Enqueue(index);
+        }
+    }
+
+    /// <summary>
+    /// 直接毙掉追踪 —— 不是「冻结」，是停。
+    ///
+    /// 走游戏自身的 <c>TraceTracker.stop()</c>（TraceTracker.cs:116-119）：
+    /// <c>active = false; trackSpeedFactor = 1f;</c>。这是原生路径，
+    /// <c>SecurityTraceExe.Killed()</c>（SecurityTraceExe.cs:26）在玩家关掉
+    /// Security Tracer 时就是这么干的；<c>OS.thisComputerIPReset()</c>
+    /// （OS.cs:1793-1796）换 IP 时也是直接置 <c>active = false</c>。
+    ///
+    /// 停是彻底的，不存在「暂停」形态 —— <c>TraceTracker.Update</c> 开头的
+    /// <c>if (!active) return;</c>（TraceTracker.cs:53-56）让后续帧零开销，
+    /// **不需要任何每帧维护**。
+    ///
+    /// 为什么不照抄 <c>TraceKillExe</c> 的「每帧把 <c>timeSinceFreezeRequest</c> 置 0」：
+    /// 那是它作为 GUI 程序的职责 —— 玩家开着它时要看到 <c>SUPPRESSION ACTIVE</c>
+    /// 的持续效果，故必须逐帧续期。mod 要的是「立即终止」这一动作，
+    /// 没有那个 UI 需求，照抄只会白白常驻一个每帧补丁。
+    ///
+    /// 不丢成就：<c>trace_close</c> 的解锁写在 <c>TraceTracker.Update</c> 的
+    /// <i>另一条</i>分支（connectedComp 为空或已换目标，TraceTracker.cs:64-71），
+    /// 走 <c>stop()</c> 不经过它。真要在意那条分支的成就，得靠断开连接。
+    /// </summary>
+    /// <returns>是否真的终止了一条进行中的追踪（供回显报数）。</returns>
+    internal static bool KillTrace(OS os)
+    {
+        if (os?.traceTracker is not { active: true })
+        {
+            return false;
+        }
+
+        os.traceTracker.stop();
+        return true;
+    }
+
+    /// <summary>
+    /// 地图上<b>全部</b>可连接的服务器 —— <c>allnodes</c> 开关启用的口径。
     ///
     /// 判据直接对齐游戏自身的连接逻辑：<c>Programs.connect</c>（Programs.cs:231-322）
-    /// 在 <c>os.netMap.nodes</c> 里按 ip/name 线性查找，**全程不检查 visibleNodes** ——
-    /// 地图上任何节点都是「敲 IP 就能连」的。原版 <c>scan</c> 维护的 visibleNodes
-    /// 只是「已发现」的展示标记，不是连接许可。
+    /// 在 <c>os.netMap.nodes</c> 里按 ip/name 线性查找，**全程不检查 visibleNodes**，
+    /// 也不看 <c>links</c> —— 地图上任何节点都是「敲 IP 就能连」的。
+    /// <c>visibleNodes</c> 只是原版 <c>scan</c> 维护的「已发现」展示标记，不是连接许可。
     ///
-    /// 故此前按 visibleNodes + <c>links</c> 做广度优先遍历是画错了图：实测存档里
-    /// 玩家机的 <c>&lt;links&gt;</c> 仅 "0 1"、其后节点多半为空，全网 147 个节点只够到 7 个，
-    /// 而游戏里随手敲一个 IP 就能连上任意一台 —— 这就是「可以直接敲 IP 的服务器没有找到」。
+    /// 实测同一存档：广度优先 7 个目标，全表 110 个 —— 差额就是「可以直接敲 IP
+    /// 但不在连线上」的机器。
     ///
     /// 此处只排除玩家机；disabled、已控、永远提不了权的机器交由
     /// <see cref="ResolveTargets"/> 统一过滤。

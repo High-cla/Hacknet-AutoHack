@@ -1076,3 +1076,143 @@ if (security >= 5) portsNeededForCrack--;      // 安全级 ≥5 再减 1
 - 版本：`AutoHack", "1.9.0"`。
 
 待真人验证：面板在真实存档上的观感；`solve` 步骤在有防火墙的机器上的实际表现。
+
+---
+
+## §13 v1.10：追踪直接毙掉，全网扫描加开关，标记改默认关
+
+用户三条指令：①「以后只推送发布，由我来决定」（流程约束，已记入 §13.5）；
+②「shell 命令类，默认不上传标记文件；全域扫描默认用上一版，做开关」；
+③追问「每帧调用是不是太吃性能了，不能直接毙掉或者绕过吗？」——这一问推翻了 §12 里
+我准备照抄 `TraceKillExe` 的每帧冻结方案。
+
+### 13.1 关键修正：追踪可以直接毙掉，不必每帧维护
+
+`TraceTracker` 有原生的停止入口：
+
+```csharp
+public void stop() {          // TraceTracker.cs:116-119
+    active = false;
+    trackSpeedFactor = 1f;
+}
+```
+
+而 `Update` 开头就是防空转早返回（`TraceTracker.cs:53-56`）：
+
+```csharp
+if (!active) { return; }
+```
+
+**停是彻底的，不存在「暂停」形态** —— 置一次 `active = false`，后续所有帧零开销。
+
+这是游戏自己的做法：
+
+| 调用点 | 场景 |
+|---|---|
+| `SecurityTraceExe.Killed()`（SecurityTraceExe.cs:26） | 玩家关掉 Security Tracer 程序 |
+| `OS.thisComputerIPReset()`（OS.cs:1793-1796） | 玩家换 IP 时 `if (traceTracker.active) traceTracker.active = false;` |
+
+**为什么原计划是错的**：我原本准备照抄 `TraceKillExe` 的
+`os.traceTracker.timeSinceFreezeRequest = 0f`（TraceKillExe.cs:88-94）。
+那是**它作为 GUI 程序的职责** —— 玩家开着 TraceKill 时要看到
+`SUPPRESSION ACTIVE` 的持续效果（TraceKillExe.cs:181），故必须逐帧续期。
+`timeSinceFreezeRequest` 的作用是让 `TraceTracker.Update` 里的
+`flag`（`timeSinceFreezeRequest < 0.2f`，:48-51）成立，从而**跳过倒计时扣减**——
+即「冻结」。冻结是给「开着程序持续压制」这个交互形态用的；
+mod 要的是「立即终止」这一**动作**，没有那个 UI 需求，
+照抄只会白白常驻一个每帧补丁。
+
+用户这一问正中要害：为一个一次性动作常驻每帧补丁是纯粹的浪费。
+
+**不丢成就**：`trace_close` 的解锁写在 `TraceTracker.Update` 的**另一条**分支
+（`connectedComp == null || ip != target.ip` 时解锁，TraceTracker.cs:64-71），
+走 `stop()` 不经过它。所以两种终止方式在成就上是互补的：
+- 断开连接 → 走那条分支 → 解锁 `trace_close`；
+- `stop()` → 不走 → 不解锁，但也不会漏掉任何已有成就。
+
+mod 两者都做了：`dc` 仍是每目标的断开动作（顺带解锁成就与警告闪烁），
+`stop()` 作为随后的确定性兜底。
+
+### 13.2 shell / Trap 为什么不做
+
+用户原话「2 但是解决计时」，我取证后确认 **shell 的 Trap 解决不了计时**，
+且用户最终选择「不做 shell/trap，聚焦于 stop() 绕过计时」。
+
+`shell` 命令（OS.cs:1966-1990 → `new ShellExe`）在 RAM 面板里有两个按钮，
+Trap 的动作是（ShellExe.cs:118-126）：
+
+```csharp
+destComp.forkBombClients(targetIP);
+compThisShellIsRunningOn.log("#SHELL_TrapActivate_:_ConnectionsFlooded");
+```
+
+而 `forkBombClients`（Computer.cs:831-847）：
+
+```csharp
+for (int i = 0; i < os.ActiveHackers.Count; i++) {
+    if (os.ActiveHackers[i].Value == ip) {
+        Computer computer = Programs.getComputer(os, os.ActiveHackers[i].Key);
+        computer.crash(ip);
+    }
+}
+```
+
+`os.ActiveHackers`（OS.cs:220）**只由 `HackerScriptExecuter` 在剧情脚本里填充**
+（HackerScriptExecuter.cs:111 加、:417 移除）。普通存档里这个列表基本为空 ——
+它反制的是任务脚本指定的对手，**不是** `TraceTracker`。追踪计时与它毫无关系。
+
+故结论：shell/Trap 对「解决计时」零帮助，不做。
+
+### 13.3 全网扫描两套口径
+
+`Programs.connect`（Programs.cs:231-322）遍历 `os.netMap.nodes` 全表，
+按 ip/name 匹配，**不检查 visibleNodes，也不看 links**。
+`visibleNodes` 只是原版 `scan` 的「已发现」展示标记。
+
+两套口径（同一存档 147 节点实测）：
+
+| 口径 | 实现 | 目标数 | 开关 |
+|---|---|---|---|
+| 沿连线广度优先 | `ReachableComputers`：多源种子（玩家机 + visibleNodes）沿 `Computer.links` 展开 | **7** | 缺省 |
+| 地图全表 | `ConnectableComputers`：遍历 `netMap.nodes`，只排除玩家机 | **110** | `allnodes` / 面板 `whole map` |
+
+用户指令是「全域扫描默认用上一版」，即恢复 v1.8 的 BFS 为缺省，v1.9 的全表降为可选。
+
+注意这条通路判据比游戏实际的连接能力**更窄**：差额那 103 台正是
+「可以直接敲 IP 连上」却被连线图漏掉的机器。两者都只排除玩家机，
+`disabled`／已控／永远提不了权的机器统一由 `ResolveTargets` 过滤。
+
+### 13.4 标记文件默认关
+
+`HackOptions.Parse` 的 `uploadMarker` 初值 `true` → `false`；
+新增 `mark` / `upload` / `marker` 别名可显式开启（`nomark` 保留，现在与缺省等价）。
+面板 `HackPanelState.UploadMarker` 默认同步改为 `false`。
+
+理由：投放 `~/autohack.txt` 会在目标机留下文件，而该文件被复制/删除都会触发
+`TrackerCompleteSequence.CompShouldStartTrackerFromLogs`（见 §12.3）；
+不做标记的入侵更干净。要留所有权凭证时可以显式开。
+
+### 13.5 流程约束
+
+**「以后只推送发布，由我来决定」** —— 提交与推送照常（版本控制需要），
+但**发布（`gh release create`）不再自动执行**，等用户明确指示。
+此前 v1.8.0 的 Release 与本次均遵循此约定。
+
+### 13.6 验证（v1.10）
+
+反编译核对（产物 `decompiled/autohack-v10/AutoHack.decompiled.cs`，1963 行）：
+
+| 项 | 关键词 | 计数 |
+|---|---|---|
+| 应存在 | `KillTrace` / `traceTracker.stop` | 8 / 1 |
+| 应存在 | `ReachableComputers` / `ConnectableComputers` / `AllNodes` | 2 / 2 / 7 |
+| 应存在 | `allnodes` / `whole map` 别名与面板标签 | 2 / 2 |
+| 已撤 | `ShellTrap` / `forkBombClients` | 0 / 0 |
+| 必须为 0 | 原生控件 / `UISmallfont` / `hostileActionTaken` | 0 / 0 / 0 |
+
+- 构建：0 警告 0 错误；产物 `AutoHack.dll` 47104 B（v1.9 为 45056 B）。
+- 版本：`AutoHack", "1.10.0"`。
+- 面板选项块行数不变（3 行 6 个复选），`OptionsBlockHeight` 无需改。
+
+**待真人验证**：`whole map` 开启后是否连上明显更多机器（应约 110 台）；
+`[autohack] trace killed - timer stopped.` 是否在追踪出现时打印。

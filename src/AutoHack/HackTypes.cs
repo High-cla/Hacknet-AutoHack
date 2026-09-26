@@ -25,7 +25,8 @@ internal sealed record HackOptions(
     bool UploadMarker,
     bool ConnectFirst,
     bool Disconnect,
-    bool SkipOwned)
+    bool SkipOwned,
+    bool AllNodes)
 {
     internal const float DefaultPortDelay = 0.6f;
     internal const float MinPortDelay = 0.05f;
@@ -35,9 +36,11 @@ internal sealed record HackOptions(
     private static readonly string[] NetworkAliases = ["all", "net", "network", "scan"];
     private static readonly string[] KeepLogsAliases = ["nologs", "keep-logs", "keep"];
     private static readonly string[] NoMarkerAliases = ["nomark", "no-upload"];
+    private static readonly string[] MarkerAliases = ["mark", "upload", "marker"];
+    private static readonly string[] AllNodesAliases = ["allnodes", "all-nodes", "full", "wide"];
     private static readonly string[] DirectAliases = ["direct", "noconnect", "no-connect"];
     private static readonly string[] StayAliases = ["stay", "keepconn", "keep-connection"];
-    private static readonly string[] RedoAliases = ["redo", "force", "all-nodes"];
+    private static readonly string[] RedoAliases = ["redo", "force"];
 
     internal static HackOptions Parse(IReadOnlyList<string> args)
     {
@@ -45,10 +48,11 @@ internal sealed record HackOptions(
         var scope = HackScope.Network;
         var delay = DefaultPortDelay;
         var clearLogs = true;
-        var uploadMarker = true;
+        var uploadMarker = false;
         var connectFirst = true;
         var disconnect = true;
         var skipOwned = true;
+        var allNodes = false;
 
         foreach (var raw in args ?? Array.Empty<string>())
         {
@@ -63,7 +67,9 @@ internal sealed record HackOptions(
             if (ConnectedAliases.Contains(lower)) { scope = HackScope.Connected; continue; }
             if (NetworkAliases.Contains(lower)) { scope = HackScope.Network; continue; }
             if (KeepLogsAliases.Contains(lower)) { clearLogs = false; continue; }
+            if (MarkerAliases.Contains(lower)) { uploadMarker = true; continue; }
             if (NoMarkerAliases.Contains(lower)) { uploadMarker = false; continue; }
+            if (AllNodesAliases.Contains(lower)) { allNodes = true; continue; }
             if (DirectAliases.Contains(lower)) { connectFirst = false; continue; }
             if (StayAliases.Contains(lower)) { disconnect = false; continue; }
             if (RedoAliases.Contains(lower)) { skipOwned = false; continue; }
@@ -83,7 +89,7 @@ internal sealed record HackOptions(
             scope = HackScope.Explicit;
         }
 
-        return new HackOptions(scope, ids, delay, clearLogs, uploadMarker, connectFirst, disconnect, skipOwned);
+        return new HackOptions(scope, ids, delay, clearLogs, uploadMarker, connectFirst, disconnect, skipOwned, allNodes);
     }
 }
 
@@ -117,8 +123,11 @@ internal enum HackStepKind
     /// <summary>rm /log/&lt;文件&gt;：抹除入侵痕迹。</summary>
     CleanLogs,
 
-    /// <summary>dc：断开连接。追踪只在连着目标时推进，断开即中止（反追踪）。</summary>
+    /// <summary>dc：断开连接。追踪只在连着目标时推进，断开即让它失效。</summary>
     Disconnect,
+
+    /// <summary>TraceTracker.stop()：直接毙掉进行中的追踪，零每帧开销。</summary>
+    KillTrace,
 }
 
 /// <summary>

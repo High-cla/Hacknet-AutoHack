@@ -9,7 +9,7 @@ using Pathfinder.Meta.Load;
 /// 命令与扩展点均通过 Pathfinder 的属性自动扫描注册（AttributeManager 挂载于
 /// HacknetChainloader.LoadPlugin），无需手动调用 Register* API。
 /// </summary>
-[BepInPlugin(Guid, "AutoHack", "1.9.0")]
+[BepInPlugin(Guid, "AutoHack", "1.10.0")]
 // Pathfinder 的属性扫描是 IL hook，在 PathfinderAPIPlugin.Load() 里才安装；
 // 缺此依赖本插件会先加载，扫描覆盖不到，命令静默失效。
 [BepInDependency("com.Pathfinder.API")]
@@ -54,13 +54,14 @@ public sealed class AutoHackPlugin : BepInEx.Hacknet.HacknetPlugin
         {
             os.write("autohack              - toggle the control panel");
             os.write("autohack run [options] [target...] - run headless");
-            os.write("  here      only the connected node (default: all reachable servers)");
+            os.write("  here      only the connected node (default: servers reachable via links)");
             os.write("  delay=s   seconds between port cracks (default 0.6)");
             os.write("  direct    skip connect, crack the node already connected");
             os.write("  stay      keep the connection at the end (default: dc, which aborts a trace)");
             os.write("  redo      re-hack nodes already owned (default: skip them)");
             os.write("  nologs    keep /log intact (default: wipe)");
-            os.write("  nomark    do not drop the marker file (default: upload)");
+            os.write("  allnodes  sweep the whole map (default: only nodes reachable via links)");
+            os.write("  mark      drop the marker file (default: no marker)");
             return;
         }
 

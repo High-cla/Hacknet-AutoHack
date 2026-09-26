@@ -33,7 +33,8 @@ internal sealed class HackPanelState
 
     internal bool ClearLogs { get; set; } = true;
 
-    internal bool UploadMarker { get; set; } = true;
+    /// <summary>是否上传 ~/autohack.txt 标记（缺省关）。</summary>
+    internal bool UploadMarker { get; set; } = false;
 
     /// <summary>每个目标先 connect 再动手（原生 probe/upload 都要求已连接）。</summary>
     internal bool ConnectFirst { get; set; } = true;
@@ -44,6 +45,9 @@ internal sealed class HackPanelState
     /// <summary>全网扫描时跳过已拿下的机器（肉鸡），不重复入侵。</summary>
     internal bool SkipOwned { get; set; } = true;
 
+    /// <summary>全网扫描口径：true = 地图全表（含不在连线上的机器），缺省 false = 沿连线广度优先。</summary>
+    internal bool AllNodes { get; set; } = false;
+
     internal HackOptions ToOptions() => new(
         Scope,
         Array.Empty<string>(),
@@ -52,7 +56,8 @@ internal sealed class HackPanelState
         UploadMarker,
         ConnectFirst,
         Disconnect,
-        SkipOwned);
+        SkipOwned,
+        AllNodes);
 }
 
 /// <summary>
@@ -224,15 +229,18 @@ internal static class HackPanel
 
         y += SliderHeight + Gap;
 
-        state.ClearLogs = Check(state.IdBase + 13, left, y, ColumnWidth, state.ClearLogs, "wipe logs", c);
-        state.ConnectFirst = Check(state.IdBase + 14, left + ColumnWidth + 8, y, ColumnWidth, state.ConnectFirst, "connect first", c);
+        state.AllNodes = Check(state.IdBase + 13, left, y, ColumnWidth, state.AllNodes, "whole map", c);
+        state.SkipOwned = Check(state.IdBase + 14, left + ColumnWidth + 8, y, ColumnWidth, state.SkipOwned, "skip owned nodes", c);
         y += CheckRowHeight;
 
-        state.UploadMarker = Check(state.IdBase + 15, left, y, ColumnWidth, state.UploadMarker, "upload marker", c);
-        state.Disconnect = Check(state.IdBase + 16, left + ColumnWidth + 8, y, ColumnWidth, state.Disconnect, "anti-trace dc", c);
+        state.ClearLogs = Check(state.IdBase + 15, left, y, ColumnWidth, state.ClearLogs, "wipe logs", c);
+        state.ConnectFirst = Check(state.IdBase + 16, left + ColumnWidth + 8, y, ColumnWidth, state.ConnectFirst, "connect first", c);
         y += CheckRowHeight;
 
-        state.SkipOwned = Check(state.IdBase + 17, left, y, ColumnWidth, state.SkipOwned, "skip owned nodes", c);
+        state.UploadMarker = Check(state.IdBase + 17, left, y, ColumnWidth, state.UploadMarker, "upload marker", c);
+        state.Disconnect = Check(state.IdBase + 18, left + ColumnWidth + 8, y, ColumnWidth, state.Disconnect, "anti-trace dc", c);
+        y += CheckRowHeight;
+
         next = y + CheckRowHeight + Gap;
     }
 

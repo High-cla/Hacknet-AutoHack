@@ -1691,6 +1691,12 @@ finally { leaving.silent = wasSilent; }
 `disconnecting` 写日志的门正是它（`Computer.cs:723` `if (!silent)`）。
 只影响这一台、只影响这一次调用，`finally` 保证还原。
 
+**边界（多人）**：同一个 `!silent` 门还守着下一行
+`sendNetworkMessage("cDisconnect " + ip + " " + ipFrom)`（`Computer.cs:728-731`）——
+静音会连断线同步一起吞掉，对局对面看到的还是「连着」。
+故 `os.multiplayer` 为真时**不静音**，退回普通断开：日志保真让位于联机状态保真。
+单机下该分支恒不触发（`OS.multiplayer` 默认 false，`OS.cs:156`；存档无 multiplayer 标记）。
+
 **③ 兜底改为无条件校验**（`HackEngine.ClearLogs`）：
 
 ```csharp

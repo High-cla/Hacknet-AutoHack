@@ -324,7 +324,17 @@ internal sealed class HackRun
         // 断开本身会往目标 /log 写 "<ip> Disconnected"（Computer.disconnecting，
         // Computer.cs:722-727），而清痕排在断开之前（要连着目标的文件系统才作数），
         // 不静音就等于清完立刻被写回一条。
-        // 只影响这一台、只影响这一次调用，finally 保证还原。
+        //
+        // 多人对局不对它静音：同一个 <c>!silent</c> 门还守着
+        // <c>sendNetworkMessage("cDisconnect ...")</c>（Computer.cs:728-731），
+        // 静音会连断线同步一起吞掉，对面看到的还是「连着」。
+        // 日志保真让位于联机状态保真 —— 单机下这个分支恒真，多人才走 else。
+        if (os.multiplayer)
+        {
+            Programs.disconnect(["dc"], os);
+            return;
+        }
+
         var wasSilent = leaving.silent;
         leaving.silent = true;
         try

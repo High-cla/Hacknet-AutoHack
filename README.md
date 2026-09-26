@@ -280,7 +280,9 @@ Pathfinder 用 `[HarmonyPrefix]` 接管了 `Computer.openPort(int, string)` 并 
   且 `Programs.disconnect` 会 `navigationPath.Clear()`；断开之后再清，回显的 `rm` 就是假命令。
   断开本身会写 `"<玩家IP> Disconnected"`（`Computer.cs:722-727`），故 `Leave` 断开时把
   `Computer.silent` 临时置真（游戏自己的开关，`Multiplayer.cs:125-127` 就是该用法），
-  刚清干净的痕迹不会被写回。详见 `docs/RESEARCH.md` §14.12。
+  刚清干净的痕迹不会被写回。**多人对局不静音** —— 同一个 `!silent` 门还守着
+  `sendNetworkMessage("cDisconnect ...")`（`Computer.cs:728-731`），静音会吞掉断线同步；
+  单机恒走静音路径。详见 `docs/RESEARCH.md` §14.12。
 - **实测发现（存档实证）**：参考存档 169 台机器中仅 **14 台** `/log` 非空（共 94 条记录），
   9 台已被控制（`adminIP` == 玩家 IP）的机器里 `Became_Admin` 记录**为 0 条**（`giveAdmin`
   必写此条，证明清痕确实跑过）。残留内容是 `Connection:_from` / `Disconnected` / `FileRead` ——

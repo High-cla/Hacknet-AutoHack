@@ -139,6 +139,87 @@ internal static class HackEngine
         => comp != null && Ports(comp).Count > comp.portsNeededForCrack;
 
     /// <summary>
+    /// 用已知账号登录目标机 —— 走游戏自身的 <c>Computer.login</c>（Computer.cs:849-865）。
+    ///
+    /// 这不是「绕过」，是更原生的路径：<c>login</c> 在用户名为 admin 且密码匹配时
+    /// <b>内部直接调 <c>giveAdmin</c></b>（Computer.cs:851-855），与 porthack 终点等价，
+    /// 但不需要破解任何端口，也<b>不会触发追踪</b>（<c>hostileActionTaken</c> 不在该路径上）。
+    ///
+    /// 候选顺序：admin 账号优先（其密码就是 <c>adminPass</c>，两者同源，
+    /// 见 Computer.cs:122-123 与存档读回 Computer.cs:1117-1120）；
+    /// 其余账号仅当 <c>known</c> 为真时才尝试 —— 那才是「玩家已知」的语义。
+    ///
+    /// 刻意不用 <c>Programs.login</c>：它是<b>交互式</b>的，用
+    /// <c>while (commandsRun() == num) Thread.Sleep(4)</c> 轮询等玩家敲用户名与密码
+    /// （Programs.cs:404-448），在游戏线程调用即卡死。
+    /// </summary>
+    /// <summary>
+    /// 目标机上是否存在可尝试的凭据（原生「已知」标记的账号，或 admin 账号）。
+    /// 用于判断「端口表打不通」的机器是否仍有救 —— 有凭据就能绕过端口门槛。
+    /// 注意这只是「可尝试」：密码是否真匹配要到 <see cref="TryLogin"/> 才知道。
+    /// </summary>
+    internal static bool HasAnyCredential(Computer comp)
+    {
+        if (comp?.users == null)
+        {
+            return false;
+        }
+
+        if (comp.adminPass != null)
+        {
+            return true;
+        }
+
+        foreach (var user in comp.users)
+        {
+            if (user.known && user.name != null && user.pass != null)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <param name="credential">回传命中的账号名，供终端说明用了哪组凭据。</param>
+    /// <returns>是否登录成功（成功即已提权）。</returns>
+    internal static bool TryLogin(Computer comp, out string credential)
+    {
+        credential = null;
+        if (comp?.users == null)
+        {
+            return false;
+        }
+
+        // ① 原生「已知」标记的账号优先 —— 这才是玩家在剧情/邮件里真知道的那组密码。
+        foreach (var user in comp.users)
+        {
+            if (!user.known || user.name == null || user.pass == null)
+            {
+                continue;
+            }
+
+            if (comp.login(user.name, user.pass) == 1)
+            {
+                credential = user.name;
+                return true;
+            }
+        }
+
+        // ② 目标的 admin 账号：密码存在公开字段 adminPass，与 users[0].pass 同源
+        //    （Computer.cs:122-123 构造，存档读回 Computer.cs:1117-1120）。
+        //    注意 login 内部对 admin 是「用户名 admin + 密码等于 adminPass 即 giveAdmin」，
+        //    不走 users 表比对。
+        if (comp.adminPass != null && comp.login("admin", comp.adminPass) == 1)
+        {
+            credential = "admin";
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// 解目标的防火墙，走游戏自身的 <c>Firewall.attemptSolve</c>（Firewall.cs:101-116）：
     /// 传入正确解即置 <c>solved = true</c> —— 与玩家敲 <c>solve &lt;序列&gt;</c> 是同一入口。
     ///
@@ -341,9 +422,10 @@ internal static class HackEngine
                     continue;
                 }
 
-                // 提权门槛高于端口表容量的机器永远打不通，全网扫描一律剔除
-                // （显式点名时仍尊重玩家选择）。
-                if (!CanEverEscalate(comp))
+                // 提权门槛高于端口表容量的机器靠破端口永远打不通，全网扫描剔除
+                // —— 除非能直接用已知凭据登入（那条路不看端口数）。
+                // 显式点名时仍尊重玩家选择。
+                if (!CanEverEscalate(comp) && !(options.UseCredentials && HasAnyCredential(comp)))
                 {
                     skippedHopeless++;
                     continue;

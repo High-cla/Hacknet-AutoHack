@@ -48,6 +48,8 @@ autohack -h                                     # 帮助
 | `wipe logs` | 是否在执行后清空目标日志 |
 | `connect first` | 每个目标先 `connect` 再动手（缺省开） |
 | `upload marker` | 是否上传 `~/autohack.txt` 标记（缺省**关**） |
+| `use known creds` | 用已知账密登入目标（缺省**开**）—— 成功即提权，跳过全部破端口 |
+| `NORMAL` / `FAST` / `INSTANT` | 推进节奏：非端口步保留真人间隔（0.35s）/ 压到 0.05s / 合并到**同一帧** |
 | `anti-trace dc` | 每个目标跑完 `dc`：追踪只在连着目标时推进，断开即中止（缺省开） |
 | `skip owned nodes` | 全网扫描时跳过已拿下的肉鸡，不重复入侵（缺省开） |
 | — | 永远提不了权的机器（端口表容量 ≤ `portsToCrack`）在全网扫描时一律跳过，见下 |
@@ -70,11 +72,13 @@ autohack -h                                     # 帮助
 | 参数 | 说明 |
 |---|---|
 | `here` | 仅当前已连接的节点（缺省 = 沿网络连线可达的服务器） |
-| `delay=秒` | 每个端口的破解间隔，默认 `0.6`，范围 `0.05`–`5` |
+| `delay=秒` | 每个端口的破解间隔，默认 `0.6`，范围 **`0.02`**–`5` |
 | `nologs` | 不清除目标日志 |
 | `nomark` | 不上传标记文件（**已是缺省**） |
 | `mark` | 上传标记文件 |
 | `allnodes` | 全网扫描改扫地图全表，不再只沿连线展开 |
+| `creds` / `nocreds` | 用 / 不用已知账密登入（**缺省用**；`nocreds` 强制走破解） |
+| `instant` / `fast` / `slow` | 节奏档位：非端口步同帧连跑 / 0.05s / 0.35s（**缺省 slow**） |
 | `direct` | 跳过 connect / probe，直接就地破解（不再回显这两条指令） |
 | `stay` | 跑完**不**断开连接（缺省断开 = 回显并执行 `dc`，可中止追踪） |
 | `redo` | 全网扫描时**连已控节点一起重打**（缺省跳过肉鸡及永远提不了权的机器） |
@@ -94,6 +98,8 @@ autohack -h                                     # 帮助
 | `10.0.0.5@> sshcrack 22` | `Computer.openPort(22, 玩家IP)`（**游戏自身签名**，框架 Prefix 已把它接到端口表） |
 | `10.0.0.5@> solve ABCDEF` | `Firewall.attemptSolve`（**游戏自身**入口，同玩家敲 `solve`）。解序列由游戏生成并公开在 `Firewall.solution` |
 | `10.0.0.5@> porthack` | 达门槛时 `Computer.giveAdmin(玩家IP)` |
+| `10.0.0.5@> login` | 用目标机上的已知账密登入。**成功即 `giveAdmin`**（`Computer.login` 内部直接调，Computer.cs:851-855）—— 与 porthack 终点等价，但不破任何端口、不触发追踪。此后本目标的破端口/解防火墙/porthack 步骤整体跳过 |
+| `[autohack] <名> :: admin via login (<账号>)` | 上一步命中的凭据（非指令，故无回显） |
 | `10.0.0.5@> dc` | 断开前先 `Computer.admin = null`，再 `Programs.disconnect`（原生）。**同时**解除延迟反扑与中止追踪：前者见下，后者因 `TraceTracker.Update` 见 `connectedComp == null` 立刻置 `active = false` |
 | `[autohack] trace killed - timer stopped.` | `TraceTracker.stop()` —— 直接毙掉追踪（非指令，故无回显）。断开已让它失效，这步是确定性的兜底 |
 | `10.0.0.5@> rm /log/Connection:_from_10.0.0.1` | 逐条抹除该目标的 `/log` 文件。因断开自身会追加一条记录，清痕排在 `dc` **之后**，此时已不在目标上，故改为一行状态：`[autohack] <名> :: wiped 3 log file(s)` |
@@ -163,6 +169,27 @@ src/AutoHack/
 **4. 为什么端口状态必须读 Pathfinder 的端口表，而不是原版 `portsOpen`。**
 Pathfinder 用 `[HarmonyPrefix]` 接管了 `Computer.openPort(int, string)` 并 **return false 跳过原版实现**，端口状态改存自己的 `PortState.Cracked`（`ConditionalWeakTable` 里的 `PortTable`）。因此原版 `portsOpen` 数组永不更新 —— 直接读它会**恒为 0**，提权判断将永不成立。**读**状态一律走框架 API：`GetAllPortStates()` / `state.Cracked` / `state.PortNumber` / `Record.OriginalPortNumber` / `CountOpenPorts()`，**没有任何一条**读原版 `portsOpen` 的路径（该字段在装框架的游戏里恒为 0，读它就是 bug）。**写**状态则走游戏自身的签名 `Computer.openPort(int portNum, string ipFrom)`（传 `Record.OriginalPortNumber`）—— 它正是原生破解程序完成时的调用形态，也是 Pathfinder Prefix 接管的那个重载；只要不在它之后去读 `portsOpen`，两者完全同路。详见 `docs/RESEARCH.md`。
 
+**4d. 已知账密登入优先于破解（v1.11，注意其量级）。**
+走游戏自身的 `Computer.login`（`Computer.cs:849-865`）——它在用户名为 admin 且密码匹配时
+**内部直接调 `giveAdmin`**（`:851-855`），与 porthack 终点等价：同样写 `adminIP`、
+标记 `users[0].known`。差别是**不破任何端口、不触发追踪**（该路径上没有 `hostileActionTaken`）。
+
+凭据两级候选，与命令行 `creds`（缺省开）／`nocreds` 对应：
+
+| 级 | 来源 | 语义 | 实测覆盖 |
+|---|---|---|---|
+| ① | `UserDetail.known == true` 的账号 | 游戏原生的「玩家已知这组账密」标记，由 `giveAdmin`（`Computer.cs:747`）与任务脚本（`MissionFunctions.cs:439/469`、`SAGivePlayerUserAccount.cs:31`）写入 | 146 台里 **5** 台 |
+| ② | 目标的 `adminPass` 公开字段 | 与 `users[0].pass` 同源（构造 `Computer.cs:122-123`，存档读回 `:1117-1120`） | **146/146（100%）** |
+
+> ⚠️ **②把破端口玩法整个架空了**。同一存档里 `login` 能拿下全部 146 台非玩家机，
+> 端口破解、防火墙、跳板过载三套机制实际都不会再被走到。
+> 这是 `creds` 缺省开的直接后果；要保留原玩法请 `nocreds`。
+> 保留 ① 优先是因为它才是「玩家真的知道密码」的原生语义，② 属便利性放行。
+
+**刻意不用 `Programs.login`**：它是**交互式**的，用
+`while (commandsRun() == num) Thread.Sleep(4)` 轮询等玩家敲用户名与密码
+（`Programs.cs:404-448`），在游戏线程上调用即卡死。所以只调纯函数 `Computer.login`。
+
 **4c. 全网扫描两套口径，「沿连线」为缺省（v1.10）。**
 `Programs.connect`（`Programs.cs:231-322`）在 `os.netMap.nodes` 里按 ip/name 线性查找，
 **全程不检查 `visibleNodes`，也不看 `links`** —— 地图上任何节点都是「敲 IP 就能连」的。
@@ -188,6 +215,21 @@ Pathfinder 用 `[HarmonyPrefix]` 接管了 `Computer.openPort(int, string)` 并 
 - 防火墙走游戏自身的 `Firewall.attemptSolve(solution)`（`Firewall.cs:101-116`），同玩家敲 `solve`；**不用 `Programs.solve`** —— 它内层先跑 `doDots(30, 60)`，每点 `Thread.Sleep(60)`，合计约 1.8 秒阻塞游戏线程。解序列由游戏生成并公开在 `Firewall.solution`，不必等 `analyze` 的逐趟收敛跑完；
 - 追加 `CanEverEscalate`：**端口表容量 ≤ 门槛**的机器永远开不满、永远提不了权（门槛由 `openPortsForSecurityLevel` 定义为 `security - 1`，`Computer.cs:200-204`）。实测存档里既有 `portsToCrack="9999998"` 的剧情保护机，也有门槛 8/6 而端口表只有 4~5 个的机器；这类机器此前每次全网扫描都被连上、逐个破端口、再提权失败 —— 即「每一次判断都是要入侵」。全网扫描现在直接剔除（显式点名仍尊重玩家）。
 
+**4e. 节奏档位与同帧连跑（v1.11）。**
+`NORMAL`/`FAST`/`INSTANT` 三档控的是**非端口步的间隔**（缺省 `NORMAL` = 与旧版行为一致）：
+
+| 档 | 非端口步间隔 | 行为 |
+|---|---|---|
+| `NORMAL` | 0.35s | 终端逐行浮现，贴近真人操作 |
+| `FAST` | 0.05s | 仍分帧，只压缩间隔 |
+| `INSTANT` | 0 | 一帧内连跑到底，只在端口步停下等 `PortDelay` |
+
+端口步**始终**按 `PortDelay` 等 —— 那是回显逐条浮现的节奏来源，也是有意义的等待。
+
+`Tick` 因此从「每帧至多一步」变为「循环执行直到撞上未到期的延迟」，
+并用 `MaxStepsPerFrame = 512` 兜住极端规模（110 目标 × ~10 步 ≈ 1100 步，
+分 3 帧跑完，不会一帧卡死）。被跳过的步骤也计入 `Done`，进度条才走得准。
+
 **5. 跳板收敛到终态，追踪直接毙掉。**
 两者性质不同，处置也必须不同。
 - **跳板（`proxyActive`）**：把 `proxyOverloadTicks` 置 0、`proxyActive` 置 false —— 与 ShellExe 过载跑满的终态（`ShellExe.cs:96-99`）逐字节相同。游戏**没有**更快的路径：终端 `ComShell.exe -o` 启动的就是同一个逐帧扣减的 ShellExe，跑满要 `BASE_PROXY_TICKS = 30f` 秒（`Computer.cs:27`）。跳过等待无副作用 —— 全游戏 12 处 `AchievementsManager.Unlock` 里唯一与追踪相关的是 `TraceTracker.cs:70` 的 `trace_close`，与跳板无关（v1.5 曾误判「跳过会丢成就」，v1.7 已订正）。**唯一刻意不重演**的是过载循环里那句 `hostileActionTaken()`（`ShellExe.cs:105`）：它不参与跳板失效，只负责点燃追踪。
@@ -208,7 +250,7 @@ Pathfinder 用 `[HarmonyPrefix]` 接管了 `Computer.openPort(int, string)` 并 
 ```
 [Info : BepInEx] Loading [AutoUpdater 5.3.4]
 [Info : BepInEx] Loading [PathfinderAPI 5.3.4]   ← Pathfinder 先，安装属性扫描 hook
-[Info : BepInEx] Loading [AutoHack 1.10.0]        ← 本插件后，能被扫描到
+[Info : BepInEx] Loading [AutoHack 1.11.0]        ← 本插件后，能被扫描到
 [Info : AutoHack] AutoHack loaded (GUI).
 [Info : AutoHack] self-check OK: 'autohack' is registered and autocompletes.
 ```
@@ -218,7 +260,7 @@ Pathfinder 用 `[HarmonyPrefix]` 接管了 `Computer.openPort(int, string)` 并 
 ### 静态验证（反编译产物）
 
 ```
-[BepInPlugin("com.highcla.autohack", "AutoHack", "1.10.0")]
+[BepInPlugin("com.highcla.autohack", "AutoHack", "1.11.0")]
 [Command("autohack", true, false)]
 
 Echo:   os.write("\n" + os.terminal.prompt + command);
@@ -230,7 +272,9 @@ Probe:   "Port#: " + PortNumber + "  -  " + DisplayName + " : OPEN"
 Crack:   PortExploits.cracks[code] -> "sshcrack" + " " + PortInfo.DisplayPort
 OpenP:   target.openPort(port.CodePort, os.thisComputer.ip)  // 游戏自身签名（框架 Prefix 接端口表）
 Firewall: target.firewall.attemptSolve(target.firewall.solution, os)                // 同玩家敲 solve，无阻塞
+Login:   HackEngine.TryLogin(target) -> comp.login("admin", adminPass)  // 成功即 giveAdmin，跳过破端口
 Escalate: HackEngine.CanEscalate(target) && target.giveAdmin(os.thisComputer.ip)   // 对齐 porthack 门禁
+Speed:   DelayFor(kind) -> Normal 0.35s / Fast 0.05s / Instant 0；端口步恒为 PortDelay
 Owned:   comp.adminIP == os.thisComputer.ip                                  // 肉鸡判定
 Hopeless: Ports(comp).Count <= comp.portsNeededForCrack                      // 永远开不满 -> 跳过
 Clean:   root.searchForFolder("log").files.Clear()  -> 回显 "rm /log/<名>"（连着时）
@@ -310,6 +354,20 @@ ConnectableComputers    2    allnodes 口径（netMap.nodes 全表）
 AllNodes                7    开关（选项/面板/解析/决策 + allnodes 别名）
 ShellTrap / forkBombClients  0 / 0   已撤（ActiveHackers 仅剧情脚本填充，反制不了普通追踪）
 hostileActionTaken / UISmallfont / doButton   0 / 0 / 0
+```
+
+v1.11 反编译产物逐项核对（`decompiled/autohack-v11/AutoHack.decompiled.cs`，2156 行）：
+
+```
+TryLogin / HasAnyCredential   2 / 2   凭据登入（两级候选：known 账号 → adminPass）
+HackStepKind.Login            2       新步骤，排在 Probe 之后、破端口之前
+IsRedundantAfterLogin         2       已 login 提权的目标，端口类步骤整体跳过
+_loggedIn                     3       只登记本次运行中靠 login 拿下的机器
+HackSpeed                    17       三档枚举（Normal/Fast/Instant）
+MaxStepsPerFrame              1       同帧步数上限 512，防一帧卡死
+NormalStepDelay 0.35f / FastStepDelay 0.05f / MinPortDelay 0.02f
+_skipPortsFor                 0       被 _loggedIn 取代（按运行内实际命中登记，更精确）
+UISmallfont / doButton / hostileActionTaken / Thread.Sleep   0 / 0 / 0 / 0
 ```
 
 ### 未验证

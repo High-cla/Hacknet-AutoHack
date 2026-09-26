@@ -16,6 +16,19 @@ internal enum HackScope
     Explicit,
 }
 
+/// <summary>推进节奏档位：控制非端口步是否合并到同一帧。</summary>
+internal enum HackSpeed
+{
+    /// <summary>每个非端口步之间等 <c>NonPortDelay</c>（0.35s），终端逐行浮现，贴近真人操作。</summary>
+    Normal,
+
+    /// <summary>非端口步压缩到 0.05s，仍分帧（保留一点节奏感）。</summary>
+    Fast,
+
+    /// <summary>非端口步合并到同一帧连续执行；只有端口破解按 <c>PortDelay</c> 等待。</summary>
+    Instant,
+}
+
 /// <summary>一次入侵的运行参数（由命令行解析）。</summary>
 internal sealed record HackOptions(
     HackScope Scope,
@@ -26,11 +39,19 @@ internal sealed record HackOptions(
     bool ConnectFirst,
     bool Disconnect,
     bool SkipOwned,
-    bool AllNodes)
+    bool AllNodes,
+    bool UseCredentials,
+    HackSpeed Speed)
 {
     internal const float DefaultPortDelay = 0.6f;
-    internal const float MinPortDelay = 0.05f;
+
+    /// <summary>端口间隔下限。0.02s = 50 端口/秒，比真人手速快得多但仍逐条回显。</summary>
+    internal const float MinPortDelay = 0.02f;
+
     internal const float MaxPortDelay = 5f;
+
+    /// <summary>Fast 档的非端口步间隔。</summary>
+    internal const float FastStepDelay = 0.05f;
 
     private static readonly string[] ConnectedAliases = ["here", "local", "current", "connected"];
     private static readonly string[] NetworkAliases = ["all", "net", "network", "scan"];
@@ -41,6 +62,11 @@ internal sealed record HackOptions(
     private static readonly string[] DirectAliases = ["direct", "noconnect", "no-connect"];
     private static readonly string[] StayAliases = ["stay", "keepconn", "keep-connection"];
     private static readonly string[] RedoAliases = ["redo", "force"];
+    private static readonly string[] CredentialAliases = ["creds", "credentials", "login", "known"];
+    private static readonly string[] NoCredentialAliases = ["nocreds", "no-login", "brute"];
+    private static readonly string[] SlowAliases = ["slow", "normal"];
+    private static readonly string[] FastAliases = ["fast", "quick"];
+    private static readonly string[] InstantAliases = ["instant", "turbo", "sameframe"];
 
     internal static HackOptions Parse(IReadOnlyList<string> args)
     {
@@ -53,6 +79,8 @@ internal sealed record HackOptions(
         var disconnect = true;
         var skipOwned = true;
         var allNodes = false;
+        var useCredentials = true;
+        var speed = HackSpeed.Normal;
 
         foreach (var raw in args ?? Array.Empty<string>())
         {
@@ -73,6 +101,11 @@ internal sealed record HackOptions(
             if (DirectAliases.Contains(lower)) { connectFirst = false; continue; }
             if (StayAliases.Contains(lower)) { disconnect = false; continue; }
             if (RedoAliases.Contains(lower)) { skipOwned = false; continue; }
+            if (CredentialAliases.Contains(lower)) { useCredentials = true; continue; }
+            if (NoCredentialAliases.Contains(lower)) { useCredentials = false; continue; }
+            if (SlowAliases.Contains(lower)) { speed = HackSpeed.Normal; continue; }
+            if (FastAliases.Contains(lower)) { speed = HackSpeed.Fast; continue; }
+            if (InstantAliases.Contains(lower)) { speed = HackSpeed.Instant; continue; }
 
             if (lower.StartsWith("delay=", StringComparison.Ordinal) &&
                 float.TryParse(lower.Substring(6), NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed))
@@ -89,7 +122,9 @@ internal sealed record HackOptions(
             scope = HackScope.Explicit;
         }
 
-        return new HackOptions(scope, ids, delay, clearLogs, uploadMarker, connectFirst, disconnect, skipOwned, allNodes);
+        return new HackOptions(
+            scope, ids, delay, clearLogs, uploadMarker, connectFirst, disconnect, skipOwned, allNodes,
+            useCredentials, speed);
     }
 }
 
@@ -104,6 +139,9 @@ internal enum HackStepKind
 
     /// <summary>probe：读取目标端口表并回显原生格式报告。</summary>
     Probe,
+
+    /// <summary>login：用已知账号密码登入（<c>Computer.login</c>），成功后直接提权，跳过全部破端口步骤。</summary>
+    Login,
 
     /// <summary>绕过跳板：等价于过载跑完，但不等待那 30 秒。</summary>
     BypassProxy,

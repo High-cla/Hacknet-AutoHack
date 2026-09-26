@@ -48,6 +48,12 @@ internal sealed class HackPanelState
     /// <summary>全网扫描口径：true = 地图全表（含不在连线上的机器），缺省 false = 沿连线广度优先。</summary>
     internal bool AllNodes { get; set; } = false;
 
+    /// <summary>用已知账密登入（成功即提权，跳过全部破端口）。</summary>
+    internal bool UseCredentials { get; set; } = true;
+
+    /// <summary>推进节奏档位。缺省 Normal = 与旧版行为一致，快档需显式选。</summary>
+    internal HackSpeed Speed { get; set; } = HackSpeed.Normal;
+
     internal HackOptions ToOptions() => new(
         Scope,
         Array.Empty<string>(),
@@ -57,7 +63,9 @@ internal sealed class HackPanelState
         ConnectFirst,
         Disconnect,
         SkipOwned,
-        AllNodes);
+        AllNodes,
+        UseCredentials,
+        Speed);
 }
 
 /// <summary>
@@ -107,7 +115,8 @@ internal static class HackPanel
     private const int OptionsBlockHeight =
         SectionHeight + SegmentHeight + Gap
         + SectionHeight + SliderHeight + Gap
-        + CheckRowHeight * 3 + Gap;
+        + SectionHeight + SegmentHeight + Gap
+        + CheckRowHeight * 4 + Gap;
 
     /// <summary>本帧面板占据的矩形。供 Update 阶段提前阻断下层控件点击。</summary>
     internal static Rectangle LastFrame { get; private set; }
@@ -229,19 +238,54 @@ internal static class HackPanel
 
         y += SliderHeight + Gap;
 
-        state.AllNodes = Check(state.IdBase + 13, left, y, ColumnWidth, state.AllNodes, "whole map", c);
-        state.SkipOwned = Check(state.IdBase + 14, left + ColumnWidth + 8, y, ColumnWidth, state.SkipOwned, "skip owned nodes", c);
+        Section("SPEED", left, y, c);
+        var speedHint = state.Speed switch
+        {
+            HackSpeed.Instant => "same frame",
+            HackSpeed.Fast => "fast",
+            _ => "normal",
+        };
+        DrawText(speedHint, left + ContentWidth - Measure(speedHint, 0.9f).X, y, c.Dim, 0.9f);
+        y += SectionHeight;
+
+        // 三档：Normal 保留真人节奏，Fast 压缩非端口步，Instant 把非端口步合并到同帧。
+        var third = ContentWidth / 3;
+        if (Segment(state.IdBase + 13, new Rectangle(left, y, third - 2, SegmentHeight),
+                state.Speed == HackSpeed.Normal, "NORMAL", c))
+        {
+            state.Speed = HackSpeed.Normal;
+        }
+
+        if (Segment(state.IdBase + 14, new Rectangle(left + third, y, third - 2, SegmentHeight),
+                state.Speed == HackSpeed.Fast, "FAST", c))
+        {
+            state.Speed = HackSpeed.Fast;
+        }
+
+        if (Segment(state.IdBase + 15, new Rectangle(left + third * 2, y, ContentWidth - third * 2, SegmentHeight),
+                state.Speed == HackSpeed.Instant, "INSTANT", c))
+        {
+            state.Speed = HackSpeed.Instant;
+        }
+
+        y += SegmentHeight + Gap;
+
+        state.UseCredentials = Check(state.IdBase + 16, left, y, ColumnWidth, state.UseCredentials, "use known creds", c);
+        state.AllNodes = Check(state.IdBase + 17, left + ColumnWidth + 8, y, ColumnWidth, state.AllNodes, "whole map", c);
         y += CheckRowHeight;
 
-        state.ClearLogs = Check(state.IdBase + 15, left, y, ColumnWidth, state.ClearLogs, "wipe logs", c);
-        state.ConnectFirst = Check(state.IdBase + 16, left + ColumnWidth + 8, y, ColumnWidth, state.ConnectFirst, "connect first", c);
+        state.SkipOwned = Check(state.IdBase + 18, left, y, ColumnWidth, state.SkipOwned, "skip owned", c);
+        state.ClearLogs = Check(state.IdBase + 19, left + ColumnWidth + 8, y, ColumnWidth, state.ClearLogs, "wipe logs", c);
         y += CheckRowHeight;
 
-        state.UploadMarker = Check(state.IdBase + 17, left, y, ColumnWidth, state.UploadMarker, "upload marker", c);
-        state.Disconnect = Check(state.IdBase + 18, left + ColumnWidth + 8, y, ColumnWidth, state.Disconnect, "anti-trace dc", c);
+        state.ConnectFirst = Check(state.IdBase + 20, left, y, ColumnWidth, state.ConnectFirst, "connect first", c);
+        state.Disconnect = Check(state.IdBase + 21, left + ColumnWidth + 8, y, ColumnWidth, state.Disconnect, "anti-trace dc", c);
         y += CheckRowHeight;
 
-        next = y + CheckRowHeight + Gap;
+        state.UploadMarker = Check(state.IdBase + 22, left, y, ColumnWidth, state.UploadMarker, "upload marker", c);
+        y += CheckRowHeight;
+
+        next = y + Gap;
     }
 
     private static void DrawRunning(HackRun run, int left, int y, Palette c)

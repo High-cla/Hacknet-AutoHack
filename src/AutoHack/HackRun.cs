@@ -31,13 +31,17 @@ internal sealed record TargetOutcome(string Name, int Opened, int Total, bool Es
 /// </summary>
 internal sealed class HackRun
 {
-    private const float NonPortDelay = 0.35f;
+    /// <summary>Normal 档的非端口步间隔（真人节奏）。</summary>
+    private const float NormalStepDelay = 0.35f;
 
     private readonly List<Computer> _targets;
     private readonly List<HackStep> _steps;
 
     private int _index;
     private float _timer;
+
+    /// <summary>本次运行中靠已知凭据登入（即已提权）的机器，其破端口类步骤整体跳过。</summary>
+    private readonly HashSet<Computer> _loggedIn = new();
 
     internal HackRun(OS os, HackOptions options)
     {
@@ -88,24 +92,76 @@ internal sealed class HackRun
             return;
         }
 
-        if (_index >= _steps.Count)
-        {
-            Finish(os);
-            return;
-        }
-
-        var step = _steps[_index];
-
         _timer += deltaSeconds;
-        var delay = step.Kind == HackStepKind.OpenPort ? Options.PortDelay : NonPortDelay;
-        if (_timer < delay)
+
+        // Instant 档：非端口步不等时间，一帧内连跑到底，直到撞上一个端口步
+        // 或本帧的预算耗尽。端口步始终按 Options.PortDelay 等 —— 那是回显
+        // 逐条浮现的节奏来源，也是唯一有意义的等待。
+        var budget = MaxStepsPerFrame;
+        while (!Finished && budget-- > 0)
         {
-            return;
+            if (_index >= _steps.Count)
+            {
+                Finish(os);
+                return;
+            }
+
+            var step = _steps[_index];
+
+            // 该目标已靠 login 提权：破端口/解防火墙/porthack 都是无用功，
+            // 直接跳过（不回显、不耗时）。停机也计入 Done，进度条才走得准。
+            if (IsRedundantAfterLogin(step))
+            {
+                _index++;
+                continue;
+            }
+
+            var delay = DelayFor(step.Kind);
+            if (_timer < delay)
+            {
+                return;
+            }
+
+            _timer = 0f;
+            Apply(os, step);
+            _index++;
+        }
+    }
+
+    /// <summary>单帧最多执行多少步，防止 Instant 档在极端规模下一帧卡死。</summary>
+    private const int MaxStepsPerFrame = 512;
+
+    /// <summary>
+    /// 该步骤是否已被 login 提权化为无用功。只对<b>本次运行中确实靠 login 拿下</b>
+    /// 的目标成立（<see cref="_loggedIn"/>），不影响 redo 模式下重打已控节点的语义。
+    /// </summary>
+    private bool IsRedundantAfterLogin(HackStep step)
+    {
+        if (_loggedIn.Count == 0 || !_loggedIn.Contains(step.Target))
+        {
+            return false;
         }
 
-        _timer = 0f;
-        Apply(os, step);
-        _index++;
+        return step.Kind is HackStepKind.BypassProxy
+            or HackStepKind.OpenPort
+            or HackStepKind.SolveFirewall
+            or HackStepKind.Escalate;
+    }
+
+    /// <summary>该步骤需等待的秒数。Instant 档把非端口步压到 0。</summary>
+    private float DelayFor(HackStepKind kind)
+    {
+        if (kind == HackStepKind.OpenPort)
+        {
+            return Options.PortDelay;
+        }
+
+        return Options.Speed switch
+        {
+            HackSpeed.Instant => 0f,
+            HackSpeed.Fast => HackOptions.FastStepDelay,
+            _ => NormalStepDelay,
+        };
     }
 
     private void Apply(OS os, HackStep step)
@@ -129,6 +185,30 @@ internal sealed class HackRun
             case HackStepKind.BypassProxy:
                 Phase = "BYPASSING PROXY ON " + Upper(target.name);
                 BypassProxy(os, target);
+                break;
+
+            case HackStepKind.Login:
+                Phase = "LOGGING IN";
+
+                // login 成功即 giveAdmin（Computer.cs:851-855），与 porthack 终点等价，
+                // 但不破端口、不触发追踪。凭据来自目标自身的公开字段与 known 标记。
+                if (HackEngine.TryLogin(target, out var credential))
+                {
+                    Phase = "LOGGED IN";
+
+                    // 只回显 login 本身：原版 login 是交互式的（先问用户名再问密码，
+                    // Programs.cs:404-448），没有 "login <user> <pass>" 这种写法，
+                    // 拼上参数会是条游戏里不存在的命令。用了哪组凭据由下面的状态行交代。
+                    Echo(os, "login");
+
+                    // 本目标已提权，后续破端口/解防火墙/porthack 都不必跑。
+                    // 只登记「本次运行中确实靠 login 拿下的」机器 —— 不用
+                    // 「adminIP 已是我们」这个更宽的判据，否则 redo 模式
+                    // （重打已控节点）会连端口都不破，改变其语义。
+                    _loggedIn.Add(target);
+                    os.write("[autohack] " + target.name + " :: admin via login (" + credential + ") - skipping port cracks");
+                }
+
                 break;
 
             case HackStepKind.Probe:
@@ -155,6 +235,7 @@ internal sealed class HackRun
 
             case HackStepKind.Escalate:
                 Phase = "ESCALATING";
+
                 Echo(os, "porthack");
 
                 // 只用 giveAdmin，不用 os.takeAdmin(ip)：后者内部还会 runCommand("connect " + ip)
@@ -284,7 +365,9 @@ internal sealed class HackRun
 
     private static void UploadMarker(OS os, Computer target)
     {
-        if (!HackEngine.CanEscalate(target))
+        // 按「是否已拿下」判定，而不是 CanEscalate —— 后者要求端口已破，
+        // 而靠 login 提权的目标一个端口都没破，用它会漏掉投放。
+        if (!HackEngine.IsOwned(target, os))
         {
             return;
         }
@@ -308,10 +391,13 @@ internal sealed class HackRun
         {
             var ports = HackEngine.Ports(target).Count;
             var opened = HackEngine.OpenPortCount(target);
-            var escalated = HackEngine.CanEscalate(target);
-            Outcomes.Add(new TargetOutcome(target.name, opened, ports, escalated));
+
+            // 所有权看 adminIP（肉鸡标记的真身），不看 CanEscalate ——
+            // 后者要求端口已破，靠 login 拿下的目标会因为 0 端口而被误报 admin=no。
+            var owned = HackEngine.IsOwned(target, os);
+            Outcomes.Add(new TargetOutcome(target.name, opened, ports, owned));
             os.write("[autohack] " + target.name + " :: " + opened + "/" + ports
-                + " ports, admin=" + (escalated ? "yes" : "no"));
+                + " ports, admin=" + (owned ? "yes" : "no"));
         }
 
         if (SkippedOwned > 0)
@@ -357,6 +443,13 @@ internal sealed class HackRun
             steps.Add(new HackStep(HackStepKind.Neutralize, target, default, null));
 
             steps.Add(new HackStep(HackStepKind.Probe, target, default, "probe"));
+
+            // 已知凭据登录排在最前：成功即提权，后面整段破端口动作都不必跑。
+            // 放在 probe 之后是为了让终端先有原生端口报告，再看到 login。
+            if (options.UseCredentials)
+            {
+                steps.Add(new HackStep(HackStepKind.Login, target, default, null));
+            }
 
             var ports = HackEngine.CrackablePorts(target);
             if (ports.Count > 0 && HackEngine.ProxyActive(target))

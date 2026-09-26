@@ -1216,3 +1216,205 @@ for (int i = 0; i < os.ActiveHackers.Count; i++) {
 
 **待真人验证**：`whole map` 开启后是否连上明显更多机器（应约 110 台）；
 `[autohack] trace killed - timer stopped.` 是否在追踪出现时打印。
+
+---
+
+## §14 v1.11：已知账密登入、节奏档位与同帧连跑
+
+用户三条指令：①「login（用已知账密登入而非破解）」；
+②「delay 最低档位改成 0.02」；③「再加『非端口步并行到同一帧』或 speed 档位」——
+③ 经追问后选定「两者都做」；①的凭据来源用户回「1+2」（两级候选都实现）。
+
+### 14.1 login 为什么能替代破解（机制取证）
+
+`Computer.login`（Computer.cs:849-865）全文：
+
+```csharp
+public virtual int login(string username, string password, byte type = 1)
+{
+    if (username.ToLower().Equals("admin") && password.Equals(adminPass))
+    {
+        giveAdmin(os.thisComputer.ip);   // ← 直接提权，与 porthack 终点等价
+        return 1;
+    }
+    for (int i = 0; i < users.Count; i++)
+    {
+        if (users[i].name.Equals(username) && users[i].pass.Equals(password)
+            && (users[i].type == type || type == 1))
+        {
+            currentUser = users[i];      // ← 返回值 2：只设 currentUser，不写 adminIP
+            return 2;
+        }
+    }
+    return 0;
+}
+```
+
+三个关键事实：
+
+1. **admin 分支内部直接 `giveAdmin`** —— 写 `adminIP`、标记 `users[0].known`，
+   与 porthack 完全同效，但**不破任何端口**。
+2. **返回值 2 不等于提权** —— 那条路径只设 `currentUser`，不写 `adminIP`，
+   机器仍不算肉鸡。故只有 `== 1` 才算成功（首版写成 `!= 0`，已修正）。
+3. **该路径上没有 `hostileActionTaken`** —— `login` 与 `giveAdmin` 都不调它，
+   故登录**不点燃追踪**。对比 `openPort` 的各破解程序都会调（§12.1 表）。
+
+安全前提已核实：
+
+| 检查 | 结果 |
+|---|---|
+| `Computer.os` 是否已赋值（`login` 内用 `os.thisComputer.ip`） | 构造函数赋值（Computer.cs:117），安全 |
+| Pathfinder 是否补丁 `login` | 否（`upstream/` 全库搜索为空） |
+| 是否有子类 `override int login` | 否（`EOSComp` 不继承 `Computer`） |
+
+**刻意不用 `Programs.login`**：它是交互式的 ——
+
+```csharp
+os.terminal.prompt = "Username :";
+int num = os.terminal.commandsRun();
+while (os.terminal.commandsRun() == num) { Thread.Sleep(4); }   // Programs.cs:414-417
+```
+
+轮询等玩家输入，在游戏线程调用即卡死。所以只调纯函数 `Computer.login`。
+
+### 14.2 凭据两级候选与其量级（用户选「1+2」）
+
+| 级 | 来源 | 语义 | 存档实测覆盖 |
+|---|---|---|---|
+| ① | `UserDetail.known == true` 的账号 | 游戏原生的「玩家已知这组账密」标记。写入点：`giveAdmin`（Computer.cs:747）、`MissionFunctions.cs:439/469`、`SAGivePlayerUserAccount.cs:31`、`DLCIntroExe.cs:242` | 146 台非玩家机里 **5 台** |
+| ② | 目标 `adminPass` 公开字段 | 与 `users[0].pass` 同源（构造 Computer.cs:122-123，存档读回 :1117-1120） | **146/146（100%）** |
+
+**②的量级必须写明**：`login` 能拿下全部 146 台非玩家机，于是
+**端口破解、防火墙、跳板过载三套机制实际都不会再被走到**。
+这是「`creds` 缺省开」的直接后果。要保留原玩法须 `nocreds`。
+
+保留 ① 优先的理由：它才是「玩家真的知道密码」的原生语义；② 属便利性放行。
+两级都实现是用户的明确选择（回「1+2」）。
+
+### 14.3 排程：Login 步插在 Probe 之后、破端口之前
+
+`BuildSteps` 顺序变为：
+
+```
+Connect → Neutralize → Probe → Login → BypassProxy → OpenPort×N
+        → SolveFirewall → Escalate → UploadMarker → Disconnect → KillTrace → CleanLogs
+```
+
+Login 插在 Probe 之后，是为了让终端先有原生端口报告、再看到登录 —— 观感更像真人先侦察。
+
+**运行时跳过**：`Tick` 用 `IsRedundantAfterLogin(step)` 判定，命中则 `_index++` 不回显不耗时。
+跳过集合 = `{BypassProxy, OpenPort, SolveFirewall, Escalate}`，条件是
+`_loggedIn.Contains(step.Target)`。
+
+**为什么用 `_loggedIn` 集合而不是「`adminIP` 已是我们」**：后者太宽 ——
+`redo` 模式（重打已控节点）下所有目标都满足，会连端口都不破，篡改该模式的语义。
+`_loggedIn` 只登记**本次运行中确实靠 login 拿下**的机器。
+
+被跳过的步骤也计入 `Done`（`Done => Math.Min(_index, _steps.Count)` 天然满足），进度条才准。
+
+### 14.4 连带修正：所有权判定从 `CanEscalate` 改为 `IsOwned`
+
+`UploadMarker` 与 `Finish` 原本用 `CanEscalate`（要求端口已破）判定 ——
+靠 login 提权的目标**一个端口都没破**，会被误判成未拿下，导致：
+- 开了 `upload marker` 也投不出标记文件；
+- 战果行误报 `admin=no`。
+
+改为 `IsOwned(target, os)`（`comp.adminIP == os.thisComputer.ip`）—— 肉鸡标记的真身。
+
+### 14.5 「永远提不了权」过滤须与凭据联动
+
+§12.4 的过滤剔除「端口表容量 ≤ 门槛」的机器（`CanEverEscalate`）。
+但 login 那条路**不看端口数**，故这些机器并非真的没救：
+
+```csharp
+if (!CanEverEscalate(comp) && !(options.UseCredentials && HasAnyCredential(comp)))
+{
+    skippedHopeless++;
+    continue;
+}
+```
+
+与 `options.UseCredentials` 联动是必需的：否则 `nocreds` 模式下过滤器失效
+（`HasAnyCredential` 与模式无关，仍会返回 true），把「永远打不通」的机器放进来。
+
+### 14.6 节奏档位与同帧连跑
+
+| 档 | 非端口步间隔 | 行为 |
+|---|---|---|
+| `NORMAL`（缺省） | 0.35s | 与旧版一致，终端逐行浮现 |
+| `FAST` | 0.05s | 仍分帧，只压缩间隔 |
+| `INSTANT` | 0 | 一帧内连跑到底，只在端口步停下 |
+
+端口步**始终**按 `Options.PortDelay` 等 —— 那是回显逐条浮现的节奏来源。
+
+`Tick` 从「每帧至多一步」改为循环：
+
+```csharp
+var budget = MaxStepsPerFrame;
+while (!Finished && budget-- > 0)
+{
+    if (_index >= _steps.Count) { Finish(os); return; }
+    var step = _steps[_index];
+    if (IsRedundantAfterLogin(step)) { _index++; continue; }
+    if (_timer < DelayFor(step.Kind)) { return; }
+    _timer = 0f;
+    Apply(os, step);
+    _index++;
+}
+```
+
+`MaxStepsPerFrame = 512` 兜住极端规模：110 目标 × ~10 步 ≈ 1100 步，
+分 3 帧跑完，不会一帧卡死。
+
+**为什么缺省不是 INSTANT**：改缺省会静默改变所有既有用户的行为，
+而档位是显式选项 —— 缺省保持 `NORMAL`（= 旧版），要快就自己选。
+
+### 14.7 delay 下限 0.05 → 0.02
+
+`MinPortDelay = 0.02f`（50 端口/秒）。仍逐条回显，只是间隔极短。
+`HackOptions.Parse` 的钳制与面板滑条的 `min` 同步改（面板滑条传的就是
+`HackOptions.MinPortDelay`，单点修改）。
+
+新增常量 `FastStepDelay = 0.05f` 供 FAST 档用。
+首版误命名为 `FastPortDelay`（它管的是非端口步，名不副实），已更正为 `FastStepDelay`。
+
+### 14.8 面板改动
+
+新增 `SPEED` 段（三档 segment：NORMAL/FAST/INSTANT）+ 复选行重排为 4 行：
+
+```
+SCOPE         [NETWORK SWEEP] [CURRENT NODE]
+PORT INTERVAL <值>  [========|=====]
+SPEED         <档位说明>  [NORMAL][FAST][INSTANT]
+[use known creds] [whole map]
+[skip owned]      [wipe logs]
+[connect first]   [anti-trace dc]
+[upload marker]
+RUN
+```
+
+`OptionsBlockHeight` 由 192 增至 274，公式同步加一项
+`SectionHeight + SegmentHeight + Gap` 并把复选改 `* 4`。
+用脚本按 `DrawOptions` 逐行累加核对：实际推进 274 = 声明 274 ✓。
+
+控件 ID 顺延至 `IdBase + 22`。
+
+### 14.9 验证（v1.11）
+
+反编译核对（`decompiled/autohack-v11/AutoHack.decompiled.cs`，2156 行）：
+
+| 项 | 关键词 | 计数 |
+|---|---|---|
+| 应存在 | `TryLogin` / `HasAnyCredential` | 2 / 2 |
+| 应存在 | `HackStepKind.Login` / `IsRedundantAfterLogin` / `_loggedIn` | 2 / 2 / 3 |
+| 应存在 | `HackSpeed` / `MaxStepsPerFrame` / `FastStepDelay` | 17 / 1 / 1 |
+| 常量 | `MinPortDelay = 0.02f` / `NormalStepDelay = 0.35f` / `FastStepDelay = 0.05f` | ✓ |
+| 已弃 | `_skipPortsFor`（被 `_loggedIn` 取代） | 0 |
+| 必须为 0 | 原生控件 / `UISmallfont` / `hostileActionTaken` / `Thread.Sleep` | 0 / 0 / 0 / 0 |
+
+- 构建：0 警告 0 错误；产物 `AutoHack.dll` 50688 B（v1.10 为 47104 B）。
+- 版本 `AutoHack", "1.11.0"`。
+
+**待真人验证**：面板 `SPEED` 三档与 `use known creds` 的点击手感；
+INSTANT 档下终端刷屏观感；`login` 在真实目标上是否如期打印
+`admin via login (admin)` 并跳过破端口。

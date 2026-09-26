@@ -61,7 +61,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
 
 ## 仓库文档
 
-- [README.md](README.md): 安装、面板与命令行用法（含四个独立工具）、终端行为、架构、关键设计决策 #1–#4h、验证方式
+- [README.md](README.md): 安装、面板与命令行用法（含四个独立工具）、终端行为、架构、关键设计决策 #1–#4j、验证方式
 - [docs/RESEARCH.md](docs/RESEARCH.md): 源码级取证，§1–§21，每条结论都带 `文件:行号`
 - [docs/EXTENSIONS.md](docs/EXTENSIONS.md): 游戏自带 `Extensions/` 官方样本的格式参考 —— 节点 XML、占位符、行为系统、任务、阵营、主题
 - [docs/HACKERSCRIPTS.md](docs/HACKERSCRIPTS.md): 自替换占位符全表 + HackerScript 动词表（以游戏实现与官方样本为准，已标出 wiki 错漏处）

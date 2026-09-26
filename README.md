@@ -34,6 +34,7 @@ dotnet build src/AutoHack/AutoHack.csproj -c Release
 autohack                                        # 开关控制面板
 autohack run [here] [delay=秒] [stay] [redo] [nologs] [nomark] [direct]   # 不开面板，直接执行
 autohack run script=stealth                     # 用脚本决定入侵次序（见下）
+autohack dec|mem|exes|unbreakable [allnodes]    # 四个独立工具（见「工具」）
 autohack -h                                     # 帮助
 ```
 
@@ -55,6 +56,8 @@ autohack -h                                     # 帮助
 | `skip owned nodes` | 全网扫描时跳过已拿下的肉鸡，不重复入侵（缺省开） |
 | — | 永远提不了权的机器（端口表容量 ≤ `portsToCrack`）在全网扫描时一律跳过，见下 |
 | `RUN` | 按当前设置执行 |
+| TOOLS 区 `DEC DECRYPT` / `MEMORY DUMP` / `ALL PROGRAMS` | 见「工具」，单击**立即执行**，无二次确认 |
+| TOOLS 区 `UNBREAKABLE` | 加固本机，**不可逆**，用告警色标注 |
 
 执行期间面板切换为进度视图：阶段 + 百分比、分段进度条、当前目标与动作计数，下方滚动显示逐目标战果。完成后显示 `LAST RUN` 与 `RUN AGAIN`。
 
@@ -89,7 +92,65 @@ autohack -h                                     # 帮助
 > 差额是「可以直接敲 IP 连上、但不在连线上」的机器 —— `Programs.connect` 遍历的是
 > `netMap.nodes` 全表，本来就不检查 `links`（见「关键设计决策」#4c）。
 
- 可写可不写，
+### 工具（v1.14.0）
+
+四个工具与入侵流程**完全独立** —— 不进 `autohack run` 的自动流程，命令与面板 TOOLS 区按钮走**同一份实现**。面板按钮**单击立即执行**，不弹二次确认（`UNBREAKABLE` 用告警色 + 回显里的 `irreversible` 代替）。
+
+| 命令 | 作用 |
+|---|---|
+| `autohack dec [allnodes]` | 解开目标上的 `#DEC_ENC` 加密文件，逐层解到明文，写入玩家 `/home` |
+| `autohack mem [allnodes]` | 查看本机内存转储（紧凑格式，截断显示）、导出到 `/home/MemDumps`、扫描节点上的 `.mem` 并解其内嵌 DEC |
+| `autohack exes` | 把游戏能生成的破解程序全部补进玩家 `/bin`（幂等） |
+| `autohack unbreakable` | 加固玩家自己这台机器（**不可逆**） |
+
+`allnodes` 只对 `dec` / `mem` 有意义（缺省只作用于当前连接节点，与 `run` 口径一致）；`exes` 与 `unbreakable` 天然只针对玩家自己。
+
+#### DEC 解密：反推而非暴力
+
+游戏的 `FileEncrypter.Encrypt` 是逐字符仿射（`FileEncrypter.cs:40`）：
+
+```
+num = data[i] * 1822 + 32767 + passcode
+```
+
+头部第 4 段恒为加密字符串 `"ENCODED"`，其首字符 `'E'` 的密文因此恒等于
+`'E' * 1822 + 32767 + passcode = 158485 + passcode`。于是
+
+```
+passcode = 头部第 4 段首个密文数字 - 158485
+```
+
+得到后**交给游戏自身的 `FileEncrypter.TestingDecryptString` 反验**：只有 `passcode`
+正确，第 4 段才会解出 `"ENCODED"`；验不过即判定失败并如实报出，不做任何猜测。
+多层嵌套递归解到正文不含 `#DEC_ENC` 标记为止，层数上限 16 防自引用挂死。
+
+> 实测：玩家存档 `save_1.xml` 中 **39 个**唯一 DEC 文件（含 4 个两层嵌套，共 43 层），
+> 全部反推 + 反验通过。
+
+#### 内存转储
+
+查看与导出都走游戏自身的往返对（`GetCompactSaveString` / `GetEncodedFileString` /
+`GetMemoryFromEncodedFileString`）。导出落点 `home/MemDumps`，与游戏
+`MemoryDumpDownloader` 一致（`MemoryDumpDownloader.cs:92-99`），并当场做一次往返比对。
+
+> 游戏自身缺陷：`MemoryContents.GetSaveString()` 的 `FileFragments` 分支遍历的是
+> `CommandsRun.Count`（`MemoryContents.cs:48`），当 `FileFragments` 比 `CommandsRun`
+> 长时会 `IndexOutOfRangeException`。查看/导出都兜住它，坏存档不会把游戏线程带崩。
+
+#### 自身加固（不可逆）
+
+对玩家自己的机器置：`portsNeededForCrack = 9999998`、`traceTime = 1`、
+`hasProxy/proxyActive/proxyOverloadTicks/startingOverloadTicks` **四字段同步**置
+`9999998`（`addProxy` 的语义就是一次设定四者，`Computer.cs:243-252` —— 只改
+`hasProxy` 会让 `DisplayModule` 按 `0/0` 算进度条）、`firewall.solution` 换 12 位随机串。
+执行前后各打印一次全部字段，便于核对与手工还原。
+
+端口走 Pathfinder 的 `PortState.SetCracked`（15 个原版协议），**不写原版 `portsOpen`** ——
+Pathfinder 已用 Harmony Prefix 接管 `openPort`/`openPorts`（`ComputerExtensions.cs:184-204`），原版列表永不更新。
+
+### 脚本模式
+
+脚本文件放在 `Content/HackerScripts/`，扩展名可写可不写，
 `#` 开头是注释（游戏本身没有注释语法，这里补一个，是唯一比游戏宽松的地方）：
 
 ```
@@ -417,6 +478,30 @@ Pathfinder 用 `[HarmonyPrefix]` 接管了 `Computer.openPort(int, string)` 并 
 
 ## 验证
 
+### v1.14.0 验证（只看产物 MD5）
+
+| 项 | 值 |
+|---|---|
+| 产物 | `<Hacknet>/BepInEx/plugins/AutoHack.dll` |
+| 字节数 | 81408 |
+| MD5 | `0220d6ad083d792753be1ce8bd1a725d` |
+| 构建 | `rm -rf src/AutoHack/obj src/AutoHack/bin && dotnet build ... -c Release` → 0 警告 0 错误 |
+
+新增四个独立工具（DEC 解密 / 内存转储 / 程序补全 / 自身加固），源码为
+`DecTools.cs`、`MemTools.cs`、`ExeTools.cs`、`HardenTools.cs`、`ToolFiles.cs`、
+`ToolDispatch.cs`；入口改动 `AutoHackPlugin.cs`（子命令分派 + help）、
+`HackPanel.cs`（TOOLS 区 + `PanelAction` 改为 `(Kind, Verb)` 记录结构）、
+`HackOverlay.cs`（工具执行路径）。
+
+**验收读数**：
+
+| 断言 | 读数 |
+|---|---|
+| 反推内核：存档内任一 `.dec` 反推出的 passcode 可用游戏自身实现验通 | 39/39 唯一文件通过（43 层，含 4 个两层嵌套） |
+| 反推公式常量 `MAGIC` | `'E' * 1822 + 32767 = 158485` |
+| 内存转储切分算术 `FileHeader.Length + 400 + 2` | 39 + 400 + 2 = **441**，反推 passcode 与预期一致，正文往返逐字节相同 |
+| 构建 | 0 警告 0 错误 |
+
 ### v1.13.0 验证（只看产物 MD5）
 
 | 项 | 值 |
@@ -460,10 +545,9 @@ plan: targets=1 skipped=10 steps=21 creds=True loginSteps=1 speed=Normal
 | 项 | 值 |
 |---|---|
 | 产物路径 | `D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll` |
-| 当前版本 | v1.13.0 |
-| 字节数 | 65536 |
-| MD5 | `1f1630b978614e8020f72089fe7b115b` |
-| 字节数 | 66048 |
+| 当前版本 | v1.14.0 |
+| 字节数 | 81408 |
+| MD5 | `0220d6ad083d792753be1ce8bd1a725d` |
 
 核对流程：清理 `obj`/`bin` → 构建（须 0 警告 0 错误）→ 记 `md5sum` 与字节数，
 与上一版比对。构建成功即证明源码已编入（增量缓存已清，漏编会报错）；

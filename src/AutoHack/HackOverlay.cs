@@ -1,5 +1,6 @@
 namespace AutoHack;
 
+using System.IO;
 using BepInEx.Logging;
 using Hacknet;
 using Hacknet.Gui;
@@ -125,15 +126,49 @@ internal static class HackOverlay
             Log.LogInfo($"Overlay drawing at {screen.Width}x{screen.Height}.");
         }
 
-        switch (action)
+        switch (action.Kind)
         {
-            case HackPanel.PanelAction.Start:
+            case HackPanel.PanelKind.Start:
                 Start();
                 break;
 
-            case HackPanel.PanelAction.Close:
+            case HackPanel.PanelKind.Close:
                 _state.Open = false;
                 break;
+
+            case HackPanel.PanelKind.Tool:
+                RunTool(action.Verb);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// 执行一个工具。工具在游戏线程上同步跑完 —— 与入侵流程共用同一个
+    /// os.connectedComp，故运行中一律拒绝，避免两边互相换掉对方的目标。
+    /// </summary>
+    private static void RunTool(string verb)
+    {
+        if (_os == null)
+        {
+            return;
+        }
+
+        if (PendingRuns.BusyFor(_os) || IsRunning)
+        {
+            _os.write("[autohack] " + verb + ": a run is in progress - wait for it to finish.");
+            return;
+        }
+
+        try
+        {
+            ToolDispatch.Run(_os, verb, _state.AllNodes);
+        }
+        catch (Exception ex) when (ex is FormatException or NullReferenceException
+                                       or ArgumentException or IndexOutOfRangeException
+                                       or IOException)
+        {
+            // 工具读的是存档里的第三方数据，坏数据不该把游戏线程带崩。
+            _os.write("[autohack] " + verb + " failed: " + ex.GetType().Name + " - " + ex.Message);
         }
     }
 

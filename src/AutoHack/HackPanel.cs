@@ -121,6 +121,27 @@ internal static class HackPanel
     private const int ProgressRowHeight = 18;
     private const int CurrentRowHeight = 26;
 
+    /// <summary>TOOLS 区：动词 + 按钮文案 + 是否危险（危险按钮用告警色）。</summary>
+    private static readonly (string Verb, string Label, bool Danger)[] Tools =
+    {
+        (ToolDispatch.Dec, "DEC DECRYPT", false),
+        (ToolDispatch.Mem, "MEMORY DUMP", false),
+        (ToolDispatch.Exes, "ALL PROGRAMS", false),
+        (ToolDispatch.Unbreakable, "UNBREAKABLE", true),
+    };
+
+    /// <summary>TOOLS 区列数；行数由按钮数算出，故加按钮不必改任何高度常量。</summary>
+    private const int ToolColumns = 2;
+    private const int ToolButtonHeight = 26;
+    private const int ToolRowGap = 4;
+    private const int ToolGap = 8;
+
+    private static int ToolRows => (Tools.Length + ToolColumns - 1) / ToolColumns;
+
+    /// <summary>TOOLS 区总高（含尾部 Gap）。必须与 <see cref="DrawTools"/> 的推进量一致。</summary>
+    private static int ToolsBlockHeight
+        => SectionHeight + ToolRows * (ToolButtonHeight + ToolRowGap) + Gap;
+
     /// <summary>选项块从正文起点到 RUN 按钮顶部的总高。必须与 <see cref="DrawOptions"/> 的推进量一致。</summary>
     private const int OptionsBlockHeight =
         SectionHeight + SegmentHeight + Gap
@@ -131,12 +152,24 @@ internal static class HackPanel
     /// <summary>本帧面板占据的矩形。供 Update 阶段提前阻断下层控件点击。</summary>
     internal static Rectangle LastFrame { get; private set; }
 
-    /// <summary>该帧用户点下的动作。</summary>
-    internal enum PanelAction
+    /// <summary>该帧用户点下的动作。工具按钮带 Verb，免得回写静态状态再读回来。</summary>
+    internal readonly record struct PanelAction(PanelKind Kind, string Verb)
+    {
+        internal static readonly PanelAction None = new(PanelKind.None, null);
+
+        internal static readonly PanelAction Start = new(PanelKind.Start, null);
+
+        internal static readonly PanelAction Close = new(PanelKind.Close, null);
+
+        internal static PanelAction Tool(string verb) => new(PanelKind.Tool, verb);
+    }
+
+    internal enum PanelKind
     {
         None,
         Start,
         Close,
+        Tool,
     }
 
     internal static PanelAction Draw(HackPanelState state, HackRun run, OS os, Rectangle screen)
@@ -198,6 +231,12 @@ internal static class HackPanel
         }
 
         DrawOptions(state, left, y, c, out y);
+
+        var tool = DrawTools(state, left, ref y, c);
+        if (tool.Kind != PanelKind.None)
+        {
+            action = tool;
+        }
 
         if (run is { Finished: true })
         {
@@ -296,6 +335,38 @@ internal static class HackPanel
         y += CheckRowHeight;
 
         next = y + Gap;
+    }
+
+    /// <summary>
+    /// TOOLS 区：四个工具各一个按钮，单击立即执行 —— 不弹二次确认（UNBREAKABLE
+    /// 用告警色 + 命令回显里的 irreversible 提示代替）。
+    /// </summary>
+    private static PanelAction DrawTools(HackPanelState state, int left, ref int y, Palette c)
+    {
+        Section("TOOLS", left, y, c);
+        var top = y + SectionHeight;
+
+        var width = (ContentWidth - ToolGap * (ToolColumns - 1)) / ToolColumns;
+        var action = PanelAction.None;
+
+        for (var i = 0; i < Tools.Length; i++)
+        {
+            var (verb, label, danger) = Tools[i];
+
+            var rect = new Rectangle(
+                left + i % ToolColumns * (width + ToolGap),
+                top + i / ToolColumns * (ToolButtonHeight + ToolRowGap),
+                width,
+                ToolButtonHeight);
+
+            if (PrimaryButton(state.IdBase + 30 + i, rect, label, danger ? c.Warn : c.Raised, danger ? c.Ink : c.Text))
+            {
+                action = PanelAction.Tool(verb);
+            }
+        }
+
+        y += ToolsBlockHeight;
+        return action;
     }
 
     private static void DrawRunning(HackRun run, int left, int y, Palette c)
@@ -579,12 +650,12 @@ internal static class HackPanel
         { Finished: false } => TopPadding + PhaseRowHeight + ProgressRowHeight + CurrentRowHeight
                                + Math.Min(run.Outcomes.Count, MaxOutcomeRows) * OutcomeRowHeight + BottomPadding,
 
-        { Finished: true } => TopPadding + OptionsBlockHeight + SectionHeight
+        { Finished: true } => TopPadding + OptionsBlockHeight + ToolsBlockHeight + SectionHeight
                               + Math.Min(run.Outcomes.Count, MaxOutcomeRows) * OutcomeRowHeight
                               + (run.Outcomes.Count > MaxOutcomeRows ? OutcomeRowHeight : 0)
                               + Gap + ButtonHeight + BottomPadding,
 
-        _ => TopPadding + OptionsBlockHeight + ButtonHeight + BottomPadding,
+        _ => TopPadding + OptionsBlockHeight + ToolsBlockHeight + ButtonHeight + BottomPadding,
     };
 
     private static (string Text, Color Color) Status(HackRun run, Palette c) => run switch

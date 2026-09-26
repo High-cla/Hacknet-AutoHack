@@ -9,7 +9,7 @@ using Pathfinder.Meta.Load;
 /// 命令与扩展点均通过 Pathfinder 的属性自动扫描注册（AttributeManager 挂载于
 /// HacknetChainloader.LoadPlugin），无需手动调用 Register* API。
 /// </summary>
-[BepInPlugin(Guid, "AutoHack", "1.13.0")]
+[BepInPlugin(Guid, "AutoHack", "1.14.0")]
 // Pathfinder 的属性扫描是 IL hook，在 PathfinderAPIPlugin.Load() 里才安装；
 // 缺此依赖本插件会先加载，扫描覆盖不到，命令静默失效。
 [BepInDependency("com.Pathfinder.API")]
@@ -68,12 +68,27 @@ public sealed class AutoHackPlugin : BepInEx.Hacknet.HacknetPlugin
             os.write("  fast      shorten the pause between non-port steps (default: normal)");
             os.write("  script=F  run a scripted action list from file F (see below)");
             os.write("");
+            os.write("autohack <tool> [allnodes] - run one tool, no panel needed:");
+            foreach (var (verb, help) in ToolDispatch.Help)
+            {
+                os.write("  " + help);
+            }
+
+            os.write("");
             os.write("Script files live in Content/HackerScripts/ and are plain text:");
             os.write("  connect / neutralize / probe / login / proxy / openPort [n]");
             os.write("  solve / porthack / mark / rm / dc / killtrace / delay s");
             os.write("  openPort with no number cracks every crackable port on the target.");
             os.write("  connect, neutralize and killtrace are always supplied - do not write them.");
             os.write("  'rm' must come before 'dc' or the script is rejected.");
+            return;
+        }
+
+        // 四个工具与 run 平级，各自独立执行；allnodes 只对 dec / mem 有意义。
+        if (args is { Length: > 0 } && ToolDispatch.Handles(args[0]))
+        {
+            var allNodes = args.Skip(1).Any(a => a.Equals("allnodes", StringComparison.OrdinalIgnoreCase));
+            ToolDispatch.Run(os, args[0], allNodes);
             return;
         }
 

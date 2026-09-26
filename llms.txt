@@ -3,7 +3,7 @@
 > Hacknet 的 BepInEx / Pathfinder 插件：用游戏自身的原生机制一键入侵全网，带控制面板与脚本驱动。
 > 本文件面向要理解或修改本仓库的编码 agent。规范见 https://llmstxt.org
 
-当前 v1.12.1。构建产物直投游戏插件目录，无需手动拷贝：
+当前 v1.14.0。构建产物直投游戏插件目录，无需手动拷贝：
 
 ```
 D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
@@ -33,7 +33,14 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    而 `/log` 里的文件名恒以 `@` 开头（`Computer.log` 拼的），故清痕不会自我污染。
 5. 管理员反扑是**延迟**的（`BasicAdministrator.disconnectionDetected`，0–20 秒）——
    不在断开前置空 `computer.admin`，肉鸡标记会在断开后丢失。这就是「全网扫描失去效果」的根因。
-6. `GuiData.UISmallfont` / `UITinyfont` **从未被赋值** —— 用了必 NRE，且被 `OS.Draw` 的内层
+6. 工具（`dec`/`mem`/`exes`/`unbreakable`）**不进** `autohack run` 的自动流程；`dec` 的
+   passcode 是**反推**出来的（`MAGIC = 'E' * 1822 + 32767 = 158485`，见 `FileEncrypter.cs:40`），
+   反推后必须用游戏自身的 `TestingDecryptString` 反验 `"ENCODED"`，验不过即放弃。
+   `unbreakable` **不可逆**，改前改后各打印一次字段。
+7. `MemoryContents.GetSaveString()` 有游戏自身缺陷：`FileFragments` 分支遍历
+   `CommandsRun.Count`（`MemoryContents.cs:48`），`FileFragments` 更长时抛
+   `IndexOutOfRangeException`。读内存转储必须兜住。
+8. `GuiData.UISmallfont` / `UITinyfont` **从未被赋值** —— 用了必 NRE，且被 `OS.Draw` 的内层
    catch 吞掉，表现为「面板莫名其妙不显示」。只可用 `smallfont`/`tinyfont`/`font`/`detailfont`。
    同理不用原生 `CheckBox`/`Button`（前者只在 hover 时画文字，后者自动缩字并加 13px 色块），
    面板是自绘的。
@@ -44,12 +51,18 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
 
 ## 仓库文档
 
-- [README.md](README.md): 安装、面板与命令行用法、终端行为、架构、关键设计决策 #1–#4h、验证方式
-- [docs/RESEARCH.md](docs/RESEARCH.md): 源码级取证，§1–§16，每条结论都带 `文件:行号`
+- [README.md](README.md): 安装、面板与命令行用法（含四个独立工具）、终端行为、架构、关键设计决策 #1–#4h、验证方式
+- [docs/RESEARCH.md](docs/RESEARCH.md): 源码级取证，§1–§20，每条结论都带 `文件:行号`
 - [llms.txt](llms.txt): 本文件
 
 ## 源码
 
+- [src/AutoHack/ToolDispatch.cs](src/AutoHack/ToolDispatch.cs): 四个工具的唯一入口（命令与面板共用）
+- [src/AutoHack/DecTools.cs](src/AutoHack/DecTools.cs): DEC 解密 —— 反推 passcode + 多层递归 + 批量落盘
+- [src/AutoHack/MemTools.cs](src/AutoHack/MemTools.cs): 内存转储 —— 查看 / 导出 / 扫描内嵌 DEC
+- [src/AutoHack/ExeTools.cs](src/AutoHack/ExeTools.cs): 程序补全 —— 幂等填充 `/bin`
+- [src/AutoHack/HardenTools.cs](src/AutoHack/HardenTools.cs): 自身加固（不可逆）
+- [src/AutoHack/ToolFiles.cs](src/AutoHack/ToolFiles.cs): 工具的落盘公共部分
 - [src/AutoHack/HackEngine.cs](src/AutoHack/HackEngine.cs): 决策层 —— 目标解析、端口表、提权门槛、清痕
 - [src/AutoHack/HackRun.cs](src/AutoHack/HackRun.cs): 执行层 —— 动作序列、逐帧推进、指令回显
 - [src/AutoHack/HackScript.cs](src/AutoHack/HackScript.cs): 入侵脚本的解析与校验（`script=` 模式）

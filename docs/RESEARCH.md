@@ -2247,3 +2247,132 @@ username = FileSanitiser.purifyStringForDisplay(username);
 - 构建：`rm -rf src/SaveFix/obj src/SaveFix/bin && dotnet build src/SaveFix/SaveFix.csproj -c Release` → 0 警告 0 错误
 - 反编译核对（本插件自身产物）：`[HarmonyPatch(typeof(SaveFileManager), "GetSaveFileNameForUsername")]`
   + `Prefix(ref string username)` + 回落表达式一致
+
+## 20. v1.14.0：四个独立工具（DEC 解密 / 内存转储 / 程序补全 / 自身加固）
+
+四个工具都不进 `autohack run` 的自动入侵流程，只在显式调用时执行；命令与面板
+TOOLS 区按钮走同一份实现（`ToolDispatch`）。本节记录全部游戏侧依据，每条都带
+`文件:行号`，可 grep 复核。
+
+### 20.1 DEC 解密：密码是反推出来的，不是暴力
+
+`Hacknet.FileEncrypter`（`FileEncrypter.cs`，`public static class`）：
+
+- `Encrypt(data, passcode)`（`:35-44`）逐字符：`num = data[i] * 1822 + 32767 + passcode`（`:40`），
+  空格拼接后 `Trim()`。
+- `Decrypt(data, passcode)`（`:46-59`）：`num3 = num - 32767 - passcode; num3 /= 1822;`（`:54-55`）。
+- `EncryptString(data, header, ipLink, pass="", fileExtension=null)`（`:10-28`）产出的头部为
+  `#DEC_ENC::<enc header>::<enc ipLink>::<enc "ENCODED" w/ real pass>::[<enc ext>]`（`:19`），
+  `\r\n` 后接加密正文（`:25-26`）。**`"ENCODED"` 是固定明文**，这是反推的支点。
+- `DecryptString(data, pass="")`（`:61-105`）返回 `string[6]`：`[0]`header、`[1]`ipLink、
+  `[2]`正文（仅当 `[5]=="ENCODED"` 时非 null，`:90-93`）、`[3]`扩展名、`[4]`"1"/"0"、
+  `[5]` = 头部第 4 段的解密结果。
+- `TestingDecryptString(data, ushort pass)`（`:107-151`）同上，但直接收 `ushort` 密码
+  —— 反推结果不必绕回字符串哈希，这是本工具使用的入口。
+- `GetPassCodeFromString(code) => (ushort)code.GetHashCode()`（`:30-33`）。
+
+**反推公式**：头部第 4 段是 `Encrypt("ENCODED", passcode)`，首字符 `'E'` 的密文恒为
+`'E' * 1822 + 32767 + passcode = 158485 + passcode`。故
+
+```
+passcode = 首个密文数字 - 158485
+```
+
+反推后**必须用 `TestingDecryptString` 反验**（第 6 段是否等于 `"ENCODED"`），验不过即
+放弃 —— 这是 Fail Fast，不是可选步骤。
+
+> 实测（玩家存档 `Accounts/save_1.xml`）：39 个唯一 DEC 文件全部反推 + 反验通过，
+> 共 43 层，其中 4 个是两层嵌套。层数上限取 16 防自引用。
+
+### 20.2 内存转储：全部走游戏自身的往返对
+
+`Hacknet.MemoryContents`（`MemoryContents.cs`）：
+
+- 常量 `EncryptionPass = "19474-217316293"`（`:11`）、
+  `FileHeader = "MEMORY_DUMP : FORMAT v1.22 ----------\n\n"`（`:13`，**长度 39**）。
+- 四个列表：`DataBlocks`（`:15`）、`CommandsRun`（`:17`）、
+  `FileFragments`（`:19`，`List<KeyValuePair<string,string>>`）、`Images`（`:21`）。
+- `GetCompactSaveString()`（`:134-144`）把 `Commands>`→`CM>`、`Command>`→`c>` 等九处缩写；
+  `ReExpandSaveString(save)`（`:146-158`）逆向展开。
+- `GetEncodedFileString()`（`:160-165`）= `FileHeader` + `generateBinaryString(512).Substring(0,400)`
+  + `"\n\n"` + `FileEncrypter.EncryptString(compact, "MEMORY DUMP", "------", EncryptionPass)`。
+- `GetMemoryFromEncodedFileString(data)`（`:167-175`）反向切分：
+  `data.Substring(FileHeader.Length + 400 + 2)` = 偏移 **441**。
+
+> **游戏自身缺陷**：`GetSaveString()`（`:23-65`）的 `FileFragments` 分支遍历的是
+> `CommandsRun.Count` 而不是 `FileFragments.Count`（`:48`，同缺陷另见 `:39`），且闭合标签写成 `</Command>`。
+> 当 `FileFragments.Count > CommandsRun.Count` 时抛 `IndexOutOfRangeException`。
+> 查看与导出都必须兜住它 —— 否则一个坏存档就能把面板绘制线程带崩。
+
+导出落点与游戏一致：`MemoryDumpDownloader`（`MemoryDumpDownloader.cs:92-99`）在玩家机
+`home` 下建 `MemDumps` 子夹，文件名走 `Utils.GetNonRepeatingFilename(stem, ".mem", folder)`。
+
+### 20.3 程序补全：exe 数据游戏早已算好
+
+`Hacknet.PortExploits.populate()`（`PortExploits.cs:38-287`）在启动时用
+`Random random = new Random(17021990)`（`:47`）与 `MSRandom rng = new MSRandom(17021990)`（`:48`）
+把全部 `crackExeData[port] = Computer.generateBinaryString(500, rng)` 预计算好
+（`:56` 起，逐端口），期间临时替换 `Utils.random` 再还原（`:49-50`、`:286`）。
+
+表：`portNums`（`:12`）、`exeNums`（`:14`）、`services`（`:16`）、`cracks`（`:18`，port→exe 名）、
+`crackExeData`（`:20`）、`crackExeDataLocalRNG`（`:22`）、`needsPort`（`:24`）；
+`EXE_FILE_LENGTH = 500`（`:10`）。全部 `public static`，跨程序集可用。
+
+**故本工具不重新生成任何二进制** —— 参考实现里的 `SubtractiveRNG`/`gen_bin` 只是游戏
+`MSRandom` 的 Python 复刻，游戏里已经有现成的表；自写 RNG 只会与游戏产生不一致。
+
+判重与落点照游戏既有写法：`Folder.searchForFile(name)`（`Folder.cs:88-97`）为 null 才
+`new FileEntry(data, name)` 加入 `/bin`（同 `MissionFunctions.cs:284/293`、
+`DLCIntroExe.cs:593-594`）。
+
+### 20.4 自身加固：端口必须走 Pathfinder，字段必须同步
+
+`Hacknet.Computer` 的安全字段：`securityLevel`（`:41`）、`traceTime`（`:43`，构造置 `-1f`，`:118`）、
+`portsNeededForCrack`（`:45`）、`hasProxy`（`:83`）、`proxyOverloadTicks`（`:85`）、
+`startingOverloadTicks`（`:87`）、`proxyActive`（`:89`）、`firewall`（`:97`）。
+
+`addProxy(float time)`（`:243-252`）的语义是**一次设定四者**：`hasProxy = true`、
+`proxyActive = true`、`proxyOverloadTicks = time`、`startingOverloadTicks = proxyOverloadTicks`。
+只改 `hasProxy` 而不改 overload 计数，会让 `DisplayModule.cs:670` 按
+`proxyOverloadTicks / startingOverloadTicks` = `0/0` 算进度条。
+
+`hostileActionTaken()`（`:294-308`）只在 `os.connectedComp.ip == ip` 且 `traceTime > 0f` 时
+启动追踪（`:296-301`）。玩家不会连自己，故给玩家机设 `traceTime = 1f` 不会让玩家被追踪。
+
+**端口**：Pathfinder 用 Harmony Prefix 接管了 `Computer.openPort`（`ComputerExtensions.cs:184-199`）、
+`openPorts`（`:201-204`，直接 `return false`）、`closePort`（`:221-235`）、
+`isPortOpen`（`:243-252`）。原版 `portsOpen` 列表因此**永不更新**，状态改存
+`PortState.Cracked`（`PortState.cs:40`）。正确写法是 `state.SetCracked(true, ipFrom)`
+（`PortState.cs:42-53`，内部调 `Computer.openPort`/`closePort`）。
+
+原版 15 个协议端口由 `ComputerExtensions` 静态构造用
+`PortExploits.portNums ∩ PortExploits.services` 构建 `OGPorts`（`:48-52`）。`OGPorts` 是
+`internal`，跨程序集不可见 —— 本工具改用公开的
+`PortManager.GetPortRecordFromNumber(port)`（`PortManager.cs:90-99`）取得同一批记录，
+口径与 Pathfinder 内部一致。
+
+`DisplayModule.cs:429` 与 `:623-660` 在 `portsNeededForCrack > 100` 时走「INVIOLABILITY
+DETECTED」特效分支，只按数字位数生成随机字符串，**不遍历该数值** —— 故取
+`9999998` 是安全的，不会造成卡顿。
+
+### 20.5 合规：参考实现是 GPL-3.0，本仓库是 MIT
+
+功能清单的来源 [TesterNaN/Hacknet_Save_Editor](https://github.com/TesterNaN/Hacknet_Save_Editor)
+是 **GPL-3.0** 授权的 Python 3.7 + Tkinter 程序（单文件 `main.py`）。本仓库是 **MIT**。
+
+**只参考其功能机制与存档字段含义，未复制任何代码。** 具体地：它的
+`brute_force_passcode`/`decrypt_layer`/`decrypt_all_layers` 是 Python 实现，
+本仓库的反推内核是依据游戏 `FileEncrypter` 源码重新推导的（`MAGIC = 158485` 是从
+`FileEncrypter.cs:40` 直接算出的，不是从参考实现抄来的）；它的 `SubtractiveRNG`/`gen_bin`
+完全没有采用（游戏 `PortExploits` 已有现成表）；`makeMyComputerUnbreakable` 的字段
+取值经游戏源码逐条核对后重写。
+
+### 20.6 交付
+
+- 源码：`src/AutoHack/{DecTools,MemTools,ExeTools,HardenTools,ToolFiles,ToolDispatch}.cs`
+- 入口：`AutoHackPlugin.cs`（子命令分派 + help）、`HackPanel.cs`（TOOLS 区，
+  `PanelAction` 改为 `(Kind, Verb)` 记录结构）、`HackOverlay.cs`（工具执行路径）
+- 产物：`<Hacknet>/BepInEx/plugins/AutoHack.dll`，81408 字节
+- MD5：`0220d6ad083d792753be1ce8bd1a725d`
+- 构建：`rm -rf src/AutoHack/obj src/AutoHack/bin && dotnet build src/AutoHack/AutoHack.csproj -c Release` → 0 警告 0 错误
+- 验收读数：DEC 反推 39/39 通过（43 层）；内存切分偏移 441 与往返逐字节一致

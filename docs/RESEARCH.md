@@ -2013,6 +2013,8 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
 ### 16.3 废止的做法
 
 `ilspycmd -o decompiled/autohack-vNNN <dll>` 的逐项字符串计数核对**不再执行**。
+这些存档目录本身也已于 v1.15.0 **全部删除** —— 本节及 §11–§17 里出现的 `decompiled/autohack-vNN/…`
+路径是当时核对的历史记录，**文件已不存在**，行数/计数留作文物指纹。
 README 里 v1.7–v1.12.0 的九块反编译核对记录**已删除**（不再保留为历史存档）；各版的字节数与 MD5 指纹留在 README 的「版本沿革」表，逐版核对原文只在 git 历史里（`git log --follow README.md`）。
 它们的残留价值：那些行数与计数是当时产物的指纹，回溯「某版本编进去了什么」时可查。
 

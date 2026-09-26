@@ -628,6 +628,19 @@ internal static class HackEngine
     }
 
     /// <summary>
+    /// 工具的缺省目标集合 —— 与 <c>autohack run</c> 的 <c>allnodes</c> 口径一致：
+    /// 缺省只作用于当前连接的节点，未连接时退到玩家自己的机器（工具在本地也讲得通，
+    /// 例如解自己的 DEC 文件）；<c>allnodes</c> 时扫地图全表。
+    ///
+    /// 抽出来是因为 dec 与 mem 各写了一遍同一个三元式，加工具还会再抄一遍 ——
+    /// 而「工具作用在哪些机器上」是必须处处一致的口径。
+    /// </summary>
+    internal static Computer[] ToolTargets(OS os, bool allNodes)
+        => allNodes
+            ? ConnectableComputers(os)
+            : new[] { os.connectedComp ?? os.thisComputer };
+
+    /// <summary>
     /// 抹除目标的 /log 目录，等价于原版终端 <c>rm log/*</c>；返回被删除的文件名，供回显与计数。
     ///
     /// 动作全部交给 <see cref="RemoveFiles"/> —— 清痕与面板 <c>purge</c> 是同一个

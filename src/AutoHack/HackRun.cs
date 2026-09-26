@@ -442,14 +442,17 @@ internal sealed class HackRun
 
         foreach (var target in _targets)
         {
-            var ports = HackEngine.Ports(target).Count;
-            var opened = HackEngine.OpenPortCount(target);
+            // 两个数取自同一次快照：分两次查会各分配一份端口表副本
+            // （GetAllPortStates 是 ...Values.ToList()），且理论上可能显示
+            // opened > total 的不一致比例。PortInfo 自带 Cracked，无需第二次遍历。
+            var ports = HackEngine.Ports(target);
+            var opened = ports.Count(p => p.Cracked);
 
             // 所有权看 adminIP（肉鸡标记的真身），不看 CanEscalate ——
             // 后者要求端口已破，靠 login 拿下的目标会因为 0 端口而被误报 admin=no。
             var owned = HackEngine.IsOwned(target, os);
-            Outcomes.Add(new TargetOutcome(target.name, opened, ports, owned));
-            os.write("[autohack] " + target.name + " :: " + opened + "/" + ports
+            Outcomes.Add(new TargetOutcome(target.name, opened, ports.Count, owned));
+            os.write("[autohack] " + target.name + " :: " + opened + "/" + ports.Count
                 + " ports, admin=" + (owned ? "yes" : "no"));
         }
 

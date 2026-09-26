@@ -1,6 +1,5 @@
 namespace AutoHack;
 
-using System.IO;
 using Hacknet;
 using Hacknet.Gui;
 using HarmonyLib;
@@ -147,17 +146,8 @@ internal static class HackOverlay
             return;
         }
 
-        try
-        {
-            ToolDispatch.Run(_os, verb, _state.AllNodes);
-        }
-        catch (Exception ex) when (ex is FormatException or NullReferenceException
-                                       or ArgumentException or IndexOutOfRangeException
-                                       or IOException)
-        {
-            // 工具读的是存档里的第三方数据，坏数据不该把游戏线程带崩。
-            _os.write("[autohack] " + verb + " failed: " + ex.GetType().Name + " - " + ex.Message);
-        }
+        // 护栏在 ToolDispatch.Run 内 —— 两个入口共用一份，此处不再重复包一层。
+        ToolDispatch.Run(_os, verb, _state.AllNodes);
     }
 
     private static bool Visible(OS instance)

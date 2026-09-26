@@ -119,9 +119,7 @@ internal static class MemTools
     /// <summary>扫描：按游戏自身的 FileHeader 识别 .mem，解出内嵌内容，含 DEC 则继续解。</summary>
     private static void Scan(OS os, bool allNodes)
     {
-        var targets = allNodes
-            ? HackEngine.ConnectableComputers(os)
-            : new[] { os.connectedComp ?? os.thisComputer };
+        var targets = HackEngine.ToolTargets(os, allNodes);
 
         var candidates = new List<FileEntry>();
         foreach (var target in targets)

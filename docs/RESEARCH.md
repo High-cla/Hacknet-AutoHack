@@ -2832,3 +2832,129 @@ internal static IReadOnlyList<string> RemoveFiles(Computer comp, string ipFrom, 
 ### 26.6 交付
 
 87552 B / `42b2604b866531ff6a0afc35191fa9d8`。构建 0 警告 0 错误，产物直投 `BepInEx/plugins/`。字节数与 v1.17.0 相同属巧合（同版本 .NET 程序集的对齐效应），MD5 已变，产物内 `1.18.0` 命中、`1.17.0` 未命中，`RemoveFiles` 方法名在元数据堆命中。
+
+---
+
+## §27 v1.19.0：护栏下沉 + 工具目标口径归一 + 端口表一次快照
+
+### 27.1 症状：命令入口失败时静默
+
+同一个 `ToolDispatch.Run`，两个入口的异常护栏**不对称**：
+
+| 入口 | 位置 | 护栏 |
+|---|---|---|
+| 面板按钮 | `HackOverlay.RunTool` | `catch (FormatException or NullReferenceException or ArgumentException or IndexOutOfRangeException or IOException)` → 回显 `autohack <verb> failed: XxxException - msg` |
+| 终端命令 | `AutoHackPlugin.AutoHackCommand` | **裸调**，无任何 catch |
+
+后果**不是崩溃**，而是静默 —— 这比崩溃更难查。链路取证：
+
+1. 命令经 Pathfinder 注册（`CommandAttribute.CallOn` → `CommandManager.RegisterCommand`，`Pathfinder.Command/CommandManager.cs:94-112`）；
+2. 触发点是 `CommandExecuteEvent.OnCommandExecutePrefix`（`Pathfinder.Event.Gameplay/CommandExecuteEvent.cs:33-44`），它 patch `ProgramRunner.ExecuteProgram`；
+3. 事件分发走 `EventManager.InvokeOn`（`Pathfinder.Event/EventManager.cs:93-115`），**整个处理器调用被 try/catch 包住**：
+
+```csharp
+try { if (...) { item.HandlerAction(eventArgs); } }
+catch (Exception msg)
+{
+    Logger.Log((LogLevel)2, item.HandlerInfo.DeclaringType.FullName + "::" + ...);
+    Logger.Log((LogLevel)2, msg);
+    eventArgs.Thrown = true;
+}
+```
+
+4. 且 `args.Cancelled = true` 在 `action(...)` **之前**就已置真（`CommandManager.cs:50-52`）—— 异常抛出后游戏仍认为命令已处理，不会再落到原生程序查找。
+
+**净效果**：异常被吞进 BepInEx 日志，终端一行提示都没有。玩家看到的正是「敲了 autohack pull，没反应」。
+
+受影响的是**没有内部 catch 的工具**：`ExeTools` / `HardenTools` / `RemoteTools`（后三个是 v1.16.0 新增，读第三方文件系统数据，最容易踩坏数据）。`DecTools` / `MemTools` 自带 catch，故从这个症状里看不出来 —— 这正是「不对称」的隐蔽之处。
+
+### 27.2 修法：护栏下沉进 `ToolDispatch.Run`
+
+```csharp
+internal static void Run(OS os, string verb, bool allNodes)
+{
+    try { Dispatch(os, verb, allNodes); }
+    catch (Exception ex) when (ex is FormatException or NullReferenceException
+                                   or ArgumentException or IndexOutOfRangeException
+                                   or IOException)
+    {
+        os.write("[autohack] " + verb + " failed: " + ex.GetType().Name + " - " + ex.Message);
+    }
+}
+
+private static void Dispatch(OS os, string verb, bool allNodes) { /* 原 switch */ }
+```
+
+原 switch 改名 `Dispatch` 并降为 private —— 外部只经 `Run` 进来，护栏无法被绕过。
+
+`HackOverlay.RunTool` 的重复护栏删除（含 `using System.IO;`，该文件再无其它 IO 用途）。
+
+这正好落实 `ToolDispatch` 类文档第一句「单实现双入口」：护栏也是实现的一部分。
+
+### 27.3 工具目标口径归一：`HackEngine.ToolTargets`
+
+`DecTools.Run` 与 `MemTools.Scan` 逐字重复同一个三元式：
+
+```csharp
+var targets = allNodes
+    ? HackEngine.ConnectableComputers(os)
+    : new[] { os.connectedComp ?? os.thisComputer };
+```
+
+加第三个工具还会再抄一遍。抽成：
+
+```csharp
+internal static Computer[] ToolTargets(OS os, bool allNodes)
+    => allNodes ? ConnectableComputers(os) : new[] { os.connectedComp ?? os.thisComputer };
+```
+
+「工具作用在哪些机器上」是必须处处一致的口径，不该由调用方各自拼。
+
+### 27.4 端口表一次快照
+
+`HackRun.Finish` 里相邻两行：
+
+```csharp
+var ports = HackEngine.Ports(target).Count;
+var opened = HackEngine.OpenPortCount(target);   // 内部再查一次端口表
+```
+
+`GetAllPortStates()` 的实现是 `PortTable.GetOrCreateValue(comp).Values.ToList()`（`Pathfinder.Port/ComputerExtensions.cs:135-138`）—— **每次调用分配一个新 List**；`CountOpenPorts`（同文件 :164-167）再遍历一次。两行 = 两次全表分配 + 两次遍历。
+
+而 `PortInfo` 自带 `Cracked`（`HackEngine.cs:12`），故一次快照即可：
+
+```csharp
+var ports = HackEngine.Ports(target);
+var opened = ports.Count(p => p.Cracked);
+```
+
+顺带消除一处理论不一致：分两次查，两次之间端口状态若被改动（多人对局、管理员反扑），会出现 `opened > total` 的荒谬比例。同一快照内两者自洽。
+
+`OpenPortCount` 保留 —— `CanEscalate`（`HackEngine.cs:133-136`）仍需它，那里只要一个数，不需要整个表。
+
+### 27.5 性能：评估后全部否决
+
+同轮审计过以下候选，**一条都没做**：
+
+| 候选 | 否决理由 |
+|---|---|
+| 面板每帧 26 次 `Loc.T`（1 次字符串比较 + ≤2 次字典查找） | 60 FPS → 1560 次/秒 ≈ 78μs/秒 = **0.008% CPU**，噪声级 |
+| `Ellipsize` 每帧 6 次 `MeasureString` + `Mid` 子串分配 | 已用比例估算而非逐字符（注释写明）；串长 < 40 字符，几步收敛；Gen0 无压力 |
+| `Apply` 里每步重拼 `Current = name + " @ " + ip` | 100 台 × 10 步 = 1000 次拼接，**整个 run 一次性** |
+| 面板关闭时（99% 时间）的每帧开销 | 两次模式匹配短路后立即返回 |
+
+根本原因：本 mod 是**事件驱动**而非每帧循环。面板关闭时两个 Harmony 补丁都提前返回；打开时每帧成本是几十次字典查找。真正的开销（`GetAllPortStates` 分配）与节点数成正比且一次性。
+
+也刻意**不**统一的两处：
+- `[autohack]` 前缀 58 处 —— 前缀几乎不会改，抽象收益小于引入的间接层。
+- 6 处 `catch (Exception ex) when` 列表各不相同 —— 差异**有意义**（脚本加载 / DEC 解析 / 工具入口预期不同异常），强行统一是「转移重复」而非消除。
+
+### 27.6 教训
+
+**护栏要放在共同入口，不能放在调用方。** 与 §26 的「同一个动作只该有一份实现」是同一条规则的另一个面：护栏也是一种实现，放在调用方就必然漏掉某个调用方。放共同入口后，新调用方与新工具自动继承。
+
+**「不崩」不等于「能看见」。** Pathfinder 的事件层吞掉异常，游戏稳定运行，玩家却得不到任何反馈。判断一个失败是否可接受，要看**人**能不能观察到，而不是进程有没有挂。
+
+### 27.7 交付
+
+88064 B / `291e23446587d0e4682266f5db5e565e`。构建 0 警告 0 错误。产物内 `1.19.0` 命中、`1.18.0` 未命中；`ToolTargets` / `Dispatch` / `failed: ` 均命中。

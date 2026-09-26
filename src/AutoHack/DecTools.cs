@@ -131,9 +131,7 @@ internal static class DecTools
     /// <summary>批量：扫目标节点上的 DEC 文件，逐层解开后写进玩家 /home/MemDumps。</summary>
     internal static void Run(OS os, bool allNodes)
     {
-        var targets = allNodes
-            ? HackEngine.ConnectableComputers(os)
-            : new[] { os.connectedComp ?? os.thisComputer };
+        var targets = HackEngine.ToolTargets(os, allNodes);
 
         var found = new List<FileEntry>();
         foreach (var target in targets)

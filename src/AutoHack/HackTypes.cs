@@ -35,6 +35,7 @@ internal sealed record HackOptions(
     IReadOnlyList<string> Targets,
     float PortDelay,
     bool ClearLogs,
+    bool ClearOwnLogs,
     bool UploadMarker,
     bool ConnectFirst,
     bool Disconnect,
@@ -57,6 +58,8 @@ internal sealed record HackOptions(
     private static readonly string[] ConnectedAliases = ["here", "local", "current", "connected"];
     private static readonly string[] NetworkAliases = ["all", "net", "network", "scan"];
     private static readonly string[] KeepLogsAliases = ["nologs", "keep-logs", "keep"];
+    private static readonly string[] OwnLogsAliases = ["ownlogs", "my-logs", "selflogs", "clean-own"];
+    private static readonly string[] NoOwnLogsAliases = ["noownlogs", "keep-own", "keep-my-logs"];
     private static readonly string[] NoMarkerAliases = ["nomark", "no-upload"];
     private static readonly string[] MarkerAliases = ["mark", "upload", "marker"];
     private static readonly string[] AllNodesAliases = ["allnodes", "all-nodes", "full", "wide"];
@@ -81,12 +84,19 @@ internal sealed record HackOptions(
         var scope = HackScope.Network;
         var delay = DefaultPortDelay;
         var clearLogs = true;
+
+        // 玩家自己 /log 的清理，独立于目标清痕，且缺省关：
+        // 那是玩家自己的操作史，抹掉属于「玩家明确要求才做」的动作。
+        var clearOwnLogs = false;
         var uploadMarker = false;
         var connectFirst = true;
         var disconnect = true;
         var skipOwned = true;
         var allNodes = false;
-        var useCredentials = true;
+        // 缺省关（v1.15.0 起）：adminPass 是公开字段，开启后能登入全部机器，
+        // 端口破解 / 防火墙 / 跳板三套机制实际都不会再被走到，等于架空玩法。
+        // 要便利性再显式 creds。
+        var useCredentials = false;
         var speed = HackSpeed.Normal;
         string script = null;
 
@@ -103,6 +113,8 @@ internal sealed record HackOptions(
             if (ConnectedAliases.Contains(lower)) { scope = HackScope.Connected; continue; }
             if (NetworkAliases.Contains(lower)) { scope = HackScope.Network; continue; }
             if (KeepLogsAliases.Contains(lower)) { clearLogs = false; continue; }
+            if (OwnLogsAliases.Contains(lower)) { clearOwnLogs = true; continue; }
+            if (NoOwnLogsAliases.Contains(lower)) { clearOwnLogs = false; continue; }
             if (MarkerAliases.Contains(lower)) { uploadMarker = true; continue; }
             if (NoMarkerAliases.Contains(lower)) { uploadMarker = false; continue; }
             if (AllNodesAliases.Contains(lower)) { allNodes = true; continue; }
@@ -142,8 +154,8 @@ internal sealed record HackOptions(
         }
 
         return new HackOptions(
-            scope, ids, delay, clearLogs, uploadMarker, connectFirst, disconnect, skipOwned, allNodes,
-            useCredentials, speed, script);
+            scope, ids, delay, clearLogs, clearOwnLogs, uploadMarker, connectFirst, disconnect, skipOwned,
+            allNodes, useCredentials, speed, script);
     }
 }
 

@@ -2540,3 +2540,47 @@ at {screen.Width}x{screen.Height}.")` 是「摘除全部日志探针」时漏下
 - 产物：`<Hacknet>/BepInEx/plugins/AutoHack.dll`，81408 字节
 - MD5：`7ee5d4bb15490985599557e1cc06a904`（v1.14.1 为 `2c9ab2c456ce36a4e038803415e371ad`，已变 → 改动确已进 IL）
 - 构建：0 警告 0 错误
+
+## 23. v1.15.0：两条缺省翻转 + 玩家机日志开关
+
+### 23.1 玩家自己的 /log 独立成开关，缺省关
+
+v1.14.1 把玩家机清痕塞进了 `if (options.ClearLogs)`（目标清痕开关）。这混淆了两件语义
+完全不同的事：
+
+| 开关 | 抹的是什么 | 该谁决定 |
+|---|---|---|
+| `ClearLogs` | 「我入侵别人留下的证据」 | 入侵者的战术选择，缺省开合理 |
+| `ClearOwnLogs` | 「玩家自己的操作史」—— 谁连过他、他读过什么文件 | **玩家自己的数据**，缺省必须关 |
+
+抹掉后者不属于「顺手」的范畴，故拆成独立选项 `ClearOwnLogs`，缺省 `false`，
+面板文案 `wipe my logs`。`HackRun.BuildSteps` 里它被移出 `ClearLogs` 块，单独判定。
+
+同时把 `ClearLogs` 的面板标签由 `wipe logs` 改为 **`wipe target logs`** ——
+有了 own 开关后，原标签是歧义源。
+
+**面板零高度改动**：`DrawOptions` 第 4 行（`CheckRowHeight` 第四次）原本只有
+`upload marker` 独占左列，**右列是空的**，故新增勾选框不触碰任何高度常量
+（`OptionsBlockHeight = 274`、`ToolsBlockHeight`、`BodyHeight` 三态全不变）。
+
+### 23.2 `use known creds` 缺省翻转为关
+
+原缺省 `true`。问题不在实现而在**它架空了玩法**：`adminPass` 是目标机的公开字段，
+已知账密登入成功即 `giveAdmin`（`Computer.login` 内部直接调，`Computer.cs:851-855`），
+此后该目标的**破端口 / 解防火墙 / porthack 三套机制整体跳过** —— 缺省开启等于
+默认绕过游戏的核心玩法。改为缺省 `false`，要便利性再显式 `creds`。
+
+命令行解析的 `var useCredentials = false;`（`HackTypes.cs` `Parse`）与面板
+`HackPanelState.UseCredentials` 缺省同步。`CredentialAliases` / `NoCredentialAliases`
+两组合法值保留不变，故旧脚本写 `creds` 仍照常生效。
+
+### 23.3 交付
+
+- 版本 1.14.2 → **1.15.0**（`AutoHackPlugin.cs:12`）。
+- 产物 81920 B / MD5 `6823f1de25a98881dd6577cc944fd9df`（v1.14.2 为 81408 B /
+  `7ee5d4bb15490985599557e1cc06a904`，已变 → 改动确已进 IL）；构建 0 警告 0 错误。
+- 改动文件：`HackTypes.cs`（record 加第 5 个参数 + 别名 + 两个缺省）、
+  `HackRun.cs`（玩家机清痕移出 `ClearLogs` 块）、`HackPanel.cs`（state 字段 +
+  `ToOptions` + 新勾选框 `IdBase+23` + 标签改名）。
+- **未标定分级计划树**：面板显示的 0/12 是「从未调用 `mark_task`」，
+  与实际完成度无关（四工具 v1.14.0/1/2 已交付并发布）。

@@ -3,7 +3,7 @@
 > Hacknet 的 BepInEx / Pathfinder 插件：用游戏自身的原生机制一键入侵全网，带控制面板与脚本驱动。
 > 本文件面向要理解或修改本仓库的编码 agent。规范见 https://llmstxt.org
 
-当前 v1.14.2。构建产物直投游戏插件目录，无需手动拷贝：
+当前 v1.15.0。构建产物直投游戏插件目录，无需手动拷贝：
 
 ```
 D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
@@ -54,6 +54,11 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    在游戏里**零引用**，它是 `generateBinaryString` 的**请求**长度：该函数开 `byte[length/8]`
    再 `Convert.ToString(b, 2)`（**不补前导零**，`Computer.cs:1580-1585`），产物约 445 字符。
    拿它校验曾让程序补全 `added 0 / skipped 37`（表面「给了但没效果」）。判据用「非空」。
+11. **目标清痕与自己的清痕是两回事** —— `ClearLogs`（`wipe target logs`）抹「入侵别人的证据」，
+   缺省开；`ClearOwnLogs`（`wipe my logs`）抹「玩家自己的操作史」，**缺省关**，须显式开。
+   玩家机不在 `Targets` 也不在 `Skipped`（`HackEngine.cs:423` 显式跳过），必须单独追加。
+   同理 `use known creds` 缺省**关**（v1.15.0 起）—— `adminPass` 是公开字段，开着等于
+   默认跳过破端口/防火墙/porthack 三套机制，架空玩法。
 
 另附一条反直觉事实：**Hacknet 没有绝对路径**。`getFolderAtPath`（`Programs.cs:1582-1593`）
 按 `/` 切分后把空段整个跳过，`/log` 与 `log` 都按「当前目录下的 log 子文件夹」解析。

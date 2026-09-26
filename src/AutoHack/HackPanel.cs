@@ -33,6 +33,12 @@ internal sealed class HackPanelState
 
     internal bool ClearLogs { get; set; } = true;
 
+    /// <summary>
+    /// 是否连玩家自己的 /log 一起清。缺省**关** —— 那是玩家自己的操作史
+    /// （谁连过他、他读过什么），不该被「入侵时顺手」抹掉，要清须显式开。
+    /// </summary>
+    internal bool ClearOwnLogs { get; set; } = false;
+
     /// <summary>是否上传 ~/autohack.txt 标记（缺省关）。</summary>
     internal bool UploadMarker { get; set; } = false;
 
@@ -48,8 +54,12 @@ internal sealed class HackPanelState
     /// <summary>全网扫描口径：true = 地图全表（含不在连线上的机器），缺省 false = 沿连线广度优先。</summary>
     internal bool AllNodes { get; set; } = false;
 
-    /// <summary>用已知账密登入（成功即提权，跳过全部破端口）。</summary>
-    internal bool UseCredentials { get; set; } = true;
+    /// <summary>
+    /// 用已知账密登入（成功即提权，跳过全部破端口）。缺省**关**（v1.15.0 起）：
+    /// adminPass 是目标的公开字段，开启后能登入全部机器，端口破解 / 防火墙 /
+    /// 跳板三套机制实际都不会再被走到，等于架空玩法。
+    /// </summary>
+    internal bool UseCredentials { get; set; } = false;
 
     /// <summary>推进节奏档位。缺省 Normal = 与旧版行为一致，快档需显式选。</summary>
     internal HackSpeed Speed { get; set; } = HackSpeed.Normal;
@@ -68,6 +78,7 @@ internal sealed class HackPanelState
         Array.Empty<string>(),
         PortDelay,
         ClearLogs,
+        ClearOwnLogs,
         UploadMarker,
         ConnectFirst,
         Disconnect,
@@ -324,7 +335,7 @@ internal static class HackPanel
         y += CheckRowHeight;
 
         state.SkipOwned = Check(state.IdBase + 18, left, y, ColumnWidth, state.SkipOwned, "skip owned", c);
-        state.ClearLogs = Check(state.IdBase + 19, left + ColumnWidth + 8, y, ColumnWidth, state.ClearLogs, "wipe logs", c);
+        state.ClearLogs = Check(state.IdBase + 19, left + ColumnWidth + 8, y, ColumnWidth, state.ClearLogs, "wipe target logs", c);
         y += CheckRowHeight;
 
         state.ConnectFirst = Check(state.IdBase + 20, left, y, ColumnWidth, state.ConnectFirst, "connect first", c);
@@ -332,6 +343,7 @@ internal static class HackPanel
         y += CheckRowHeight;
 
         state.UploadMarker = Check(state.IdBase + 22, left, y, ColumnWidth, state.UploadMarker, "upload marker", c);
+        state.ClearOwnLogs = Check(state.IdBase + 23, left + ColumnWidth + 8, y, ColumnWidth, state.ClearOwnLogs, "wipe my logs", c);
         y += CheckRowHeight;
 
         next = y + Gap;

@@ -602,19 +602,26 @@ internal sealed class HackRun
             {
                 steps.Add(new HackStep(HackStepKind.CleanLogs, comp, default, null));
             }
+        }
 
-            // 玩家自己的机器同样要清。它不在 targets 里（ResolveTargets 显式跳过
-            // os.thisComputer，HackEngine.cs:423），也不在 skipped 里 —— 上面两处
-            // 都够不着，玩家的 /log 因此从来没被清过。
-            //
-            // 排在全部步骤之后是刻意的：玩家的 /log 记的是「谁连过我」，入侵过程中
-            // 每连一台都会往自己机器上写一条，提前清会被后续步骤重新写回来。
-            // 此刻是终点动作，不会再有新记录追加。
-            //
-            // 不需要等断开：ClearLogs 自己把 folderPath 传给 Computer.deleteFile
-            // （HackEngine.cs:660），而 Programs.getFolderFromNavigationPath
-            // （Programs.cs:1749-1770）只读 path 与 startFolder，不看
-            // os.connectedComp / navigationPath —— 与 rm 命令的作用域规则不同。
+        // 玩家自己的机器单独一条开关（ClearOwnLogs），缺省关。
+        //
+        // 它与上面的目标清痕是两回事：上面抹的是「我入侵别人留下的证据」，
+        // 这条抹的是「玩家自己的操作史」—— 玩家的 /log 记的是谁连过他、他读过什么文件。
+        // 后者是玩家自己的数据，不该被「入侵时顺手」清掉，故必须显式开。
+        //
+        // 机器不在 targets 里（ResolveTargets 显式跳过 os.thisComputer，
+        // HackEngine.cs:423），也不在 skipped 里 —— 上面两处都够不着，必须单独追加。
+        //
+        // 排在全部步骤之后是刻意的：玩家的 /log 记的是「谁连过我」，入侵过程中
+        // 每连一台都会往自己机器上写一条，提前清会被后续步骤重新写回来。
+        //
+        // 不需要等断开：ClearLogs 自己把 folderPath 传给 Computer.deleteFile
+        // （HackEngine.cs:660），而 Programs.getFolderFromNavigationPath
+        // （Programs.cs:1749-1770）只读 path 与 startFolder，不看
+        // os.connectedComp / navigationPath —— 与 rm 命令的作用域规则不同。
+        if (options.ClearOwnLogs)
+        {
             steps.Add(new HackStep(HackStepKind.CleanLogs, os.thisComputer, default, null));
         }
 

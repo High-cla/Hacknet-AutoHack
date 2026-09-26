@@ -278,12 +278,23 @@ internal sealed class HackRun
                 // 正常目标：清痕排在它自己的 Disconnect 之前，此刻 os.connectedComp
                 // 就是 target，回显的 rm 是一条真能跑的命令（正是玩家手敲的那条）。
                 // 先回显后执行，与其余步骤同一约定。
-                // 命令的作用域由连接决定（Programs.rm，Programs.cs:956 取
-                // os.connectedComp），清痕排在 Disconnect 之前，此刻正在目标上。
+                //
+                // 命令的两个作用域都成立，缺一不可：
+                // ① 目标机取自连接 —— Programs.rm（Programs.cs:956）用的是
+                //    os.connectedComp，断开后就变成玩家自己的文件系统；
+                // ② 目录取自当前目录 —— rm 的参数 "log/*" 会经 getFolderAtPath
+                //    （Programs.cs:1582）在【当前目录】下找 log 子文件夹。
+                //    本插件从不发 cd，而 connect 会 Clear() 导航路径
+                //    （Programs.cs:235），故此刻当前目录恒为目标根。
+                //
+                // 路径不写前导斜杠：Hacknet 没有绝对路径，getFolderAtPath 按 '/'
+                // 切分后把空段整个跳过（Programs.cs:1590），"/log" 与 "log" 解析结果
+                // 相同 —— 但前者会让人以为它从根出发。玩家在 cd log 之后敲
+                // "rm log/*" 之所以失败，正是因为在【当前目录】里再找 log 找不到。
                 var onTarget = os.connectedComp == target;
                 if (onTarget)
                 {
-                    Echo(os, step.Command ?? "rm /log/*");
+                    Echo(os, step.Command ?? "rm log/*");
                 }
 
                 var wiped = HackEngine.ClearLogs(target, os.thisComputer.ip);
@@ -295,7 +306,7 @@ internal sealed class HackRun
                 {
                     os.write(onTarget
                         ? "Deleting " + wiped.Count + " file(s)... Done"
-                        : "[autohack] " + target.name + " :: rm /log/* -> "
+                        : "[autohack] " + target.name + " :: rm log/* -> "
                             + wiped.Count + " log file(s) wiped");
                 }
 
@@ -542,7 +553,7 @@ internal sealed class HackRun
             // navigationPath 清空。断开之后再清，回显的 rm 就是条假命令。
             if (options.ClearLogs)
             {
-                steps.Add(new HackStep(HackStepKind.CleanLogs, target, default, "rm /log/*"));
+                steps.Add(new HackStep(HackStepKind.CleanLogs, target, default, "rm log/*"));
             }
 
             if (options.Disconnect)
@@ -672,7 +683,7 @@ internal sealed class HackRun
         HackStepKind.Disconnect => "dc",
         HackStepKind.Escalate => "porthack",
         HackStepKind.Probe => "probe",
-        HackStepKind.CleanLogs => "rm /log/*",
+        HackStepKind.CleanLogs => "rm log/*",
         _ => null,
     };
 }

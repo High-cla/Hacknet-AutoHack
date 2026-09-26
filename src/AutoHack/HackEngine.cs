@@ -619,7 +619,7 @@ internal static class HackEngine
     }
 
     /// <summary>
-    /// 抹除目标的 /log 目录，等价于原版终端 <c>rm /log/*</c>；返回被删除的文件名，供回显与计数。
+    /// 抹除目标的 /log 目录，等价于原版终端 <c>rm log/*</c>；返回被删除的文件名，供回显与计数。
     ///
     /// 走游戏自己的删除原语 <c>Computer.deleteFile(ipFrom, "*", folderPath)</c>
     /// （Computer.cs:508），而不是就地清 <c>List</c>：权限门禁与多人同步都交回游戏。

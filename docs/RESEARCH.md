@@ -1576,7 +1576,7 @@ files.root.searchForFolder("log").files.Insert(0, new FileEntry(message, text2))
 ⇒ 删 log 文件时 `name[0] == '@'` 成立，`FileDeleted` 这条 log **被 `deleteFile` 自己豁免**。
 存档实证佐证：14 台有痕迹机器的文件名**全部**以 `@` 开头
 （如 `@616_Connection:_from_51.87.123.209`）。所以"用游戏原语删除"与"不留下删除痕迹"
-这两个目标不冲突 —— 原先担心的 `rm /log/*` 会残留 N 条 `FileDeleted` 并不成立。
+这两个目标不冲突 —— 原先担心的 `rm log/*` 会残留 N 条 `FileDeleted` 并不成立。
 
 **权限门禁**（`Computer.cs:511-517`）：
 
@@ -1592,8 +1592,8 @@ if (!flag && !silent && !ipFrom.Equals(adminIP) && !ipFrom.Equals(ip)) return fa
 `List<string>`，再逐个递归调用 —— 遍历期间删元素不会漏项。这是能安全用 `"*"` 的前提。
 
 **回显收敛**：原先逐文件 `Echo(os, "rm /log/" + name)`，N 个文件刷 N 行命令。
-改为一条 `rm /log/*`（stay 模式下是真实可跑的命令）；默认已断开时写状态行
-`[autohack] <名> :: rm /log/* -> N log file(s) wiped`。
+改为一条 `rm log/*`（stay 模式下是真实可跑的命令）；默认已断开时写状态行
+`[autohack] <名> :: rm log/* -> N log file(s) wiped`。
 
 **为什么不用 `Programs.rm`**：它逐文件 `for j in 0..min(max(size/1000,3),26): Thread.Sleep(200)`
 （`Programs.cs:1013-1017`），每个文件最多 5.2 秒动画，且必须跑在非游戏线程
@@ -1602,7 +1602,7 @@ if (!flag && !silent && !ipFrom.Equals(adminIP) && !ipFrom.Equals(ip)) return fa
 （`Programs.cs:1019`）—— 直接调这一句即可，语义完全相同而无动画。
 
 **验证**（`decompiled/autohack-v112/AutoHack.decompiled.cs`，2156 行）：
-`deleteFile` 1、`ClearLogs(Computer comp, string ipFrom)` 1、`rm /log/*` 2、
+`deleteFile` 1、`ClearLogs(Computer comp, string ipFrom)` 1、`rm log/*` 2、
 `FileDeleted` 0、`"1.11.2"` 1、`"1.11.1"` 0；禁项
 `UISmallfont`/`doCheckBox`/`hostileActionTaken`/`Thread.Sleep` 全 0。
 
@@ -1666,12 +1666,41 @@ if (folder == null) { os.write("Folder " + text2 + " Not found!"); return; }
 `getFolderAtPath` 从**当前目录**（已在 `/log`）往下找名为 `log` 的子文件夹
 （`Programs.cs:1582+`，`folder.folders[j].name == array[i]`；`Folder.searchForFolder`
 同理，`Folder.cs:76-86`）⇒ 不存在 ⇒ `Folder log Not found!` 直接返回。
-正确敲法是 `cd log` 后 `rm *`，或根目录下 `rm /log/*`。
+正确敲法是 `cd log` 后 `rm *`，或根目录下 `rm log/*`。
+
+#### 14.12.2b Hacknet 没有绝对路径（反直觉，值得单列）
+
+`rm /log/*` 与 `rm log/*` 在 Hacknet 里**解析结果相同**：
+
+```csharp
+// Programs.cs:1582-1593  getFolderAtPath
+char[] separator = new char[2] { '/', '\\' };
+string[] array = path.Split(separator);      // "/log" → ["", "log"]
+for (int i = 0; i < array.Length; i++) {
+    if (array[i] == "" || array[i] == " ") { continue; }   // ← 空段整个跳过
+    ...
+}
+```
+
+前导 `/` 只产出一个空段，随即被跳过 —— 于是 `/log` 与 `log` 一律按
+**「当前目录下的 log 子文件夹」**解析，不回到根。这不是实现疏漏：整个
+`Programs` 里没有一处把路径当绝对路径处理，`getCurrentFolder`（`:1531`）
+永远是解析起点。
+
+**故本插件的回显定格为 `rm log/*`（无前导斜杠）**：两者行为一致，但带斜杠会
+让人以为它从根出发 —— 而玩家若照抄进 `cd log` 之后的当前目录，照样会撞
+`Folder log Not found!`。写不带斜杠的形式，与「真正决定行为的是当前目录」
+这件事相符。
+
+清痕时当前目录**恒为目标根**，两个条件同时成立：`connect` 会
+`os.navigationPath.Clear()`（`Programs.cs:235`），而本插件从不发 `cd`
+（全仓 `grep '"cd ` 无命中），`getFolderAtDepth`（`:1536`）在
+`navigationPath.Count == 0` 时直接返回 `files.root`。
 
 #### 14.12.3 改法
 
 **① 顺序反转**（`HackRun.BuildSteps`）：`CleanLogs` 提到 `Disconnect` 之前，
-命令从 `null` 改为字面量 `"rm /log/*"`。新顺序：
+命令从 `null` 改为字面量 `"rm log/*"`。新顺序：
 
 ```
 … → Escalate → UploadMarker → CleanLogs → Disconnect → KillTrace
@@ -1712,7 +1741,7 @@ if (logFolder.files.Count > 0) { logFolder.files.Clear(); }
 **④ 战果可见**：原版 `rm` 逐文件打印 `"Deleting <名>." + "Done"`
 （`Programs.cs:1018-1031`），全自动跑 100+ 台会刷屏，压成一行
 `Deleting N file(s)... Done`（沿用游戏自己的两个词）；删 0 条时不吭声。
-被剔除的机器没有连接，走状态行 `[autohack] <名> :: rm /log/* -> N log file(s) wiped`。
+被剔除的机器没有连接，走状态行 `[autohack] <名> :: rm log/* -> N log file(s) wiped`。
 
 > **本地化核对**：原版走 `LocaleTerms.Loc("Deleting")` / `Loc("Done")`
 > （`LocaleTerms.cs:53-64`：非 en-us 时查 `ActiveTerms`，查不到就返回原文）。
@@ -1745,7 +1774,7 @@ if (!flag && !silent && !ipFrom.Equals(adminIP) && !ipFrom.Equals(ip)) { return 
 |---|---|---|
 | `"1.11.3"` / `"1.11.2"` / `"1.11.1"` | 1 / 0 / 0 | 版本唯一 |
 | `CleanLogs @1937 → Disconnect @1941 → KillTrace @1943` | — | 顺序反转实证 |
-| `"rm /log/*"` | 2 | 一条回显 + 一条状态行 |
+| `"rm log/*"` | 2 | 一条回显 + 一条状态行 |
 | `deleteFile(ipFrom` | 1 | 走游戏删除原语 |
 | `.files.Clear()` | 1 | 无条件兜底 |
 | `connectedComp.silent = true` | 1 | 静默断开 |
@@ -1835,7 +1864,7 @@ v1.11.3 给 `Leave` 加的静默断开是**游戏自己的标准做法**，逐�
 | `solve` | `firewall` `analyze` | `SolveFirewall` | `solve <解>` |
 | `porthack` | `escalate` `admin` | `Escalate` | `porthack` |
 | `mark` | `upload` `marker` | `UploadMarker` | 无 |
-| `rm` | `clean` `wipe` `logs` | `CleanLogs` | `rm /log/*` |
+| `rm` | `clean` `wipe` `logs` | `CleanLogs` | `rm log/*` |
 | `dc` | `disconnect` | `Disconnect` | `dc` |
 | `killtrace` | `stoptrace` `trace` | `KillTrace` | 无 |
 

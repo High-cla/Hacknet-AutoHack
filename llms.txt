@@ -63,6 +63,8 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
 
 - [README.md](README.md): 安装、面板与命令行用法（含四个独立工具）、终端行为、架构、关键设计决策 #1–#4h、验证方式
 - [docs/RESEARCH.md](docs/RESEARCH.md): 源码级取证，§1–§21，每条结论都带 `文件:行号`
+- [docs/EXTENSIONS.md](docs/EXTENSIONS.md): 游戏自带 `Extensions/` 官方样本的格式参考 —— 节点 XML、占位符、行为系统、任务、阵营、主题
+- [docs/HACKERSCRIPTS.md](docs/HACKERSCRIPTS.md): 自替换占位符全表 + HackerScript 动词表（以游戏实现与官方样本为准，已标出 wiki 错漏处）
 - [llms.txt](llms.txt): 本文件
 
 ## 源码
@@ -93,6 +95,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
 ## 外部参考
 
 - [Hacknet.wiki](https://hacknet.wiki/llms.txt): 游戏 Extension / 脚本格式的权威说明（站点自带 llms.txt 与 `.md` 版页面）
+- [Placeholder 参考](https://hacknet.wiki/reference/Placeholder.md): 占位符。**有错漏**（漏 4 个标识符、`BINARYSMALL` 长度写错），以 docs/HACKERSCRIPTS.md §1 为准
 - [HackerScripts 参考](https://hacknet.wiki/reference/HackerScripts.md): 游戏自带的 NPC 入侵脚本格式。**不能直接复用** —— 它没有提权动作，且 `connect` 不设 `os.connectedComp`，详见 RESEARCH §15.2
 - [Pathfinder 源码](https://github.com/Arkhist/Hacknet-Pathfinder): 框架 API 来源。本仓库 `upstream/` 有 clone（已被 git 忽略）
 

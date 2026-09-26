@@ -341,7 +341,7 @@ private static bool OpenPortPrefix(Computer __instance, int portNum, string ipFr
 | 目标查找 | `ComputerLookup.Find(id)` / `FindById` / `FindByIp` / `FindByName` | Util/ComputerLookup.cs:50 |
 
 原版机器（vanilla，来自地图 XML）的端口表由 `PortManager.LoadPortsFromStringVanilla` 初始化，
-调用点：`Pathfinder.Replacements.ContentLoader.cs:341,828`、`SaveLoader.cs:356` → 原版机器**也有** PortState。
+调用点：`decompiled/pathfinder/Pathfinder.Replacements/ContentLoader.cs:341`（EOS 另见 `:828`）、`SaveLoader.cs:356` → 原版机器**也有** PortState。
 
 ### 2. 终端指令契约（回显格式）
 
@@ -493,7 +493,7 @@ os.write("\n" + os.terminal.prompt + command);
 
 **不是**所有权标记的：`Computer.admin`（`Computer.cs:103 public Administrator admin = null`）是任务的 `Administrator` 行为对象（`Administrator.cs`：`ResetsPassword` / `IsSuper` / `disconnectionDetected` / `traceEjectionDetected`），与玩家是否拿下无关。
 
-Pathfinder 没有提供更上层的「已控」封装（`grep adminIP|IsOwned|owned` 全树仅命中 `ReloadExtensionNodes.cs:42` 的属性拷贝与存档读写两处），故本插件直接用 `comp.adminIP == os.thisComputer.ip` 判定。
+游戏与 Pathfinder 都没有更上层的「已控」封装：`adminIP` 全树 144 处命中，除存档读写外全是 `adminIP == os.thisComputer.ip` 的即时比较，没有可复用的判定函数。故本插件直接用 `comp.adminIP == os.thisComputer.ip` 判定。
 
 跳过策略：**只对全网扫描生效**。`here` 与显式点名的目标是刻意选择，一律尊重 —— 且重打已控节点本身是合法用法（重放／重置）。`redo` / `force` / `all-nodes` 三个别名或面板复选框可关闭过滤。
 

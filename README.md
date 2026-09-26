@@ -857,7 +857,9 @@ dotnet build src/SaveFix/SaveFix.csproj -c Release
 
 ## 调研资料
 
-- `docs/RESEARCH.md` — 完整调研：原生机制、API 精确签名、陷阱
+- `docs/RESEARCH.md` — 完整调研：原生机制、API 精确签名、陷阱（§1–§21，每条结论带 `文件:行号`）
+- `docs/EXTENSIONS.md` — 游戏自带 `Extensions/` 官方样本的格式参考：节点 XML、占位符、行为系统、任务、阵营、主题
+- `docs/HACKERSCRIPTS.md` — 自替换占位符全表 + HackerScript 动词表，以游戏实现与官方样本为准，已标出 wiki 的错漏处
 
 以下为**本地研究树**，未入库（体积大，且含第三方版权物与 binary；`.gitignore` 已排除，可按下列配方随时重建）：
 

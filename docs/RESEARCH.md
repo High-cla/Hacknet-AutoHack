@@ -280,6 +280,16 @@ public static void RegisterExecutable<T>(string xmlName);
 5. 本机 `Hacknet.exe` 已注入 BepInEx（1,469,952 B），`HacknetOld.exe` 为原版备份（1,477,120 B）。`PathfinderPatcher.exe` 安装后自删属正常。
 6. `grep -ac 'BepInEx.Hacknet.Entrypoint' Hacknet.exe` 返回 0 是**误判信号** — `.cctor` 里是拼接/编码形式，非明文。
 
+7. **属性扫描有加载顺序依赖 —— 必须声明 `[BepInDependency("com.Pathfinder.API")]`。**
+   §2.3 那个 IL hook 是在 `PathfinderAPIPlugin.Load()` 里 `PatchAll` 时才安装的
+   （`decompiled/pathfinder/Pathfinder/PathfinderAPIPlugin.cs:45` = `HarmonyInstance.PatchAll(typeof(PathfinderAPIPlugin).Assembly)`；
+   hook 点见 `Pathfinder.Meta.Load/AttributeManager.cs:27`）。若本插件先加载，
+   属性扫描不会覆盖到它 —— `[Command]` 注册的终端命令会**静默失效**：不报错、不打日志，
+   终端里就是没有 `autohack` 这个命令。
+   实测初始顺序 `AutoHack → AutoUpdater → PathfinderAPI`（错误），加依赖后变为
+   `AutoUpdater → PathfinderAPI → AutoHack`（正确）。
+   **这不是可选依赖，是正确性前提**；同理，任何依赖 Pathfinder 属性注册的插件都要声明它。
+
 ---
 
 ## 6. 待办
@@ -292,7 +302,7 @@ public static void RegisterExecutable<T>(string xmlName);
 | 2 | 搭建项目骨架（csproj + 源文件） | ✅ v1.0（net472 / LangVersion 13 / 直接输出到游戏目录） |
 | 3 | 实现自动入侵核心 | ✅ v1.0，v1.2 迁移到 Pathfinder 框架 API，v1.3 补跳板与追踪 |
 | 4 | 编译输出到游戏目录 `BepInEx/plugins/` | ✅ 每次 `dotnet build` 自动落地 |
-| 5 | 游戏内验证 | ✅ 加载顺序／命令注册已由日志证实；面板肉眼观感待真人确认（见 README「未验证」） |
+| 5 | 游戏内验证 | ✅ 加载顺序／命令注册已由日志证实；**面板渲染、鼠标交互与终端回显的肉眼观感待真人确认**（无法自动化）。四工具同理 —— 反推内核、内存往返、程序补全判据均已用存档数据离线验通，按钮点击与观感仍需进游戏确认 |
 
 
 ---
@@ -2003,7 +2013,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
 ### 16.3 废止的做法
 
 `ilspycmd -o decompiled/autohack-vNNN <dll>` 的逐项字符串计数核对**不再执行**。
-README 里 v1.7–v1.12.0 的九块反编译核对记录**转为历史存档**，不再是流程要求。
+README 里 v1.7–v1.12.0 的九块反编译核对记录**已删除**（不再保留为历史存档）；各版的字节数与 MD5 指纹留在 README 的「版本沿革」表，逐版核对原文只在 git 历史里（`git log --follow README.md`）。
 它们的残留价值：那些行数与计数是当时产物的指纹，回溯「某版本编进去了什么」时可查。
 
 **注意**：`decompiled/game-proj/` 与 `decompiled/pathfinder/` 是**另一回事** ——

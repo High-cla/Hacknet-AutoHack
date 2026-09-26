@@ -61,8 +61,8 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
 
 ## 仓库文档
 
-- [README.md](README.md): 安装、面板与命令行用法（含四个独立工具）、终端行为、架构、关键设计决策 #1–#4j、验证方式
-- [docs/RESEARCH.md](docs/RESEARCH.md): 源码级取证，§1–§21，每条结论都带 `文件:行号`
+- [README.md](README.md): 面向使用者的说明 —— 安装、面板与命令行用法（含四个独立工具）、脚本模式、架构、验证方式。**刻意保持精简**，设计决策与取证细节一律在 docs/RESEARCH.md
+- [docs/RESEARCH.md](docs/RESEARCH.md): 源码级取证与设计决策，§1–§22，每条结论都带 `文件:行号`。**细节的唯一归属地**（README 只留给人看的结论）
 - [docs/EXTENSIONS.md](docs/EXTENSIONS.md): 游戏自带 `Extensions/` 官方样本的格式参考 —— 节点 XML、占位符、行为系统、任务、阵营、主题
 - [docs/HACKERSCRIPTS.md](docs/HACKERSCRIPTS.md): 自替换占位符全表 + HackerScript 动词表（以游戏实现与官方样本为准，已标出 wiki 错漏处）
 - [llms.txt](llms.txt): 本文件
@@ -103,5 +103,5 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
 
 - [decompiled/game-proj/](decompiled/game-proj): **游戏本体**反编译（360 文件）。RESEARCH 里大量 `文件:行号` 引用都指向它，是全部改动的依据 —— 与「不核对 mod 产物」无关，必须保留
 - [decompiled/pathfinder/](decompiled/pathfinder): PathfinderAPI 反编译（135 文件）
-- [decompiled/](decompiled): 另含各版本 mod 产物的反编译存档（`autohack-vNN/`）。**已废止核对，不再新增**；版权物，被 git 忽略
+- [decompiled/](decompiled): 另含各版本 mod 产物的反编译存档（`autohack-vNN/`）。**已废止核对，不再新增、可随时删除**；版权物，被 git 忽略
 - [.cbmignore](.cbmignore): codebase-memory 索引的排除规则。它把 `.gitignore` 一并当忽略源读，故 `decompiled/` 与 `upstream/` 不进索引 —— 索引只覆盖 mod 自身源码，这是有意为之

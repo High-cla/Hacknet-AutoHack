@@ -3120,3 +3120,105 @@ private static (Computer Comp, Folder Dir, List<int> Path) Current(OS os)
 ### 28.7 工具护栏补 `InvalidOperationException`
 
 `ToolDispatch.Run` 的 catch 列表补上 `InvalidOperationException`。理由是真实的竞态面：命令走 `OS.execute` 的独立线程（`OS.cs:1754-1767`），`cd` 会改 `os.navigationPath`，而工具在游戏线程读它 —— 并发时抛的正是「Collection was modified」。
+
+---
+
+## 29. 面板控件 ID 冲突：purge 按钮点不动
+
+### 29.1 症状
+
+面板上按 **PURGE FILES 完全没反应**（终端一行回显都没有），而**同一行的 PULL FILES 正常**。
+用户第一次报的是「清除文件没有效果」，一度被误判为删除通道故障；第二轮补上关键信息
+「清除日志有效果」—— 清痕走的是 `autohack run` 的流程（`HackRun`），与按钮**完全另一条路径**，
+这条信息把故障面从「删除逻辑」收敛到了「按钮到工具的接线」。
+
+### 29.2 根因
+
+`HackPanel.Drag` 里拖动标题栏的控件 ID 是**硬编码常量**：
+
+`@csharp
+const int DragId = 7099;          // HackPanel.cs:633（修复前）
+`@
+
+而面板所有控件的 ID 都从 `HackPanelState.IdBase` 派生，工具按钮用 `IdBase + 30 + i`：
+
+`@csharp
+private static int _nextId = 7000;                          // HackPanel.cs:14
+internal readonly int IdBase = _nextId += 64;               // 唯一实例 → 7064
+PrimaryButton(state.IdBase + 30 + i, ...)                   // HackPanel.cs:407
+`@
+
+`Tools[5]` 是 `Purge`（`HackPanel.cs:156`），故它的 id = `7064 + 30 + 5` = **7099** —— 与
+`DragId` 是同一个数字。
+
+### 29.3 为什么点击被吃掉
+
+`Drag` 在 `Chrome` 之后、`DrawTools` **之前**执行（`HackPanel.cs:211` vs `:262`），
+而 `Track` 只在 `GuiData.active == -1` 时抢占 active。逐帧（仿真验证）：
+
+| 帧 | 事件 | `GuiData.active` | 面板位置 |
+|---|---|---|---|
+| 0 | 光标落在 PURGE 上、左键按下 | `Drag` 先跑：光标不在标题栏 → 不动。`Track` 抢占 → **7099** | (1000,600) 不动 |
+| 1 | 左键仍按住 | `Drag` 跑：`active == DragId(7099)` **成立 → 接管为拖动**，把 `state.X/Y` 设成光标位置 | (1000,600) → **(1212,954)** |
+| 2 | 左键抬起 | `Drag` 见 `active == DragId` 且已抬起 → `active = -1` | — |
+
+第 2 帧 `Track` 算 `clicked = GuiData.active == id && GuiData.mouseLeftUp()` 时，`active` 已被
+`Drag` 清成 -1 → **`clicked = false`，点击永久丢失**。同时面板随光标跳走（第 1 帧
+`state.X = mp.X - _dragOffset.X`，而 `_dragOffset` 仍是上次拖动或 0 值）。
+
+两件事玩家都能观察到，且都指向同一个 id。
+
+### 29.4 为什么只有 PURGE 中招
+
+`IdBase` 恒为 7064（`_nextId` 从 7000 起步、每实例 +64、面板实例唯一），故各工具按钮 id：
+
+| 按钮 | 表达式 | id | 与 7099 |
+|---|---|---|---|
+| DEC / MEM | `+30+0` / `+30+1` | 7094 / 7095 | — |
+| ALL PROGRAMS | `+30+2` | 7096 | — |
+| UNBREAKABLE | `+30+3` | 7097 | — |
+| PULL FILES | `+30+4` | 7098 | — |
+| **PURGE FILES** | `+30+5` | **7099** | **撞** |
+| DROP NODE | `+30+6` | 7100 | — |
+
+**7 个按钮里恰好第 6 个撞上**，这正是「只有 purge 没反应」的完整解释。
+
+### 29.5 修法
+
+让 `DragId` **从 `IdBase` 派生**，取 `IdBase - 1`：
+
+`@csharp
+internal int DragId => IdBase - 1;
+`@
+
+取 `IdBase - 1` 而非「挑一个没人用的偏移」：本面板的控件一律用 `IdBase + N`（N ≥ 1），
+故 `IdBase - 1` **结构上**不可能是控件 id，不依赖「哪几个偏移还没被占」这种随时会失效的清单。
+多实例也不撞：下一个实例的 `IdBase` 比本实例大 64，而本实例最大只用到 `IdBase + 36`。
+
+`Drag` 内改用局部变量 `var dragId = state.DragId;`，三处引用（判断、赋值、清位）同步替换。
+
+### 29.6 教训
+
+**硬编码的控件 ID 是一个会自己长出来的 bug。** `DragId = 7099` 在写下时是安全的 —— 那时
+工具按钮只有 4 个（`+30+0..3` = 7094..7097），7099 是空的。v1.16.0 加三个远程工具后
+`Tools.Length` 变成 7，第 6 个正好落进 7099。**加按钮的人不可能知道** —— 这个数字与
+「加一个工具按钮」之间没有任何可见关联。
+
+结论不是「记得检查 ID」，而是**让冲突在结构上不可能**：凡是会被别处计算出来的 ID 空间，
+一律从同一个基址派生，不留字面量。
+
+### 29.7 顺带修掉的两处
+
+**`Purge` 缺「未连接」的说明。** `Current(os)` 在未连接时退到 `os.thisComputer`，与终端
+`rm` 的作用域规则一致（`Programs.cs:956` 也是 `os.connectedComp ?? os.thisComputer`），
+行为不改；但玩家很容易以为它冲着目标去。现把 `(local machine - not connected)` 写进回显。
+
+**`Pull` 与 `Purge` 的注释过时。** 两处仍写着「当前目录 = `os.navigationPath` 在目标上的
+投影」，而 §28.6 已改为以 `Programs.getCurrentFolder(os)` 为唯一权威。
+
+### 29.8 交付
+
+89088 B / `7deb395a07a4b0a924220ba8682ea75e`。构建 0 警告 0 错误。产物内
+`local machine - not connected` / `folders are never removed` / `has no file` /
+`still there (unexpected)` / `file(s) removed from` 均命中，`already empty`（旧文案）未命中，
+`1.20.0` 未命中、`1.21.0` 命中。旧常量 7099 已从 IL 中消失。

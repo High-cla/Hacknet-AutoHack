@@ -202,10 +202,19 @@ internal static class RemoteTools
     /// 的动作只该有一份实现。本方法此前自带一份、且没有兜底，于是
     /// <c>deleteFile</c> 权限门禁一拒就静默什么都不删，表现为「按了没反应」。
     /// </summary>
+    /// <summary>未连接时把「作用于本机」写进回显，避免玩家以为删的是目标。</summary>
+    private static string SelfTag(bool onSelf)
+        => onSelf ? " (local machine - not connected)" : string.Empty;
+
     internal static void Purge(OS os)
     {
         var (comp, dir, path) = Current(os);
         var where = Where(comp, path);
+
+        // 未连接时 Current 会退到玩家自己的机器 —— 这与终端 rm 的作用域规则一致
+        // （rm 也取 os.connectedComp ?? os.thisComputer），但玩家很容易以为它是
+        // 冲着目标去的。不改变行为，只把它写进回显，不留给玩家猜。
+        var onSelf = os.connectedComp == null;
 
         // 子夹数一并报出：本工具按约定**不删文件夹**，所以「夹子还在」是正常结果，
         // 不是没生效。把它说在前面，免得玩家对着一个空夹反复试。
@@ -213,7 +222,7 @@ internal static class RemoteTools
 
         if (dir.files.Count == 0)
         {
-            os.write("[autohack] purge: " + comp.name + " :: " + where
+            os.write("[autohack] purge: " + comp.name + SelfTag(onSelf) + " :: " + where
                      + " has no file (" + folders + " folder(s) left - folders are never removed).");
             return;
         }
@@ -226,7 +235,7 @@ internal static class RemoteTools
         // 真剩下了就是它没做到 —— 不该被一行乐观的回显盖过去。
         var tail = left > 0 ? " - " + left + " still there (unexpected)" : string.Empty;
         os.write("[autohack] purge: " + removed.Count + " of " + before + " file(s) removed from "
-                 + comp.name + " :: " + where + tail
+                 + comp.name + SelfTag(onSelf) + " :: " + where + tail
                  + (folders > 0 ? " (" + folders + " folder(s) left)" : string.Empty) + ".");
     }
 

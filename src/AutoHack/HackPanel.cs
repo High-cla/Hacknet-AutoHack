@@ -16,6 +16,22 @@ internal sealed class HackPanelState
     /// <summary>控件 ID 基址；多个面板实例共存时不串扰。</summary>
     internal readonly int IdBase = _nextId += 64;
 
+    /// <summary>
+    /// 标题栏拖动的控件 ID。**必须从 <see cref="IdBase"/> 派生**，不能写死数字。
+    ///
+    /// 这里曾硬编码 7099，而 IdBase 恒为 7064 —— 7099 = IdBase + 30 + 5，正是
+    /// <c>Tools[5]</c>（PURGE）的按钮 id。两个控件共用同一 id 后：按下 PURGE 的
+    /// 第二帧，<see cref="Drag"/> 看到 <c>GuiData.active == DragId</c> 便接管为拖动，
+    /// 面板随光标跳走，PURGE 的点击在抬起那一帧被 <c>active = -1</c> 吃掉。
+    /// 表现为「按 PURGE 没反应，面板自己还跑掉了」。
+    ///
+    /// 取 <c>IdBase - 1</c>：本面板的控件一律用 <c>IdBase + N</c>（N ≥ 1），故这个
+    /// 位置**结构上**不可能是控件 id，不必依赖「哪几个偏移还没被占」这种随时会失效
+    /// 的清单。多面板实例之间也不撞：下一个实例的 IdBase 比本实例大 64，
+    /// 而本实例最大只用到 IdBase + 36。
+    /// </summary>
+    internal int DragId => IdBase - 1;
+
     internal bool Open { get; set; } = true;
 
     /// <summary>收起为一条状态栏，避免长期遮挡终端。</summary>
@@ -149,9 +165,10 @@ internal static class HackPanel
         (ToolDispatch.Exes, "ALL PROGRAMS", false),
         (ToolDispatch.Unbreakable, "UNBREAKABLE", true),
 
-        // 三个远程动作，作用于**当前连接的节点**（未连接时各自报错，不静默）。
-        // 前两个看的是当前目录（= os.navigationPath 在目标上的投影），
-        // 与游戏自己的 scp/rm 同口径。
+        // 三个远程动作，作用于**当前连接的节点**；未连接时 pull/drop 报错，
+        // purge 退到玩家自己的机器（与终端 rm 的作用域规则一致，回显里会写明）。
+        // 前两个看的是「当前目录」，取自 Programs.getCurrentFolder(os) ——
+        // 与游戏自己的 ls/rm/scp 同一个权威来源，不再自行下钻 navigationPath。
         (ToolDispatch.Pull, "PULL FILES", false),
         (ToolDispatch.Purge, "PURGE FILES", true),
         (ToolDispatch.Drop, "DROP NODE", true),
@@ -630,11 +647,11 @@ internal static class HackPanel
     /// <summary>标题栏拖动；命中测试与其它控件一致，都用 <see cref="GuiData.getMousePoint"/>。</summary>
     private static void Drag(HackPanelState state, Rectangle screen)
     {
-        const int DragId = 7099;
+        var dragId = state.DragId;
         var mp = GuiData.getMousePoint();
         var header = new Rectangle(LastFrame.X, LastFrame.Y, LastFrame.Width, HeaderHeight);
 
-        if (GuiData.active == DragId)
+        if (GuiData.active == dragId)
         {
             if (GuiData.mouse.LeftButton == ButtonState.Released)
             {
@@ -650,7 +667,7 @@ internal static class HackPanel
         else if (header.Contains(mp) && GuiData.mouseWasPressed() && GuiData.hot == -1)
         {
             // hot == -1 保证标题栏上的收起/关闭按钮优先，不会误触发拖动。
-            GuiData.active = DragId;
+            GuiData.active = dragId;
             _dragOffset = new Point(mp.X - LastFrame.X, mp.Y - LastFrame.Y);
         }
     }

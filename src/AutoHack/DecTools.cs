@@ -128,33 +128,6 @@ internal static class DecTools
         return new Result(false, current, codes);
     }
 
-    /// <summary>递归收集文件夹里的 DEC 文件。</summary>
-    internal static void Collect(Folder folder, List<FileEntry> into)
-    {
-        if (folder == null)
-        {
-            return;
-        }
-
-        foreach (var file in folder.files)
-        {
-            if (IsEncrypted(file.data))
-            {
-                into.Add(file);
-            }
-        }
-
-        foreach (var child in folder.folders)
-        {
-            if (Array.IndexOf(Skipped, child.name) >= 0)
-            {
-                continue;
-            }
-
-            Collect(child, into);
-        }
-    }
-
     /// <summary>批量：扫目标节点上的 DEC 文件，逐层解开后写进玩家 /home。</summary>
     internal static void Run(OS os, bool allNodes)
     {
@@ -165,7 +138,7 @@ internal static class DecTools
         var found = new List<FileEntry>();
         foreach (var target in targets)
         {
-            Collect(target.files.root, found);
+            ToolFiles.Collect(target.files.root, found, IsEncrypted, Skipped);
         }
 
         if (found.Count == 0)

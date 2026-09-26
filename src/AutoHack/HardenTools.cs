@@ -35,12 +35,10 @@ internal static class HardenTools
         comp.portsNeededForCrack = Inviolable;
         comp.traceTime = 1f;
 
-        // 四个字段必须同步：addProxy 的语义就是「一次设定四者」（Computer.cs:243-252），
-        // 只改 hasProxy 而不改 overloadTicks，会让 DisplayModule 按 0/0 算进度条（DisplayModule.cs:670）。
-        comp.hasProxy = true;
-        comp.proxyActive = true;
-        comp.proxyOverloadTicks = Inviolable;
-        comp.startingOverloadTicks = Inviolable;
+        // 走游戏自身的 addProxy：它一次设定 hasProxy/proxyActive/proxyOverloadTicks/
+        // startingOverloadTicks 四者（Computer.cs:243-252）。只改 hasProxy 而不改
+        // overloadTicks，会让 DisplayModule 按 0/0 算进度条（DisplayModule.cs:670）。
+        comp.addProxy(Inviolable);
 
         var firewallNote = HardenFirewall(comp);
         var opened = HardenPorts(comp);

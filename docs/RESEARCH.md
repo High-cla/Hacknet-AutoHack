@@ -2450,3 +2450,83 @@ DETECTED」特效分支，只按数字位数生成随机字符串，**不遍历�
 - 构建：0 警告 0 错误
 - 验收读数（离线推算，基于 `save_1.xml`）：exes `added 28 / skipped 9`（修复前 0/37）；
   cleanlogs 新增覆盖玩家机 `/log` 的 21 条痕迹
+## 22. v1.14.2：全仓审计后的六项修复
+
+用 codebase-memory 重建索引（**734 nodes / 1767 edges**，17 个 C# 文件，排除
+`.git`/`buildlogs`/`decompiled`/`refs`/`release`）后，按「反模式 / 死代码 / 坏味道 / 性能 /
+游戏原生 API 未对齐 / 语言特性」六类做了一轮审计，落地六项修复。
+
+### 22.1 游戏原生 API 未对齐（3 处）
+
+**A1 — 三处手写目录解析。** `ToolFiles.Home`、`ToolFiles.MemDumps`、`ExeTools` 都各自
+`searchForFolder` + 手工 `new Folder(...)` + `folders.Add(...)`。游戏本身就有
+`Computer.getFolderFromPath(string path, bool createFoldersThatDontExist = false)`
+（`Computer.cs:1628-1636`）→ `getFolderPath`（`:1638-1665`）按 `/` 与 `\\` 切分、逐段
+查找、缺失且允许时 `folders.Add(new Folder(array[i]))`，再 `getFolderAtDepth`（`:1602-1616`）
+定位。三处改为一行调用，`MemDumps` 还顺带把两步并成 `"home/MemDumps"` 一次解析。
+
+**注意 `getFolderPath` 的静默缩短行为**：找不到且 `createFoldersThatDontExist == false` 时
+不 `list.Add`，返回的路径会缺段 —— 因此只有传 `true` 才等价于原手写逻辑。
+
+**A2 — proxy 四字段。** `HardenTools` 原本逐字段赋值 `hasProxy` / `proxyActive` /
+`proxyOverloadTicks` / `startingOverloadTicks`，而注释里自己就写着「addProxy 的语义就是
+一次设定四者」。改用 `comp.addProxy(Inviolable)`（`Computer.cs:243-252`，`time > 0f` 时
+四者同步置位），语义完全等价。`Inviolable` 是 `int` 常量，`addProxy` 收 `float`，靠隐式转换。
+
+### 22.2 性能
+
+**B1 — 内存查看 60 次 `os.write` 合并为 1 次。** `MemTools.View` 原本 `for (var i = 0; i < shown; i++)
+os.write(lines[i]);`，`shown` 上限 `MaxViewLines = 60`。`OS.write`（`OS.cs:1726-1737`）内部走
+`DisplayModule.cleanSplitForWidth`（逐词字符串拼接），而 `Terminal.writeLine`
+（`Terminal.cs:356-364`）本就把正文按 `'\n'` 拆行入 history —— 逐行调用等于把这段逐词
+开销乘以行数。游戏自身也传多行串（`DLCIntroExe.cs:213`）。改为 `os.write(string.Join("\n", lines, 0, shown))`。
+
+### 22.3 死代码与坏味道
+
+**C1 — `HackEngine.Ports` 的兜底分支不可达。** 证据链：Pathfinder 用 `decompiled/pathfinder/Pathfinder.Replacements/ContentLoader.cs:341`
+的 `Computer.ports` executor 完全替换了游戏原生加载器 → 走 `PortManager.LoadPortsFromStringVanilla`
+（`PortManager.cs:238-262`）→ `comp.AddPort(record)` → `ComputerExtensions.cs:75-85` →
+`record.CreateState(comp)` → `PortRecord.cs:33-36` `new PortState(...)` → `AddPort(PortState)`
+**只写 `PortTable`，不回写 `comp.ports`**。而 `GetAllPortStates()`（`ComputerExtensions.cs:135-138`）
+= `PortTable.GetOrCreateValue(comp).Values.ToList()`，`ComputerExtensions.cs:201-204` 的
+`OpenPortsPrefix` 又直接 `return false` 拦掉原生 `openPorts`。故 `states.Count > 0` 必先返回。
+唯一仍写 `comp.ports` 的是 `DLC1SessionUpgrader.cs:57-61`（只对 `ispComp` 加 443/6881，且不设
+`portsNeededForCrack`）。
+
+**决定保留并注释**，而非删除：替换机制一旦被别的 mod 改掉，这里会静默返回空端口表 ——
+那是比多几行代码更糟的失效方式。
+
+**C2 — v1.13.0 漏掉的绘制探针。** `HackOverlay` 里 `_drawLogged` + `Log.LogInfo($"Overlay drawing
+at {screen.Width}x{screen.Height}.")` 是「摘除全部日志探针」时漏下的一条。摘掉后 `Log` 字段
+失去唯一用途，连 `using BepInEx.Logging;` 一并移除。
+
+**C4 — 两处同构递归。** `DecTools.Collect` 与 `MemTools.Collect` 结构完全一致，差异只有
+谓词（`IsEncrypted` vs `StartsWith(FileHeader)`）与是否跳 `log`/`sys`。抽成
+`ToolFiles.Collect(Folder, List<FileEntry>, Func<string, bool> match, string[] skipFolders)`，
+`skipFolders` 传 `null` 表示不跳。
+
+### 22.4 语言特性 / 异步 / 并发：已评估并否决
+
+| 手段 | 判定 | 依据 |
+|---|---|---|
+| `Span<T>` / `ArrayPool` / `stackalloc` | **不可用** | net472 + `LangVersion 13` + 无任何 `PackageReference`（`AutoHack.csproj` 只引 0Harmony / BepInEx.Core / BepInEx.Hacknet / PathfinderAPI / Hacknet / FNA），`refs/assemblies/netfx-all/` 无 `System.Memory` |
+| `async/await` | **禁用** | 见 §11.1：全状态主线程独占，逐帧步进机即协程等价物；v1.8.0 已用 `Collection was modified` 证明过 |
+| 多线程 / `Parallel` | **禁用（工具路径）** | `ExeTools` 37 个 port、`DecTools` N 个文件虽是纯 CPU，但都要写 `folder.files` 与 `os.write`。现状（`ConcurrentDictionary` 仅用于命令线程→游戏线程入队，`PendingRuns.cs:26`）已是正确的最小用法 |
+
+### 22.5 审计确认**无问题**的项（勿重复排查）
+
+- **无真死代码**：全文件声明名引用计数扫描，6 个「零引用」全是 BepInEx/Harmony 反射入口
+  （`AutoHackCommand` / `OnOSDraw` / `OnOSDrawPrefix` / `PostLoad` / `Unload`）+ 编译器合成 `IsExternalInit`。
+- **异常边界已对齐**：`HackOverlay.RunTool` try/catch ✓、`PendingRuns.OnOSUpdate` try/catch ✓、
+  `HackRun.Tick` 无 catch（正确，不应吞）✓。
+- **面板布局数学一致**：实测 `DrawOptions` 推进 = 60+52+60+88+14 = **274 = `OptionsBlockHeight`** ✓；
+  `ToolsBlockHeight` 按按钮数参数化 ✓；`BodyHeight` 三态均含 `ToolsBlockHeight` ✓。
+
+### 22.6 交付
+
+- 改动：`ToolFiles.cs`（A1 + C4）、`ExeTools.cs`（A1）、`HardenTools.cs`（A2）、
+  `MemTools.cs`（B1 + C4 + `IsDump`）、`DecTools.cs`（C4）、`HackEngine.cs`（C1 注释）、
+  `HackOverlay.cs`（C2）、`AutoHackPlugin.cs`（版本 1.14.2）
+- 产物：`<Hacknet>/BepInEx/plugins/AutoHack.dll`，81408 字节
+- MD5：`7ee5d4bb15490985599557e1cc06a904`（v1.14.1 为 `2c9ab2c456ce36a4e038803415e371ad`，已变 → 改动确已进 IL）
+- 构建：0 警告 0 错误

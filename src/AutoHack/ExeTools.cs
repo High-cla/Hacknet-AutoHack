@@ -42,13 +42,8 @@ internal static class ExeTools
 
         os.write("[autohack] exes: table check - " + usable + "/" + total + " entr(ies) carry exe data.");
 
-        var root = os.thisComputer.files.root;
-        var bin = root.searchForFolder("bin");
-        if (bin == null)
-        {
-            bin = new Folder("bin");
-            root.folders.Add(bin);
-        }
+        // 走游戏自身的路径解析（Computer.cs:1628），不手写建夹。
+        var bin = os.thisComputer.getFolderFromPath("bin", createFoldersThatDontExist: true);
 
         var added = 0;
         var skipped = 0;

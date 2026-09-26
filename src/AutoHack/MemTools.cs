@@ -60,10 +60,11 @@ internal static class MemTools
         // 完整内容仍可经导出（home/MemDumps）拿到。
         var lines = compact.Split(Utils.robustNewlineDelim, StringSplitOptions.None);
         var shown = Math.Min(lines.Length, MaxViewLines);
-        for (var i = 0; i < shown; i++)
-        {
-            os.write(lines[i]);
-        }
+
+        // 一次写多行：OS.write 内部走 DisplayModule.cleanSplitForWidth（逐词拼接），
+        // 而 Terminal.writeLine 本就把正文按 '\n' 拆行入 history（Terminal.cs:356-364），
+        // 逐行调用等于把这段逐词开销乘以行数。游戏自身也这么用（DLCIntroExe.cs:213）。
+        os.write(string.Join("\n", lines, 0, shown));
 
         if (lines.Length > shown)
         {
@@ -111,6 +112,10 @@ internal static class MemTools
         os.write("[autohack] mem: exported home/MemDumps/" + name + " (" + encoded.Length + " chars, " + verdict + ").");
     }
 
+    /// <summary>按游戏自身的 FileHeader 识别内存转储（含 .mem 之外的扩展名）。</summary>
+    private static bool IsDump(string data)
+        => data != null && data.StartsWith(MemoryContents.FileHeader, StringComparison.Ordinal);
+
     /// <summary>扫描：按游戏自身的 FileHeader 识别 .mem，解出内嵌内容，含 DEC 则继续解。</summary>
     private static void Scan(OS os, bool allNodes)
     {
@@ -121,7 +126,7 @@ internal static class MemTools
         var candidates = new List<FileEntry>();
         foreach (var target in targets)
         {
-            Collect(target.files.root, candidates);
+            ToolFiles.Collect(target.files.root, candidates, IsDump, null);
         }
 
         if (candidates.Count == 0)
@@ -185,27 +190,5 @@ internal static class MemTools
 
         os.write("[autohack] mem: " + decoded + "/" + candidates.Count + " dump(s) decoded, "
                  + withDec + " carried an inner DEC layer.");
-    }
-
-    /// <summary>收集按游戏 FileHeader 识别出的内存转储（含 .mem 之外的扩展名）。</summary>
-    private static void Collect(Folder folder, List<FileEntry> into)
-    {
-        if (folder == null)
-        {
-            return;
-        }
-
-        foreach (var file in folder.files)
-        {
-            if (file.data != null && file.data.StartsWith(MemoryContents.FileHeader, StringComparison.Ordinal))
-            {
-                into.Add(file);
-            }
-        }
-
-        foreach (var child in folder.folders)
-        {
-            Collect(child, into);
-        }
     }
 }

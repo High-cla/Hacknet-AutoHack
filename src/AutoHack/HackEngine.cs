@@ -57,6 +57,15 @@ internal static class HackEngine
             return fromStates;
         }
 
+        // 以下分支在当前加载路径下**不可达**，保留作防御：
+        // Pathfinder 用 ContentLoader.cs:341 的 Computer.ports executor 完全替换了游戏原生
+        // 加载器，端口一律经 PortManager.LoadPortsFromStringVanilla -> comp.AddPort(record)
+        // -> record.CreateState(comp) 写进 PortTable，**不回写 comp.ports**；且
+        // ComputerExtensions.cs:201-204 的 OpenPortsPrefix 直接 return false 拦掉原生
+        // openPorts。故 GetAllPortStates() 恒非空，上面 states.Count > 0 必先返回。
+        // 唯一仍写 comp.ports 的是 DLC1SessionUpgrader.cs:57-61（只对 ispComp 加 443/6881，
+        // 且不设 portsNeededForCrack）。留着是因为替换机制一旦被别的 mod 改掉，
+        // 这里会静默返回空端口表 —— 那是比多几行更糟的失效方式。
         if (comp.ports == null || comp.ports.Count == 0)
         {
             return Array.Empty<PortInfo>();

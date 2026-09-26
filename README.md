@@ -92,7 +92,7 @@ autohack -h                                     # 帮助
 > 差额是「可以直接敲 IP 连上、但不在连线上」的机器 —— `Programs.connect` 遍历的是
 > `netMap.nodes` 全表，本来就不检查 `links`（见「关键设计决策」#4c）。
 
-### 工具（v1.14.0 起，v1.14.1 修缺陷）
+### 工具（v1.14.0 起，v1.14.1 / v1.14.2 修缺陷与优化）
 
 四个工具与入侵流程**完全独立** —— 不进 `autohack run` 的自动流程，命令与面板 TOOLS 区按钮走**同一份实现**。面板按钮**单击立即执行**，不弹二次确认（`UNBREAKABLE` 用告警色 + 回显里的 `irreversible` 代替）。
 
@@ -516,6 +516,44 @@ Pathfinder 用 `[HarmonyPrefix]` 接管了 `Computer.openPort(int, string)` 并 
   且这个常量在游戏里**零引用**（全仓只有声明一处），拿它当门槛等于自造契约。
   凡「拿某个常量当数据校验」的地方，先确认那个常量有真实读者。
 
+### v1.14.2 验证（只看产物 MD5）
+
+| 项 | 值 |
+|---|---|
+| 产物 | `<Hacknet>/BepInEx/plugins/AutoHack.dll` |
+| 字节数 | 81408 |
+| MD5 | `7ee5d4bb15490985599557e1cc06a904` |
+| 构建 | `rm -rf src/AutoHack/obj src/AutoHack/bin && dotnet build ... -c Release` → 0 警告 0 错误 |
+
+一次全仓审计（734 nodes / 1767 edges）后的六项修复：三处手写目录解析改走游戏自身的
+`Computer.getFolderFromPath(path, createFoldersThatDontExist: true)`；proxy 四字段改走
+`Computer.addProxy`；内存查看由 60 次 `os.write` 合并为 1 次多行写；摘除 v1.13.0 漏掉的
+绘制探针及其已成死代码的 `Log` 字段；DEC 与内存两处同构的递归收集抽成带谓词的
+`ToolFiles.Collect`；`HackEngine.Ports` 的不可达兜底分支补上「为何不可达」的注释并保留。
+
+**已评估并否决**（记录以免重开）：`Span<T>`/`ArrayPool` 不可用（net472 且无任何
+`PackageReference`）；async/await 与多线程禁用（全状态主线程独占，逐帧步进机即协程等价物，
+v1.8.0 已证）。
+
+### v1.14.2 验证（只看产物 MD5）
+
+| 项 | 值 |
+|---|---|
+| 产物 | `<Hacknet>/BepInEx/plugins/AutoHack.dll` |
+| 字节数 | 81408 |
+| MD5 | `7ee5d4bb15490985599557e1cc06a904` |
+| 构建 | `rm -rf src/AutoHack/obj src/AutoHack/bin && dotnet build ... -c Release` → 0 警告 0 错误 |
+
+一次全仓审计（734 nodes / 1767 edges）后的六项修复：三处手写目录解析改走游戏自身的
+`Computer.getFolderFromPath(path, createFoldersThatDontExist: true)`；proxy 四字段改走
+`Computer.addProxy`；内存查看由 60 次 `os.write` 合并为 1 次多行写；摘除 v1.13.0 漏掉的
+绘制探针及其已成死代码的 `Log` 字段；DEC 与内存两处同构的递归收集抽成带谓词的
+`ToolFiles.Collect`；`HackEngine.Ports` 的不可达兜底分支补上「为何不可达」的注释并保留。
+
+**已评估并否决**（记录以免重开）：`Span<T>`/`ArrayPool` 不可用（net472 且无任何
+`PackageReference`）；async/await 与多线程禁用（全状态主线程独占，逐帧步进机即协程等价物，
+v1.8.0 已证）。
+
 ### v1.14.1 验证（只看产物 MD5）
 
 | 项 | 值 |
@@ -583,7 +621,7 @@ plan: targets=1 skipped=10 steps=21 creds=True loginSteps=1 speed=Normal
 | 项 | 值 |
 |---|---|
 | 产物路径 | `D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll` |
-| 当前版本 | v1.14.1 |
+| 当前版本 | v1.14.2 |
 | 字节数 | 81408 |
 | MD5 | `2c9ab2c456ce36a4e038803415e371ad` |
 

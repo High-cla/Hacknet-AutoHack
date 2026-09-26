@@ -9,32 +9,42 @@ using Hacknet;
 /// </summary>
 internal static class ToolFiles
 {
-    /// <summary>玩家机 /home，缺失则建。</summary>
+    /// <summary>玩家机 /home，缺失则建（走游戏自身的路径解析，Computer.cs:1628）。</summary>
     internal static Folder Home(OS os)
-    {
-        var root = os.thisComputer.files.root;
-        var home = root.searchForFolder("home");
-        if (home == null)
-        {
-            home = new Folder("home");
-            root.folders.Add(home);
-        }
-
-        return home;
-    }
+        => os.thisComputer.getFolderFromPath("home", createFoldersThatDontExist: true);
 
     /// <summary>玩家机 /home/MemDumps，缺失则建（与 MemoryDumpDownloader.cs:92-98 同一落点）。</summary>
     internal static Folder MemDumps(OS os)
+        => os.thisComputer.getFolderFromPath("home/MemDumps", createFoldersThatDontExist: true);
+
+    /// <summary>
+    /// 递归收集符合条件的文件。DEC 批量与内存扫描是同一套遍历，
+    /// 差异只有「认哪些文件」与「跳哪些目录」，故抽成一处。
+    /// </summary>
+    internal static void Collect(Folder folder, List<FileEntry> into, Func<string, bool> match, string[] skipFolders)
     {
-        var home = Home(os);
-        var dumps = home.searchForFolder("MemDumps");
-        if (dumps == null)
+        if (folder == null)
         {
-            dumps = new Folder("MemDumps");
-            home.folders.Add(dumps);
+            return;
         }
 
-        return dumps;
+        foreach (var file in folder.files)
+        {
+            if (match(file.data))
+            {
+                into.Add(file);
+            }
+        }
+
+        foreach (var child in folder.folders)
+        {
+            if (skipFolders != null && Array.IndexOf(skipFolders, child.name) >= 0)
+            {
+                continue;
+            }
+
+            Collect(child, into, match, skipFolders);
+        }
     }
 
     /// <summary>写进目录，返回实际文件名（重名自动加序号）。</summary>

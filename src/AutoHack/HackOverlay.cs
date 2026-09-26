@@ -1,7 +1,6 @@
 namespace AutoHack;
 
 using System.IO;
-using BepInEx.Logging;
 using Hacknet;
 using Hacknet.Gui;
 using HarmonyLib;
@@ -31,14 +30,9 @@ using Microsoft.Xna.Framework.Graphics;
 [HarmonyPatch]
 internal static class HackOverlay
 {
-    private static readonly ManualLogSource Log = Logger.CreateLogSource("AutoHack");
-
     private static HackPanelState _state;
     private static HackRun _run;
     private static OS _os;
-
-    /// <summary>首次成功绘制后记一条日志，作为「渲染路径真的跑通」的可核查证据。</summary>
-    private static bool _drawLogged;
 
     internal static bool IsOpen => _state is { Open: true };
 
@@ -118,12 +112,6 @@ internal static class HackOverlay
             {
                 spriteBatch.End();
             }
-        }
-
-        if (!_drawLogged)
-        {
-            _drawLogged = true;
-            Log.LogInfo($"Overlay drawing at {screen.Width}x{screen.Height}.");
         }
 
         switch (action.Kind)

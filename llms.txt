@@ -1,62 +1,80 @@
-# AutoHack — Hacknet 全自动入侵 Mod
+# AutoHack
 
-> Hacknet 的 BepInEx/Pathfinder 插件：用游戏自己的原生机制一键入侵全网，支持控制面板与脚本驱动。
-> 面向需要理解或修改本仓库的编码 agent —— 关键事实集中在本文，细节在链接后的文件里。
+> Hacknet 的 BepInEx / Pathfinder 插件：用游戏自身的原生机制一键入侵全网，带控制面板与脚本驱动。
+> 本文件面向要理解或修改本仓库的编码 agent。规范见 https://llmstxt.org
 
-## 一句话状态
+当前 v1.12.1。构建产物直投游戏插件目录，无需手动拷贝：
 
-v1.12.0。构建产物直投 `D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll`。
+```
+D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
+```
 
-## 动手前必读的三条硬约束
+路径由 `src/AutoHack/AutoHack.csproj:14-15` 写死（`OutputPath` = `$(HacknetDir)BepInEx\plugins\`）。
 
-1. **构建命令固定**：`rm -rf src/AutoHack/obj src/AutoHack/bin` 之后才 `dotnet build src/AutoHack/AutoHack.csproj -c Release -v q --nologo`。
-   不清理会命中增量缓存，产出**同字节数**的假通过（历史踩过）。
-2. **改动后看产物 MD5，不做反编译核对**（用户定的规矩）。产物直投插件目录：
+**三条硬约束**
 
-   ```
-   D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
-   ```
+1. 构建前必须 `rm -rf src/AutoHack/obj src/AutoHack/bin`。不清理会命中增量缓存，
+   产出与上一版**同字节数**的假通过（历史踩过）。之后 `dotnet build src/AutoHack/AutoHack.csproj -c Release -v q --nologo`，须 0 警告 0 错误。
+2. **改动后只看产物 MD5，不做反编译核对**（用户定的规矩）。记 `md5sum` + 字节数，
+   与上一版比对。构建成功本身即证明源码已编入（缓存已清，漏编会报错）；
+   MD5 只回答「部署是否新鲜」。副产品判据：改源码 MD5 必变，只改注释/文档 MD5 不变（注释不进 IL）。
+3. **`gh release create` 绝不自动执行** —— 等用户显式发令。`git push` 可以直接做。
 
-   核对 = 记录 `md5sum` + 字节数 + mtime，与上一版比对（变了才说明部署真的更新了）。
-   内容正确性由**「先清理后构建」**保证：每次都 `rm -rf obj bin`，编译器若把某段源码
-   漏掉会直接报错，构建成功即等价于源码已进去。MD5 只回答「部署是否新鲜」，
-   不回答「内容是否含某行」—— 后者不再单独校验。
-3. **`gh release create` 绝不自动执行** —— 由用户显式发令。`git push` 可以直接做。
+**六个最容易踩的坑**（都带行号，可直接 grep）
 
-## 文档入口
-
-- [README.md](README.md)：安装、面板与命令行用法、终端行为、架构、关键设计决策（#1–#4h）、验证清单
-- [docs/RESEARCH.md](docs/RESEARCH.md)：源码级取证。§1–§15，每条结论都带 `文件:行号`
-  - §11 逐帧推进为何不用 async · §12 清痕的完整机制 · §13 追踪与反追踪 · §14 账密/档位/清痕时序 · §15 脚本驱动
-- [samples/](samples)：三份可直接用的入侵脚本（`stealth` / `brute` / `full`）
-- [src/AutoHack/](src/AutoHack)：源码。`HackEngine.cs` 是决策层，`HackRun.cs` 是执行层
-
-## 六个最容易踩的坑（都带行号，可直接 grep）
-
-1. **`Computer.portsOpen` 恒为 0** —— Pathfinder 用 Harmony Prefix 接管了 `openPort`/`openPorts`
-   并 `return false`，状态改存 `PortState.Cracked`。任何读 `portsOpen` 的判断都是错的，一律走 `GetAllPortStates()`。
-2. **`Programs.probe` / `Programs.login` 内部 `Thread.Sleep`** —— 绝不可在游戏线程调用。
-   `Programs.rm` 同理（每文件最多 5.2 秒动画），故清痕直接调 `Computer.deleteFile`。
-3. **`rm` 的目标机取自 `os.connectedComp`**（`Programs.cs:956`）——
-   断开之后再清痕，删的是**玩家自己**的文件系统。故清痕必须排在 `dc` 之前。
-4. **`Computer.deleteFile` 会自己写一条 log**（`Computer.cs:543`）—— 但仅当 `name[0] != '@'`，
+1. `Computer.portsOpen` 恒为 0 —— Pathfinder 用 Harmony Prefix 接管 `openPort`/`openPorts`
+   并 `return false`，状态改存 `PortState.Cracked`。任何读 `portsOpen` 的判断都是错的，
+   一律走 `GetAllPortStates()`。
+2. `Programs.probe` / `Programs.login` / `Programs.rm` 内部都有 `Thread.Sleep`
+   （`rm` 每文件最多 5.2 秒动画）—— 绝不可在游戏线程调用。清痕故直接调 `Computer.deleteFile`。
+3. `rm` 的目标机取自 `os.connectedComp`（`Programs.cs:956`）—— 断开之后再清痕，
+   删的是**玩家自己**的文件系统。故清痕必须排在 `dc` 之前。
+4. `Computer.deleteFile` 会自己写一条 log（`Computer.cs:543`）—— 但仅当 `name[0] != '@'`，
    而 `/log` 里的文件名恒以 `@` 开头（`Computer.log` 拼的），故清痕不会自我污染。
-5. **管理员反扑是延迟的**（`BasicAdministrator.disconnectionDetected`，0–20 秒）——
-   不断开前把 `computer.admin` 置 null，肉鸡标记会在断开后丢失，这就是「全网扫描失去效果」的根因。
-6. **`GuiData.UISmallfont` / `UITinyfont` 从未被赋值** —— 用了必 NRE，且被 `OS.Draw` 的内层 catch 吞掉，
-   表现为「面板莫名其妙不显示」。只可用 `smallfont`/`tinyfont`/`font`/`detailfont`。
-   同理不用原生 `CheckBox`/`Button`（前者只在 hover 时画文字，后者自动缩字并加 13px 色块），面板是自绘的。
+5. 管理员反扑是**延迟**的（`BasicAdministrator.disconnectionDetected`，0–20 秒）——
+   不在断开前置空 `computer.admin`，肉鸡标记会在断开后丢失。这就是「全网扫描失去效果」的根因。
+6. `GuiData.UISmallfont` / `UITinyfont` **从未被赋值** —— 用了必 NRE，且被 `OS.Draw` 的内层
+   catch 吞掉，表现为「面板莫名其妙不显示」。只可用 `smallfont`/`tinyfont`/`font`/`detailfont`。
+   同理不用原生 `CheckBox`/`Button`（前者只在 hover 时画文字，后者自动缩字并加 13px 色块），
+   面板是自绘的。
 
-## 外部依赖的参考
+另附一条反直觉事实：**Hacknet 没有绝对路径**。`getFolderAtPath`（`Programs.cs:1582-1593`）
+按 `/` 切分后把空段整个跳过，`/log` 与 `log` 都按「当前目录下的 log 子文件夹」解析。
+故清痕回显用的字面量是 `rm log/*`（不带前导斜杠）。
 
-- [Hacknet.wiki 参考文档](https://hacknet.wiki/llms.txt)：游戏本身的 Extension/脚本格式权威说明。
-  HackerScript 见 [reference/HackerScripts.md](https://hacknet.wiki/reference/HackerScripts.md)。
-  注意该引擎是 **NPC 用的**，没有提权动作且 `connect` 不设 `os.connectedComp` —— 详见 RESEARCH §15.2。
-- [Pathfinder 源码](https://github.com/Arkhist/Hacknet-Pathfinder)：框架 API 来源。本仓库 `upstream/` 有 clone（已被 git 忽略）。
+## 仓库文档
+
+- [README.md](README.md): 安装、面板与命令行用法、终端行为、架构、关键设计决策 #1–#4h、验证方式
+- [docs/RESEARCH.md](docs/RESEARCH.md): 源码级取证，§1–§16，每条结论都带 `文件:行号`
+- [llms.txt](llms.txt): 本文件
+
+## 源码
+
+- [src/AutoHack/HackEngine.cs](src/AutoHack/HackEngine.cs): 决策层 —— 目标解析、端口表、提权门槛、清痕
+- [src/AutoHack/HackRun.cs](src/AutoHack/HackRun.cs): 执行层 —— 动作序列、逐帧推进、指令回显
+- [src/AutoHack/HackScript.cs](src/AutoHack/HackScript.cs): 入侵脚本的解析与校验（`script=` 模式）
+- [src/AutoHack/HackPanel.cs](src/AutoHack/HackPanel.cs): 自绘控制面板
+- [src/AutoHack/HackOverlay.cs](src/AutoHack/HackOverlay.cs): 叠加层 —— patch `OS.Draw` / `OS.Update`
+- [src/AutoHack/HackTypes.cs](src/AutoHack/HackTypes.cs): 不可变数据 —— `HackOptions` / `HackStep`
+- [src/AutoHack/PendingRuns.cs](src/AutoHack/PendingRuns.cs): headless 运行的跨线程调度
+- [src/AutoHack/AutoHackPlugin.cs](src/AutoHack/AutoHackPlugin.cs): 插件入口与命令注册
+- [src/AutoHack/AutoHack.csproj](src/AutoHack/AutoHack.csproj): 构建配置（产物落点在此）
+
+## 可运行样例
+
+- [samples/stealth.txt](samples/stealth.txt): 不碰端口，只靠已知账密登入
+- [samples/brute.txt](samples/brute.txt): 硬破解，逐端口攻破 + 解防火墙
+- [samples/full.txt](samples/full.txt): 全套 —— 登入失败也照样破端口，最后投放标记
+
+## 外部参考
+
+- [Hacknet.wiki](https://hacknet.wiki/llms.txt): 游戏 Extension / 脚本格式的权威说明（站点自带 llms.txt 与 `.md` 版页面）
+- [HackerScripts 参考](https://hacknet.wiki/reference/HackerScripts.md): 游戏自带的 NPC 入侵脚本格式。**不能直接复用** —— 它没有提权动作，且 `connect` 不设 `os.connectedComp`，详见 RESEARCH §15.2
+- [Pathfinder 源码](https://github.com/Arkhist/Hacknet-Pathfinder): 框架 API 来源。本仓库 `upstream/` 有 clone（已被 git 忽略）
 
 ## Optional
 
-- [decompiled/](decompiled)：反编译产物（`game-proj/` 是游戏本体，`autohack-vNN/` 是各版本插件）。被 git 忽略。
-  版权物，不进版本库；重新生成见上面第 2 条。
-- [.cbmignore](.cbmignore)：codebase-memory 索引的排除规则。它把 `.gitignore` 一并当忽略源读，
-  故 `decompiled/` 与 `upstream/` 不进索引 —— 索引只覆盖 mod 自身源码，这是有意为之。
+- [decompiled/game-proj/](decompiled/game-proj): **游戏本体**反编译（360 文件）。RESEARCH 里大量 `文件:行号` 引用都指向它，是全部改动的依据 —— 与「不核对 mod 产物」无关，必须保留
+- [decompiled/pathfinder/](decompiled/pathfinder): PathfinderAPI 反编译（135 文件）
+- [decompiled/](decompiled): 另含各版本 mod 产物的反编译存档（`autohack-vNN/`）。**已废止核对，不再新增**；版权物，被 git 忽略
+- [.cbmignore](.cbmignore): codebase-memory 索引的排除规则。它把 `.gitignore` 一并当忽略源读，故 `decompiled/` 与 `upstream/` 不进索引 —— 索引只覆盖 mod 自身源码，这是有意为之

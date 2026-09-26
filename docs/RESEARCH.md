@@ -1964,3 +1964,48 @@ rm 不变量字符串 1（`:2193`）、`config` 取 `array2[3]`（`:2150-2152`�
 重复 `rm` 合法、拼错报行号、`config` 第 4 参生效、空脚本报 `no actions`。
 
 **未验证**：真机加载脚本、终端回显观感需真人进游戏确认。
+
+
+---
+
+## 16. 验证流程变更：只看产物 MD5，不再反编译核对
+
+**用户指令（v1.12.1 起生效）**：「以后不要反编译核对,只看MD五就好编译出来的文件在哪里？」
+
+### 16.1 产物路径
+
+```
+D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
+```
+
+由 `src/AutoHack/AutoHack.csproj:14-15` 写死，构建后**自动直投**，无需手动拷贝：
+
+```xml
+<HacknetDir Condition="'$(HacknetDir)' == ''">D:\steam\steamapps\common\Hacknet\</HacknetDir>
+<OutputPath>$(HacknetDir)BepInEx\plugins\</OutputPath>
+<AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+```
+
+同目录另有 `PathfinderAPI.dll`、`PathfinderUpdater.dll`、`HacknetHotReplace.dll`、
+`KernelFix.dll`（后两个非本插件产物）。
+
+### 16.2 新的核对流程
+
+1. `rm -rf src/AutoHack/obj src/AutoHack/bin` —— **不可省**。历史教训：增量缓存会
+   产出与上一版**同字节数**的假通过（`d897d5b` 那次就是这样被骗过的）。
+2. `dotnet build src/AutoHack/AutoHack.csproj -c Release -v q --nologo`，须 **0 警告 0 错误**。
+3. 记 `md5sum` + 字节数 + mtime，与上一版比对。
+
+**为什么这已足够**：构建成功本身即证明源码被编入 —— 清过缓存的完整重编，任何
+语法错、缺引用、类型不匹配都会直接失败。MD5 的作用收窄为「确认部署确实是新产物」
+（同一个 md5 出现两次就说明构建没真正生效，或源码没改到该改的地方）。
+
+### 16.3 废止的做法
+
+`ilspycmd -o decompiled/autohack-vNNN <dll>` 的逐项字符串计数核对**不再执行**。
+README 里 v1.7–v1.12.0 的九块反编译核对记录**转为历史存档**，不再是流程要求。
+它们的残留价值：那些行数与计数是当时产物的指纹，回溯「某版本编进去了什么」时可查。
+
+**注意**：`decompiled/game-proj/` 与 `decompiled/pathfinder/` 是**另一回事** ——
+那是**游戏与框架本体**的反编译，是本插件全部决策的依据来源（RESEARCH 里大量
+`文件:行号` 引用都指向它），**必须保留**，与「不再核对 mod 产物」无关。

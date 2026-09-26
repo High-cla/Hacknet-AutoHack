@@ -477,7 +477,24 @@ Pathfinder 用 `[HarmonyPrefix]` 接管了 `Computer.openPort(int, string)` 并 
 
 自检读的是游戏**自己的** `ProgramList.programs`（自动补全注册表，由 `CommandManager` 在注册自定义命令时填充）——命中即证明扫描链路完整，而非仅凭本插件自述。
 
-### 静态验证（反编译产物）
+### 验证方式
+
+**当前规矩（用户定）：只看产物 MD5，不做反编译核对。**
+
+| 项 | 值 |
+|---|---|
+| 产物路径 | `D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll` |
+| 当前版本 | v1.12.1 |
+| 字节数 | 65536 |
+| MD5 | `3d80c0bcfaf0c1fb0b898daf2309a830` |
+
+核对流程：清理 `obj`/`bin` → 构建（须 0 警告 0 错误）→ 记 `md5sum` 与字节数，
+与上一版比对。构建成功即证明源码已编入（增量缓存已清，漏编会报错）；
+MD5 只用于确认部署确实是新的那个产物。
+
+> 以下 v1.7–v1.12.0 的**反编译核对记录全部是历史存档**，反映当时的核对方式，
+> 不再作为流程要求。保留它们的价值在于：那些行数与计数是当时产物的指纹，
+> 若日后需要回溯「某版本究竟编进去了什么」仍可查。
 
 ```
 [BepInPlugin("com.highcla.autohack", "AutoHack", "1.12.1")]

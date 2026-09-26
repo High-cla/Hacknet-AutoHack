@@ -6,13 +6,21 @@
 
 ## 安装
 
-编译产物直接输出到游戏目录，无需手工拷贝：
+### 方式一：下载现成产物
+
+从 [Releases](https://github.com/High-cla/Hacknet-AutoHack/releases/latest) 取 `AutoHack.dll`，放进游戏的 `BepInEx/plugins/` 目录：
+
+```
+<Hacknet>/BepInEx/plugins/AutoHack.dll
+```
+
+### 方式二：从源码构建
+
+本仓库的构建配置会把产物**直接输出到游戏目录**，无需手工拷贝：
 
 ```
 D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
 ```
-
-构建：
 
 ```bash
 dotnet build src/AutoHack/AutoHack.csproj -c Release

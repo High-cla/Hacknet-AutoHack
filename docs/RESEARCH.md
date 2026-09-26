@@ -2153,3 +2153,97 @@ v1.12.2/v1.12.3 为定位「login 没跳过」曾临时加入三处诊断输出�
 
 **交付**：`AutoHack.dll` 66048 字节，MD5 `1f1630b978614e8020f72089fe7b115b`，
 版本 `1.13.0`，构建 0 警告 0 错误。
+
+## 19. HacknetSaveFix：修游戏本体的存档 NullReferenceException
+
+### 19.1 症状
+
+```
+[Error  :   Hacknet] Error writing save data for user :
+System.NullReferenceException
+   at Hacknet.PlatformAPI.Storage.SaveFileManager.GetSaveFileNameForUsername(String username) IL<0x0001>
+   at Hacknet.PlatformAPI.Storage.SaveFileManager.WriteSaveData(String saveData, String playerID) IL<0x0000>
+```
+
+注意 `for user :` 冒号后为空 —— 说明 `playerID` 是 null。
+
+### 19.2 根因链（全在游戏本体）
+
+```
+OS.cs:148        public string SaveUserAccountName = null;      ← 默认就是 null
+MainMenu.cs:103/150/235/315   ← 该字段只在这里被赋值
+OS.cs:1522       writeSaveGame(SaveUserAccountName)           ← 当文件名传下去
+OS.cs:1529       public void writeSaveGame(string filename)
+OS.cs:1548       SaveFileManager.WriteSaveData(text, filename)
+SaveFileManager.cs:238   GetSaveFileNameForUsername(playerID)
+SaveFileManager.cs:223   "save_" + FileSanitiser.purifyStringForDisplay(username).Replace("_","-").Trim() + ".xml"
+FileSanitiser.cs:9-12    if (data == null) { return null; }   ← 返回 null
+                         ↑ 紧接着的 .Replace 打在 null 上 → NRE
+```
+
+栈里的 `IL<0x0001>` 正是 `purifyStringForDisplay` 返回 null 后**第一句**取成员的位置。
+
+**触发条件**：任何**绕过主菜单**进入 OS 的入口。实测来源是用
+HacknetHotReplace 的默认配置直接连进扩展设备 —— 那条路径不经过 `MainMenu`，
+字段停在 null。
+
+### 19.3 为什么危险
+
+`WriteSaveData`（`SaveFileManager.cs:240-243`）把异常 catch 成一行错误日志：
+
+```csharp
+catch (Exception ex)
+{
+    Utils.AppendToErrorFile("Error writing save data for user : " + playerID + "\r\n" + Utils.GenerateReportFromException(ex));
+}
+```
+
+**游戏不崩，但存档静默失败** —— 玩家以为存了，实际没写盘。这是本次最值得修的点。
+
+顺带记一条游戏侧疏漏：`FileSanitiser.purifyStringForDisplay` 自己做了 null 防护
+（返回 null），但调用处直接链式取成员 `.Replace(...)`，防护形同虚设。
+
+### 19.4 修法（独立插件，不进 AutoHack）
+
+`src/SaveFix/`，产物 `HacknetSaveFix.dll`，与 AutoHack 零耦合，可单独装卸。
+
+```csharp
+[HarmonyPatch(typeof(SaveFileManager), nameof(SaveFileManager.GetSaveFileNameForUsername))]
+internal static class SaveFileNamePatch
+{
+    [HarmonyPrefix]
+    private static void Prefix(ref string username)
+    {
+        if (!string.IsNullOrWhiteSpace(username)) { return; }
+        username = Settings.isConventionDemo ? Settings.ConventionLoginName : Environment.UserName;
+    }
+}
+```
+
+**为什么用这套回落**：它与 `OS.cs:372` 逐字一致 ——
+
+```csharp
+username = ((SaveUserAccountName != null) ? SaveUserAccountName
+          : (Settings.isConventionDemo ? Settings.ConventionLoginName : Environment.UserName));
+username = FileSanitiser.purifyStringForDisplay(username);
+```
+
+即 `SaveUserAccountName` 为 null 时，`os.username` 正是由同一表达式算出的，
+所以落盘文件名与 `os.username` 保持一致 —— 不另立规则。
+
+两个字段的默认值不同，容易看错：
+- `OS.cs:146` `public string SaveGameUserName = "";`（**读**路径，`OS.cs:1457`）
+- `OS.cs:148` `public string SaveUserAccountName = null;`（**写**路径）
+
+只在真的兜底时打一条 `LogWarning`：这是异常路径，静默会把
+「有入口没设账号名」这件事藏起来。
+
+### 19.5 交付
+
+- 源码：`src/SaveFix/SaveFix.csproj` + `src/SaveFix/SaveFixPlugin.cs`
+- 产物：`<Hacknet>/BepInEx/plugins/HacknetSaveFix.dll`，5120 字节
+- MD5：`505df298c541768b0cc39a3d4d610806`
+- 依赖：仅 BepInEx + 0Harmony（**不需要** PathfinderAPI）
+- 构建：`rm -rf src/SaveFix/obj src/SaveFix/bin && dotnet build src/SaveFix/SaveFix.csproj -c Release` → 0 警告 0 错误
+- 反编译核对（本插件自身产物）：`[HarmonyPatch(typeof(SaveFileManager), "GetSaveFileNameForUsername")]`
+  + `Prefix(ref string username)` + 回落表达式一致

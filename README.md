@@ -663,6 +663,76 @@ HostileHackerBreakin           0    绝未引用剧情破坏序列（"systakeove
 
 > `refs/` 未入库。新克隆若同样缺目标包，安装 .NET Framework 4.7.2 Developer Pack 后删掉该属性即可；或自行准备同结构的 `refs/assemblies/netfx-all/`。
 
+## 附：HacknetSaveFix（独立插件）
+
+仓库里还有第二个**独立**插件 `src/SaveFix/`，产物 `HacknetSaveFix.dll`，
+修的是**游戏本体**的一个存档崩溃，与 AutoHack 无耦合，可单独安装/卸载。
+
+### 症状
+
+```
+[Error  :   Hacknet] Error writing save data for user :
+System.NullReferenceException
+   at Hacknet.PlatformAPI.Storage.SaveFileManager.GetSaveFileNameForUsername(String username) IL<0x0001>
+   at Hacknet.PlatformAPI.Storage.SaveFileManager.WriteSaveData(String saveData, String playerID) IL<0x0000>
+```
+
+### 根因（全在游戏本体）
+
+| # | 位置 | 事实 |
+|---|---|---|
+| 1 | `OS.cs:148` | `public string SaveUserAccountName = null;` —— 默认就是 null |
+| 2 | `MainMenu.cs:103/150/235/315` | 该字段**只在 MainMenu 构造 OS 时赋值** |
+| 3 | `OS.cs:1522` | `writeSaveGame(SaveUserAccountName)` 把它当文件名传下去 |
+| 4 | `SaveFileManager.cs:238` | `GetSaveFileNameForUsername(playerID)` |
+| 5 | `SaveFileManager.cs:223` | `purifyStringForDisplay(username).Replace("_","-").Trim()` |
+| 6 | `FileSanitiser.cs:9-12` | 对 null 输入**返回 null** → 紧接着的 `.Replace` 打在 null 上 |
+
+栈里的 `IL<0x0001>` 正是第 5、6 步那一句。错误信息 `for user :`（冒号后为空）
+也印证 `playerID` 是 null。
+
+**任何绕过主菜单进入 OS 的入口都会触发** —— 例如用 HacknetHotReplace 之类的工具
+直接连进设备、或经扩展直接起 OS。此时字段停在 null，保存必炸。
+
+`WriteSaveData` 把异常吞成一行错误日志（`SaveFileManager.cs:240-243`），
+**游戏不崩，但存档静默失败** —— 这是真正危险的地方。
+
+### 修法
+
+给崩溃点打一个 Harmony 前缀，把 null/空白用户名换成**游戏自己在 `OS.cs:372`
+用的同一套回落**，不另立规则：
+
+```csharp
+[HarmonyPatch(typeof(SaveFileManager), nameof(SaveFileManager.GetSaveFileNameForUsername))]
+internal static class SaveFileNamePatch
+{
+    [HarmonyPrefix]
+    private static void Prefix(ref string username)
+    {
+        if (!string.IsNullOrWhiteSpace(username)) { return; }
+        username = Settings.isConventionDemo ? Settings.ConventionLoginName : Environment.UserName;
+    }
+}
+```
+
+因为 `SaveUserAccountName` 为 null 时 `os.username` 正是由同一表达式算出
+（`OS.cs:372-373`，且已 purify），落盘文件名与 `os.username` 保持一致。
+
+只在真的兜底时打一条 `LogWarning` —— 这是异常路径，静默会把
+「有入口没设账号名」这件事藏起来。
+
+### 构建与产物
+
+```bash
+rm -rf src/SaveFix/obj src/SaveFix/bin
+dotnet build src/SaveFix/SaveFix.csproj -c Release
+```
+
+产物落点同 AutoHack：`<Hacknet>/BepInEx/plugins/HacknetSaveFix.dll`。
+5120 字节，MD5 `505df298c541768b0cc39a3d4d610806`。
+
+不依赖 PathfinderAPI，只需 BepInEx + 0Harmony。
+
 ## 调研资料
 
 - `docs/RESEARCH.md` — 完整调研：原生机制、API 精确签名、陷阱

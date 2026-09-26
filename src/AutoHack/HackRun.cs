@@ -43,6 +43,10 @@ internal sealed class HackRun
     private float _timer;
 
     /// <summary>本次运行中靠已知凭据登入（即已提权）的机器，其破端口类步骤整体跳过。</summary>
+    /// <summary>诊断日志。BepInEx 日志里能直接读到，不必靠肉眼盯终端。</summary>
+    private static readonly BepInEx.Logging.ManualLogSource Diag =
+        BepInEx.Logging.Logger.CreateLogSource("AutoHack");
+
     private readonly HashSet<Computer> _loggedIn = new();
 
     /// <summary>本次运行的入侵脚本；null = 用内置次序。构造期已解析完成。</summary>
@@ -62,6 +66,14 @@ internal sealed class HackRun
         SkippedOwned = plan.SkippedOwned;
         SkippedHopeless = plan.SkippedHopeless;
         _steps = BuildSteps(_targets, plan.Skipped, options, os, _script);
+        Diag.LogInfo("[autohack] plan: targets=" + _targets.Count
+            + " skipped=" + (SkippedOwned + SkippedHopeless)
+            + " owned=" + SkippedOwned
+            + " hopeless=" + SkippedHopeless
+            + " steps=" + _steps.Count
+            + " creds=" + Options.UseCredentials
+            + " loginSteps=" + _steps.FindAll(st => st.Kind == HackStepKind.Login).Count
+            + " speed=" + Options.Speed);
         Current = _targets.Count > 0 ? _targets[0].name : "-";
         Phase = "ENGAGING";
     }
@@ -167,6 +179,15 @@ internal sealed class HackRun
             return Options.PortDelay;
         }
 
+        // 清痕是纯内存操作（ClearLogs 只做 List 清空 + deleteFile 遍历，
+        // 无磁盘 IO、无 Thread.Sleep），且每台至多回显一行摘要 ——
+        // 没有需要人眼跟上的逐条节奏。故不吃节流：一整屏机器同帧抹完。
+        // 单帧步数仍受 MaxStepsPerFrame 约束，不会失控。
+        if (kind == HackStepKind.CleanLogs)
+        {
+            return 0f;
+        }
+
         // 脚本自带 delay 行时以它为准（游戏 HackerScript 的 config 第 4 参同义），
         // 否则回到 speed 档位 —— 两者正交：档位管「多快」，脚本管「什么次序」。
         if (_script?.StepDelay is { } scripted)
@@ -224,7 +245,18 @@ internal sealed class HackRun
                     // 「adminIP 已是我们」这个更宽的判据，否则 redo 模式
                     // （重打已控节点）会连端口都不破，改变其语义。
                     _loggedIn.Add(target);
-                    os.write("[autohack] " + target.name + " :: admin via login (" + credential + ") - skipping port cracks");
+
+                    var okLine = "[autohack] " + target.name + " :: admin via login (" + credential + ") - skipping port cracks";
+                    os.write(okLine);
+                    Diag.LogInfo(okLine + " | " + HackEngine.CredentialReport(target));
+                }
+                else
+                {
+                    // 静默失败等于把问题藏起来：登录没成时必须说清是哪一项前提不成立。
+                    var why = HackEngine.CredentialReport(target);
+                    var failLine = "[autohack] " + target.name + " :: login unavailable (" + why + ")";
+                    os.write(failLine);
+                    Diag.LogInfo(failLine);
                 }
 
                 break;
@@ -459,6 +491,17 @@ internal sealed class HackRun
             Outcomes.Add(new TargetOutcome(target.name, opened, ports, owned));
             os.write("[autohack] " + target.name + " :: " + opened + "/" + ports
                 + " ports, admin=" + (owned ? "yes" : "no"));
+        }
+
+        if (_targets.Count == 0)
+        {
+            // 目标为 0 是最容易被误读的状态：终端仍会逐台打清痕行，
+            // 看着像「每台都重跑了一遍」，实际每台只抹了 log。
+            // 必须把原因和出路直接写出来。
+            os.write("[autohack] No targets: all " + (SkippedOwned + SkippedHopeless)
+                + " reachable node(s) were filtered out ("
+                + SkippedOwned + " already owned, " + SkippedHopeless + " cannot escalate).");
+            os.write("[autohack]   'redo' re-hacks owned nodes; 'allnodes' sweeps the whole map.");
         }
 
         if (SkippedOwned > 0)

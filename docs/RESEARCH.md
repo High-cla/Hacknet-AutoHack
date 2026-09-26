@@ -2009,3 +2009,120 @@ README 里 v1.7–v1.12.0 的九块反编译核对记录**转为历史存档**�
 **注意**：`decompiled/game-proj/` 与 `decompiled/pathfinder/` 是**另一回事** ——
 那是**游戏与框架本体**的反编译，是本插件全部决策的依据来源（RESEARCH 里大量
 `文件:行号` 引用都指向它），**必须保留**，与「不再核对 mod 产物」无关。
+
+## 17. v1.12.3：清痕不吃节流；targets=0 必须说明原因
+
+### 17.1 清痕的耗时构成（用户问「能否异步多线程提速」）
+
+结论先行：**慢的不是清痕，是节流；多线程既无收益也有害。**
+
+`ClearLogs`（`src/AutoHack/HackEngine.cs`）实际动作只有两件：
+
+```csharp
+var folderPath = new List<int> { root.folders.IndexOf(logFolder) };
+comp.deleteFile(ipFrom, "*", folderPath);   // 纯内存：遍历 List + Remove
+if (logFolder.files.Count > 0) { logFolder.files.Clear(); }   // 兜底
+```
+
+- **无磁盘 IO**：`Computer.files` 是内存里的 `FileSystem` 对象，存档写盘由游戏自己的
+  `SaveGame` 负责，与此无关。
+- **无 `Thread.Sleep`**：`Programs.rm`（`Programs.cs:948-1034`）每文件有
+  `for j in 0..min(max(size/1000,3),26) { Thread.Sleep(200); }` 的动画，本插件
+  **刻意不走它**，只调它内部真正的那一句 `deleteFile`（`Programs.cs:1024`）。
+- **无网络**：`deleteFile` 里 `sendNetworkMessage` 受 `os.multiplayer` 门禁，单机不发。
+- **连自写日志都没有**：`deleteFile` 唯一写 log 处是
+  `if (name[0] != '@') { log("FileDeleted: by " + ipFrom + " - file:" + name); }`
+  （`Computer.cs:543`），而 `/log` 文件名恒以 `@` 开头
+  （`Computer.log` 用 `"@" + (int)OS.currentElapsedTime + " " + message` 再空格换下划线，
+  `Computer.cs:337-355`）—— 条件不成立，被豁免。
+
+所以真正的耗时是 `HackRun.Tick` 里的：
+
+```csharp
+var delay = DelayFor(step.Kind);
+if (_timer < delay) { return; }      // Normal 档 = 0.35 s/步
+```
+
+Normal 档下：11 台跳过机 3.85 s；`allnodes` ~158 台 55 s；正常入侵 110 台 38.5 s。
+**全部是等出来的。**
+
+### 17.2 为什么不用多线程
+
+1. **没有可并行的东西** —— 耗时是人为等待而非计算，开线程后每个线程仍要等同样的时长。
+2. **会踩游戏主线程状态** —— `Computer.files` / `deleteFile` 被游戏每帧读（存档、GUI 遍历），
+   跨线程写即数据竞争。v1.8.0 已因此产生真实缺陷（`Collection was modified`），
+   并由此确立「不引入 async/await、不跨线程，靠每帧步进（协程等价物）」的规矩（§11.1）。
+3. **收益为零、风险为存档损坏** —— 不成比例。
+
+### 17.3 改法
+
+`DelayFor` 中对 `CleanLogs` 返回 `0f`：
+
+```csharp
+if (kind == HackStepKind.CleanLogs) { return 0f; }
+```
+
+理由：清痕没有需要人眼跟上的逐条回显（每台至多一行摘要），不该吃节流。
+单帧步数仍由 `MaxStepsPerFrame = 512` 兜底，不会因一次涌入几百步而卡帧。
+`OpenPort` 不受影响，仍按 `Options.PortDelay` 走 —— 那是逐条端口回显的节奏来源，
+唯一有意义的等待。
+
+`INSTANT` 档本也能达成同样效果，但它会连带把 `probe`/`login`/`porthack` 的节奏
+一起打掉；本次只解锁清痕，两者正交可叠加。
+
+### 17.4 targets=0 的误读（真实发生的 UX 缺陷）
+
+实测 `LogOutput.log`：
+
+```
+plan: targets=1 skipped=10 steps=21 creds=True loginSteps=1 speed=Normal
+网络教育档案馆 :: admin via login (admin) - skipping port cracks | users=1 known=1 adminPass=set seclevel=6 ports=1
+plan: targets=0 skipped=11 steps=11 creds=True  loginSteps=0 speed=Fast
+plan: targets=0 skipped=11 steps=11 creds=True  loginSteps=0 speed=Instant
+plan: targets=0 skipped=11 steps=11 creds=False loginSteps=0 speed=Instant   ...（共 10 次）
+```
+
+第一行证明 **login 成功且端口被跳过**；`creds=True` 与 `creds=False` 的结果完全相同，
+说明差异不在凭据上。
+
+真因：用户可达的 11 台机器**全部已归玩家**（`adminIP` 指向自己），
+`skip owned`（默认开）把它们过滤干净 → `targets=0` → 没有登录步骤可建
+（`loginSteps=0`）。那 `steps=11` 是 v1.11.1 的「被跳过的机器照样清痕」，
+**每台只抹了 log**，却因为逐台在终端滚出机器名，被读成「每台都重跑了一遍流程」。
+
+修法：`HackRun.Finish` 在 `_targets.Count == 0` 时直接写明原因与出路 ——
+
+```
+[autohack] No targets: all N reachable node(s) were filtered out (X already owned, Y cannot escalate).
+[autohack]   'redo' re-hacks owned nodes; 'allnodes' sweeps the whole map.
+```
+
+### 17.5 失败静默也是缺陷
+
+登录分支原本是：
+
+```csharp
+if (HackEngine.TryLogin(target, out var credential)) { /* 打印成功 */ }
+break;      // 失败分支什么都不打印
+```
+
+失败静默把「为什么没跳过」这条最有价值的信息藏了起来，直接导致本次误判。
+现改为打印 `login unavailable (<诊断>)`，并经 `Diag.LogInfo` 落进 BepInEx 日志：
+
+```
+[autohack] <机器名> :: login unavailable (users=5 known=1 adminPass=set seclevel=5 ports=4)
+```
+
+`HackEngine.CredentialReport` 摊开全部前提：`users` 条数、其中 `known` 条数、
+`adminPass` 是否为空、`securityLevel`、可破端口数。
+
+同时运行计划记一行，便于事后从日志还原：
+`plan: targets=… skipped=… owned=… hopeless=… steps=… creds=… loginSteps=… speed=…`
+
+### 17.6 交付
+
+- 产物：`D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll`
+- 67072 字节，MD5 `51cfa993824f6d5978ddcb6886a06d90`
+- 构建：`rm -rf src/AutoHack/obj src/AutoHack/bin && dotnet build src/AutoHack/AutoHack.csproj -c Release`
+  → 0 警告 0 错误
+- 版本：`AutoHackPlugin.cs` 的 `[BepInPlugin]` → `1.12.3`

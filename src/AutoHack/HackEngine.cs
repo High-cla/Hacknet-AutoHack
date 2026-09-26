@@ -183,6 +183,25 @@ internal static class HackEngine
 
     /// <param name="credential">回传命中的账号名，供终端说明用了哪组凭据。</param>
     /// <returns>是否登录成功（成功即已提权）。</returns>
+    /// <summary>登录为什么没成的诊断串 —— 登录失败会静默，这里把前提条件摊开。</summary>
+    internal static string CredentialReport(Computer comp)
+    {
+        if (comp == null) { return "no target"; }
+        if (comp.users == null) { return "users=null adminPass=" + (comp.adminPass == null ? "null" : "set"); }
+
+        var known = 0;
+        foreach (var user in comp.users)
+        {
+            if (user.known) { known++; }
+        }
+
+        return "users=" + comp.users.Count
+            + " known=" + known
+            + " adminPass=" + (comp.adminPass == null ? "null" : "set")
+            + " seclevel=" + comp.securityLevel
+            + " ports=" + Ports(comp).Count;
+    }
+
     internal static bool TryLogin(Computer comp, out string credential)
     {
         credential = null;

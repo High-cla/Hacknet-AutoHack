@@ -89,101 +89,6 @@ autohack -h                                     # 帮助
 > 差额是「可以直接敲 IP 连上、但不在连线上」的机器 —— `Programs.connect` 遍历的是
 > `netMap.nodes` 全表，本来就不检查 `links`（见「关键设计决策」#4c）。
 
-### 脚本模式（`script=`）
-
-一份纯文本动作表，决定每个目标按什么次序被打。文件放 `Content/HackerScripts/`，
-按名字引用即可（`.txt` 可省；本项目在 `samples/` 带了三份可直接拷用）。
-格式沿用游戏自己的 HackerScript 写法 —— 每行一个动作，行尾 `$#%## AutoHack — Hacknet 全自动入侵 Mod
-
-仓库：<https://github.com/High-cla/Hacknet-AutoHack> · 许可：[MIT](LICENSE)
-
-基于 Hacknet + Pathfinder 的自动入侵插件，带**交互式控制面板**。**优先使用游戏原生机制**：每个动作都先把对应指令回显进终端，再走原生 API（`Programs.connect` / `Computer.openPort` / `Computer.giveAdmin` / `makeFile`）执行，行为与真人敲 `connect` / `probe` / `sshcrack 22` / `porthack` 一致。四个游戏机制被显式处理：**管理员反扑**（断开时 `disconnectionDetected` 会关端口并把 `adminIP` 还原成机器自己，故离开前先解除反扑）、**跳板**（`proxyActive` 会拦下破解程序，先过载绕过）、**追踪**（`TraceTracker` 只在连着被追踪目标时推进，跑完即 `dc` 中止）、以及**肉鸡复用**（全网扫描默认跳过 `adminIP` 已是玩家的节点）。
-
-## 安装
-
-### 方式一：下载现成产物
-
-从 [Releases](https://github.com/High-cla/Hacknet-AutoHack/releases/latest) 取 `AutoHack.dll`，放进游戏的 `BepInEx/plugins/` 目录：
-
-```
-<Hacknet>/BepInEx/plugins/AutoHack.dll
-```
-
-### 方式二：从源码构建
-
-本仓库的构建配置会把产物**直接输出到游戏目录**，无需手工拷贝：
-
-```
-D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
-```
-
-```bash
-dotnet build src/AutoHack/AutoHack.csproj -c Release
-```
-
-## 使用
-
-游戏终端里输入 `autohack` 打开**控制面板**（再输一次关闭）：
-
-```
-autohack                                        # 开关控制面板
-autohack run [here] [delay=秒] [stay] [redo] [nologs] [nomark] [direct]   # 不开面板，直接执行
-autohack run script=stealth                     # 用脚本决定入侵次序（见下）
-autohack -h                                     # 帮助
-```
-
-### 面板
-
-面板浮在游戏画面右下角，**全部自绘**（不用游戏原生 `Button`/`CheckBox`/`SliderBar`），鼠标直接操作。拖动标题栏可移到任意位置，`-` 收起为一条状态栏，`x` 关闭。
-
-| 控件 | 作用 |
-|---|---|
-| `NETWORK SWEEP` / `CURRENT NODE` | 目标范围：沿网络连线可达的服务器 / 仅当前连接节点 |
-| `whole map` | 全网扫描口径：勾选 = 地图全表（含不在连线上的机器），缺省不勾 = 沿连线广度优先 |
-| `PORT INTERVAL` 滑条 | 每个端口的破解间隔，`0.05`–`5` 秒，默认 `0.6`；支持滚轮微调，`≤0.15` 时数值转为警示色 |
-| `wipe logs` | 是否在执行后清空目标日志 |
-| `connect first` | 每个目标先 `connect` 再动手（缺省开） |
-| `upload marker` | 是否上传 `~/autohack.txt` 标记（缺省**关**） |
-| `use known creds` | 用已知账密登入目标（缺省**开**）—— 成功即提权，跳过全部破端口 |
-| `NORMAL` / `FAST` / `INSTANT` | 推进节奏：非端口步保留真人间隔（0.35s）/ 压到 0.05s / 合并到**同一帧** |
-| `anti-trace dc` | 每个目标跑完 `dc`：追踪只在连着目标时推进，断开即中止（缺省开） |
-| `skip owned nodes` | 全网扫描时跳过已拿下的肉鸡，不重复入侵（缺省开） |
-| — | 永远提不了权的机器（端口表容量 ≤ `portsToCrack`）在全网扫描时一律跳过，见下 |
-| `RUN` | 按当前设置执行 |
-
-执行期间面板切换为进度视图：阶段 + 百分比、分段进度条、当前目标与动作计数，下方滚动显示逐目标战果。完成后显示 `LAST RUN` 与 `RUN AGAIN`。
-
-**为什么自绘而不是用原生控件**（三条都实测过）：
-
-1. `CheckBox.doCheckBox(id, x, y, on, color, text)` 只在 `GuiData.hot == id` 时才画文字（`Hacknet.Gui/CheckBox.cs:55-59`）——**标签平时不可见**，这是旧面板显脏的主因。
-2. 原生 `Button` 用 `tinyfont`（Font10）并自动缩放塞进按钮（`Button.cs:96-110`），字号与间距不可控；自绘统一用 `smallfont`（Font12）加显式缩放系数，得到 0.9 / 1.0 / 1.1 / 1.3 四级字号阶梯。
-3. 原生 `Button` 在宽度 > 65 时会额外画一条 13px 颜色标签条，与紧凑面板风格冲突。
-
-配色（`highlightColor` / `terminalTextColor`）**取自 `OS` 当前主题**，换主题时面板跟随，不会与游戏自身 UI 撞色。
-
-输入是模态的：`OS.Draw` 的 **Prefix** 在正文绘制前检查光标是否落在 `HackPanel.LastFrame` 内，是则置 `GuiData.blockingInput = true`。必须用 Prefix —— 正文里的游戏控件在 `Draw` 期间就消费输入，Postfix 已经太晚；只在光标位于面板上时抢占，面板之外照常操作游戏。
-
-### 命令行参数（`autohack run` 时）
-
-| 参数 | 说明 |
-|---|---|
-| `here` | 仅当前已连接的节点（缺省 = 沿网络连线可达的服务器） |
-| `delay=秒` | 每个端口的破解间隔，默认 `0.6`，范围 **`0.02`**–`5` |
-| `nologs` | 不清除目标日志 |
-| `nomark` | 不上传标记文件（**已是缺省**） |
-| `mark` | 上传标记文件 |
-| `allnodes` | 全网扫描改扫地图全表，不再只沿连线展开 |
-| `creds` / `nocreds` | 用 / 不用已知账密登入（**缺省用**；`nocreds` 强制走破解） |
-| `instant` / `fast` / `slow` | 节奏档位：非端口步同帧连跑 / 0.05s / 0.35s（**缺省 slow**） |
-| `direct` | 跳过 connect / probe，直接就地破解（不再回显这两条指令） |
-| `stay` | 跑完**不**断开连接（缺省断开 = 回显并执行 `dc`，可中止追踪） |
-| `redo` | 全网扫描时**连已控节点一起重打**（缺省跳过肉鸡及永远提不了权的机器） |
-| `script=文件` | 用一份**动作表**取代内置次序（见「脚本模式」） |
-
-> `allnodes` 与缺省口径的差额实测（同一存档 147 节点）：沿连线广度优先 **7** 个目标，地图全表 **110** 个。
-> 差额是「可以直接敲 IP 连上、但不在连线上」的机器 —— `Programs.connect` 遍历的是
-> `netMap.nodes` 全表，本来就不检查 `links`（见「关键设计决策」#4c）。
-
  可写可不写，
 `#` 开头是注释（游戏本身没有注释语法，这里补一个，是唯一比游戏宽松的地方）：
 
@@ -463,14 +368,78 @@ Pathfinder 用 `[HarmonyPrefix]` 接管了 `Computer.openPort(int, string)` 并 
   `PendingRuns` 另有一层 `catch` 兜底 —— 异常抛进 Harmony Postfix 会打断
   `OS.Update` 的整条补丁链。
 
+#### 4i. 清痕不吃节流；目标为 0 必须说明原因（v1.12.3）
+
+**清痕提速（用户提问：能否异步多线程？—— 答：不能，也不需要）。**
+清痕慢的原因不是 IO 也不是 CPU，而是 `Tick` 里每步 0.35 秒的节流等待。
+`ClearLogs` 本身是纯内存操作：`logFolder.files.Clear()` + `comp.deleteFile` 遍历 List，
+**无磁盘 IO、无 `Thread.Sleep`、无网络**（`sendNetworkMessage` 仅多人对局发），
+且 log 文件名恒以 `@` 开头，`deleteFile` 里那条 `log("FileDeleted: ...")` 自写被豁免。
+故开线程收益为零 —— 每个线程仍要等同样的 0.35 秒。
+
+**多线程是错的方向**：`Computer.files` / `deleteFile` 是游戏主线程的活状态，
+游戏每帧都在读（存档、GUI 遍历），跨线程改即数据竞争。v1.8.0 已因此栽过
+（`Collection was modified`），本项目由此确立「不引入 async/await、不跨线程，
+靠每帧步进（协程等价物）」的规矩（见 §11.1）。
+
+**改法**：`DelayFor` 中 `CleanLogs` 返回 `0f` —— 清痕没有需要人眼跟上的逐条回显
+（每台至多一行摘要），不该吃节流。单帧步数仍由 `MaxStepsPerFrame = 512` 兜底。
+端口破解不受影响（`OpenPort` 仍按 `delay` 走，那是唯一有意义的等待）。
+
+| 场景 | 改前 | 改后 |
+|---|---|---|
+| 11 台跳过机（Normal） | 3.85 s | ~0（同帧抹完） |
+| `allnodes` ~158 台 | 55 s | ~0 |
+| 正常入侵 110 台 | 38.5 s | ~0 |
+
+注意 `INSTANT` 档本也能达成同样效果，但它会连带把 `probe`/`login`/`porthack`
+的回显节奏一起打掉；本次只解锁清痕，两者可叠加。
+
+**目标为 0 时必须说明原因。** 实测日志显示：用户网络里可达节点全部已归玩家后，
+`plan: targets=0 skipped=11 steps=11`，而终端仍逐台滚出机器名（跳过机的清痕步）
+—— 极易被读成「每台都重跑了一遍流程」，进而误判为「login 没跳过步骤」。
+`Finish` 现在会直接写明原因与出路：
+
+```
+[autohack] No targets: all 11 reachable node(s) were filtered out (11 already owned, 0 cannot escalate).
+[autohack]   'redo' re-hacks owned nodes; 'allnodes' sweeps the whole map.
+```
+
+同时登录失败不再静默（此前 `if (TryLogin(...)) { ... }` 失败分支什么都不打印，
+把问题藏了起来），改为打印 `login unavailable (<users=N known=M adminPass=set seclvl=S ports=P>)`，
+并经 `Diag.LogInfo` 落进 BepInEx 日志以便直接读取。运行计划也记一行：
+`plan: targets=... skipped=... owned=... hopeless=... steps=... creds=... loginSteps=... speed=...`。
+
 ## 验证
+
+### v1.12.3 验证（只看产物 MD5）
+
+| 项 | 值 |
+|---|---|
+| 产物 | `<Hacknet>/BepInEx/plugins/AutoHack.dll` |
+| 字节数 | 67072 |
+| MD5 | `51cfa993824f6d5978ddcb6886a06d90` |
+| 构建 | `rm -rf src/AutoHack/obj src/AutoHack/bin && dotnet build ... -c Release` → 0 警告 0 错误 |
+
+改动两处，均为「节流与可观测性」：`DelayFor` 中 `CleanLogs` 返回 `0f`；
+`Finish` 在 `_targets.Count == 0` 时写明原因与出路；`TryLogin` 失败不再静默。
+
+**实测日志（`BepInEx/LogOutput.log`）确证 login 正常工作：**
+
+```
+plan: targets=1 skipped=10 steps=21 creds=True loginSteps=1 speed=Normal
+网络教育档案馆 :: admin via login (admin) - skipping port cracks | users=1 known=1 adminPass=set seclevel=6 ports=1
+```
+
+随后 10 次运行全部 `targets=0 skipped=11` —— 可达节点已全数归玩家，
+被 `skip owned` 过滤。`loginSteps=0` 是**因为没有目标**，不是登录失效。
 
 ### 加载顺序与注册（实测日志）
 
 ```
 [Info : BepInEx] Loading [AutoUpdater 5.3.4]
 [Info : BepInEx] Loading [PathfinderAPI 5.3.4]   ← Pathfinder 先，安装属性扫描 hook
-[Info : BepInEx] Loading [AutoHack 1.12.1]        ← 本插件后，能被扫描到
+[Info : BepInEx] Loading [AutoHack 1.12.3]        ← 本插件后，能被扫描到
 [Info : AutoHack] AutoHack loaded (GUI).
 [Info : AutoHack] self-check OK: 'autohack' is registered and autocompletes.
 ```
@@ -484,9 +453,10 @@ Pathfinder 用 `[HarmonyPrefix]` 接管了 `Computer.openPort(int, string)` 并 
 | 项 | 值 |
 |---|---|
 | 产物路径 | `D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll` |
-| 当前版本 | v1.12.1 |
+| 当前版本 | v1.12.3 |
 | 字节数 | 65536 |
-| MD5 | `3d80c0bcfaf0c1fb0b898daf2309a830` |
+| MD5 | `51cfa993824f6d5978ddcb6886a06d90` |
+| 字节数 | 67072 |
 
 核对流程：清理 `obj`/`bin` → 构建（须 0 警告 0 错误）→ 记 `md5sum` 与字节数，
 与上一版比对。构建成功即证明源码已编入（增量缓存已清，漏编会报错）；
@@ -497,7 +467,7 @@ MD5 只用于确认部署确实是新的那个产物。
 > 若日后需要回溯「某版本究竟编进去了什么」仍可查。
 
 ```
-[BepInPlugin("com.highcla.autohack", "AutoHack", "1.12.1")]
+[BepInPlugin("com.highcla.autohack", "AutoHack", "1.12.3")]
 [Command("autohack", true, false)]
 
 Echo:   os.write("\n" + os.terminal.prompt + command);

@@ -1418,3 +1418,60 @@ RUN
 **待真人验证**：面板 `SPEED` 三档与 `use known creds` 的点击手感；
 INSTANT 档下终端刷屏观感；`login` 在真实目标上是否如期打印
 `admin via login (admin)` 并跳过破端口。
+
+### 14.10 清痕不受跳过影响（v1.11.1 修正）
+
+**用户指令**：「清理log改成不受跳过影响」。
+
+**根因**：`ResolveTargets` 的两处剔除直接 `continue`，被剔除的机器
+既不进 `result`，也就**不生成任何步骤** —— 包括 `CleanLogs`：
+
+```csharp
+if (options.SkipOwned && IsOwned(comp, os))
+{
+    skippedOwned++;
+    continue;          // ← 连清痕也一并免了
+}
+```
+
+注意 `IsRedundantAfterLogin` **不含** `CleanLogs`（只跳过
+`BypassProxy` / `OpenPort` / `SolveFirewall` / `Escalate`），
+所以 login 那条路径的清痕本来就是好的；本次问题**只在目标层剔除**这一处。
+
+**问题性质**：「跳过入侵」与「放过证据」是两回事。这些机器此前进过、破过、侦察过，
+`/log` 里躺着痕迹，恰恰是**最该清**的一批 —— 已控机器上的玩家痕迹最多。
+
+**改法**：剔除时登记，末尾补步。
+
+```csharp
+skipped.Add(comp);     // 两处剔除分支各一行
+// ...
+return new TargetPlan(result, skipped, skippedOwned, skippedHopeless);
+```
+
+`BuildSteps` 在**全部正常步骤之后**补：
+
+```csharp
+if (options.ClearLogs)
+{
+    foreach (var comp in skipped)
+    {
+        steps.Add(new HackStep(HackStepKind.CleanLogs, comp, default, null));
+    }
+}
+```
+
+**为什么排在最后**：正常流程不会再碰这些机器，此刻清是终点动作，
+不会有新记录再追加进来（对比 §12.3：正常目标的清痕必须排在 `dc` 之后，
+同样是为了「清完不再有人写」这个不变量）。
+
+**边界**：`disabled` 机器与玩家自己**不进** `Skipped` —— 既没打过，也不该碰。
+对无痕迹的机器幂等：`ClearLogs` 返回空列表，不产生任何输出。
+
+**顺带的结构收敛**：`ResolveTargets` 原本返回 `IReadOnlyList<Computer>` 并带两个
+`out int` 参数，现在改为返回 `TargetPlan` 记录结构。三个返回值本就是同一份
+解析的产出，装进一个结构才符合单一职责，调用侧也少两个 `out`。
+
+反编译核对（`decompiled/autohack-v111/AutoHack.decompiled.cs`，2169 行）：
+`list2.Add` 在 :452 与 :458 各一次（两处剔除）、`in skipped` 1（补步循环）、
+`HackStepKind.CleanLogs, item2` 1（补的正是清痕步）、`out int skippedOwned` 0（已随签名删除）。

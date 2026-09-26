@@ -103,10 +103,12 @@ autohack -h                                     # 帮助
 | `10.0.0.5@> dc` | 断开前先 `Computer.admin = null`，再 `Programs.disconnect`（原生）。**同时**解除延迟反扑与中止追踪：前者见下，后者因 `TraceTracker.Update` 见 `connectedComp == null` 立刻置 `active = false` |
 | `[autohack] trace killed - timer stopped.` | `TraceTracker.stop()` —— 直接毙掉追踪（非指令，故无回显）。断开已让它失效，这步是确定性的兜底 |
 | `10.0.0.5@> rm /log/Connection:_from_10.0.0.1` | 逐条抹除该目标的 `/log` 文件。因断开自身会追加一条记录，清痕排在 `dc` **之后**，此时已不在目标上，故改为一行状态：`[autohack] <名> :: wiped 3 log file(s)` |
+| `[autohack] <名> :: wiped 3 log file(s)` | 被 `skip owned`／无望过滤**剔除**的机器同样清痕 —— 「跳过入侵」不等于「放过证据」。无痕迹时静默跳过 |
 | `[autohack] <名> :: proxy bypassed` | 跳板解除（非指令，故无回显） |
 | `[autohack] <名> :: 3/5 ports, admin=yes` | 收尾战果行（非指令） |
 
 > **顺序是刻意的**：提权、上传、**以及断开连接**都会向 `/log` 追加记录（`Computer.disconnecting` 写 `"<玩家IP> Disconnected"`，`Computer.cs:722-727`），所以清痕必须排在本目标的**最后**（`dc` 之后），否则痕迹残留。
+> 被剔除的机器（已控／无望）没有入侵步骤可排，其清痕步统一追加在**全部正常步骤之后** —— 此刻不会再有人碰它们，清就是终点动作，不会有新记录再追加进来。
 > 破解指令名取自游戏数据（`PortExploits.cracks`），显示端口取自框架端口表（`PortState.PortNumber`），均不硬编码。
 >
 > **跳板**：目标 `proxyActive` 时，`OS.addExe` 会拦下所有 `needsProxyAccess` 的破解程序（`Proxy Active -- Cannot Execute`），破解必然失败。解除方式是把 `proxyOverloadTicks` 收敛到 0、`proxyActive` 置 false —— 与原生 `ShellExe` 过载跑完的终态逐字节相同（`ShellExe.cs:96-99`），但**不等**那 30 秒。
@@ -128,6 +130,7 @@ autohack -h                                     # 帮助
 [autohack] skipped 5 node(s) already owned - 'redo' to include them.
 ```
 
+- **跳过只免掉「入侵动作」，不免掉清痕**：被剔除的机器仍会抹掉 `/log`（那里面是此前侦察与入侵留下的痕迹），末尾统一清，无痕迹则静默。
 - `here` 与显式点名的目标**不过滤** —— 那是刻意的选择，且重打已控节点本身是合法用法（重放、重置状态）。
 - 想连肉鸡一起重扫：CLI 加 `redo`，或关掉面板的 `skip owned nodes`。
 
@@ -230,6 +233,21 @@ Pathfinder 用 `[HarmonyPrefix]` 接管了 `Computer.openPort(int, string)` 并 
 并用 `MaxStepsPerFrame = 512` 兜住极端规模（110 目标 × ~10 步 ≈ 1100 步，
 分 3 帧跑完，不会一帧卡死）。被跳过的步骤也计入 `Done`，进度条才走得准。
 
+**4f. 分类剔除的目标仍要清痕（v1.11.1 修正）。**
+`ResolveTargets` 的两处剔除（已控、端口表撑不到门槛）原先直接 `continue`，被剔除的机器
+根本不进目标列表 —— **连清痕也一并免了**。但「跳过入侵」与「放过证据」是两回事：
+这些机器此前进过、破过、侦察过，`/log` 里躺着痕迹。
+
+改法：剔除时登记进 `TargetPlan.Skipped`，`BuildSteps` 在**全部正常步骤之后**
+为它们各补一个 `CleanLogs` 步。排在最后是因为正常流程不会再碰这些机器，
+此刻清是终点动作，不会有新记录再追加进来。
+
+- 只有 `disabled` 机器与玩家自己不进 `Skipped` —— 既没打过，也不该碰（后者的"痕迹"就是玩家自己的操作史）。
+- 对没有痕迹的机器是幂等的：`ClearLogs` 返回空列表，不产生任何输出。
+- `ResolveTargets` 的返回值从 `IReadOnlyList<Computer>` + 两个 `out` 参数
+  改为 `TargetPlan` 记录结构（`Targets` / `Skipped` / `SkippedOwned` / `SkippedHopeless`）——
+  三个并行返回值本就是同一份解析的产出，收进一个结构才符合单一职责。
+
 **5. 跳板收敛到终态，追踪直接毙掉。**
 两者性质不同，处置也必须不同。
 - **跳板（`proxyActive`）**：把 `proxyOverloadTicks` 置 0、`proxyActive` 置 false —— 与 ShellExe 过载跑满的终态（`ShellExe.cs:96-99`）逐字节相同。游戏**没有**更快的路径：终端 `ComShell.exe -o` 启动的就是同一个逐帧扣减的 ShellExe，跑满要 `BASE_PROXY_TICKS = 30f` 秒（`Computer.cs:27`）。跳过等待无副作用 —— 全游戏 12 处 `AchievementsManager.Unlock` 里唯一与追踪相关的是 `TraceTracker.cs:70` 的 `trace_close`，与跳板无关（v1.5 曾误判「跳过会丢成就」，v1.7 已订正）。**唯一刻意不重演**的是过载循环里那句 `hostileActionTaken()`（`ShellExe.cs:105`）：它不参与跳板失效，只负责点燃追踪。
@@ -250,7 +268,7 @@ Pathfinder 用 `[HarmonyPrefix]` 接管了 `Computer.openPort(int, string)` 并 
 ```
 [Info : BepInEx] Loading [AutoUpdater 5.3.4]
 [Info : BepInEx] Loading [PathfinderAPI 5.3.4]   ← Pathfinder 先，安装属性扫描 hook
-[Info : BepInEx] Loading [AutoHack 1.11.0]        ← 本插件后，能被扫描到
+[Info : BepInEx] Loading [AutoHack 1.11.1]        ← 本插件后，能被扫描到
 [Info : AutoHack] AutoHack loaded (GUI).
 [Info : AutoHack] self-check OK: 'autohack' is registered and autocompletes.
 ```
@@ -260,7 +278,7 @@ Pathfinder 用 `[HarmonyPrefix]` 接管了 `Computer.openPort(int, string)` 并 
 ### 静态验证（反编译产物）
 
 ```
-[BepInPlugin("com.highcla.autohack", "AutoHack", "1.11.0")]
+[BepInPlugin("com.highcla.autohack", "AutoHack", "1.11.1")]
 [Command("autohack", true, false)]
 
 Echo:   os.write("\n" + os.terminal.prompt + command);
@@ -278,6 +296,7 @@ Speed:   DelayFor(kind) -> Normal 0.35s / Fast 0.05s / Instant 0；端口步恒�
 Owned:   comp.adminIP == os.thisComputer.ip                                  // 肉鸡判定
 Hopeless: Ports(comp).Count <= comp.portsNeededForCrack                      // 永远开不满 -> 跳过
 Clean:   root.searchForFolder("log").files.Clear()  -> 回显 "rm /log/<名>"（连着时）
+Skipped: TargetPlan.Skipped -> 被剔除的机器在全部正常步骤之后补 CleanLogs（清痕不受跳过影响）
 Proxy:   HackEngine.BypassProxy(target) -> proxyOverloadTicks = 0f; proxyActive = false  // 同 ShellExe 过载终态
 Neutral: HackEngine.SuppressCounterattack(target) -> comp.admin = null             // 断开前解除反扑
 Trace:   os.traceTracker.stop() -> active = false; trackSpeedFactor = 1f           // 直接毙掉，零每帧开销
@@ -368,6 +387,18 @@ MaxStepsPerFrame              1       同帧步数上限 512，防一帧卡死
 NormalStepDelay 0.35f / FastStepDelay 0.05f / MinPortDelay 0.02f
 _skipPortsFor                 0       被 _loggedIn 取代（按运行内实际命中登记，更精确）
 UISmallfont / doButton / hostileActionTaken / Thread.Sleep   0 / 0 / 0 / 0
+```
+
+v1.11.1 反编译产物逐项核对（`decompiled/autohack-v111/AutoHack.decompiled.cs`，2169 行）：
+
+```
+TargetPlan                   5    目标解析结果（Targets/Skipped/SkippedOwned/SkippedHopeless）
+ResolveTargets(OS, HackOptions)  1   签名收敛为单参返回，取代 IReadOnlyList + 两个 out
+list2.Add                    2    两处剔除各登记一次（:452 已控 / :458 无望）
+in skipped                   1    BuildSteps 末尾为被剔除机器补步
+HackStepKind.CleanLogs, item2  1  补的正是清痕步，排在全部正常步骤之后
+out int skippedOwned         0    已随签名收敛删除
+UISmallfont / doCheckBox / hostileActionTaken / Thread.Sleep   0 / 0 / 0 / 0
 ```
 
 ### 未验证

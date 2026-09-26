@@ -375,19 +375,27 @@ internal static class HackEngine
     }
 
     /// <summary>
+    /// 目标解析结果。<see cref="Targets"/> 是要入侵的机器；<see cref="Skipped"/>
+    /// 是被剔除、但仍会被清痕的机器 —— 它们的 /log 里留着此前侦察与入侵的痕迹，
+    /// 不因「跳过入侵」而豁免清痕。
+    /// </summary>
+    internal readonly record struct TargetPlan(
+        List<Computer> Targets,
+        List<Computer> Skipped,
+        int SkippedOwned,
+        int SkippedHopeless);
+
+    /// <summary>
     /// 解析目标集合，按可行性与「是否已拿下」过滤。目标串走框架查找表。
     /// 两类剔除只作用于「全网扫描」；<c>here</c> 与显式点名是刻意选择，一律尊重。
-    /// <paramref name="skippedOwned"/> 与 <paramref name="skippedHopeless"/>
-    /// 分别回传「已控」与「永远提不了权」的机器数，供终端报数。
+    /// 被剔除的机器登记进 <see cref="TargetPlan.Skipped"/> 以便补清痕 ——
+    /// 只有 <c>disabled</c> 机器与玩家自己不计入（既没打过，也不该碰）。
     /// </summary>
-    internal static IReadOnlyList<Computer> ResolveTargets(
-        OS os, HackOptions options, out int skippedOwned, out int skippedHopeless)
+    internal static TargetPlan ResolveTargets(OS os, HackOptions options)
     {
-        skippedOwned = 0;
-        skippedHopeless = 0;
         if (os == null)
         {
-            return Array.Empty<Computer>();
+            return new TargetPlan([], [], 0, 0);
         }
 
         var pool = options.Scope switch
@@ -402,6 +410,9 @@ internal static class HackEngine
 
         var sweep = options.Scope == HackScope.Network;
         var result = new List<Computer>(pool.Length);
+        var skipped = new List<Computer>();
+        var skippedOwned = 0;
+        var skippedHopeless = 0;
 
         // 用哈希集去重，而不是 List.Contains：显式目标串可能重复点名，
         // 而全网遍历的池本身已去重，两者都需要 O(1) 判重。
@@ -419,6 +430,7 @@ internal static class HackEngine
                 if (options.SkipOwned && IsOwned(comp, os))
                 {
                     skippedOwned++;
+                    skipped.Add(comp);
                     continue;
                 }
 
@@ -428,6 +440,7 @@ internal static class HackEngine
                 if (!CanEverEscalate(comp) && !(options.UseCredentials && HasAnyCredential(comp)))
                 {
                     skippedHopeless++;
+                    skipped.Add(comp);
                     continue;
                 }
             }
@@ -438,7 +451,7 @@ internal static class HackEngine
             }
         }
 
-        return result;
+        return new TargetPlan(result, skipped, skippedOwned, skippedHopeless);
     }
 
     /// <summary>

@@ -46,11 +46,12 @@ internal sealed class HackRun
     internal HackRun(OS os, HackOptions options)
     {
         Options = options;
-        _targets = new List<Computer>(
-            HackEngine.ResolveTargets(os, options, out var skippedOwned, out var skippedHopeless));
-        SkippedOwned = skippedOwned;
-        SkippedHopeless = skippedHopeless;
-        _steps = BuildSteps(_targets, options, os);
+
+        var plan = HackEngine.ResolveTargets(os, options);
+        _targets = plan.Targets;
+        SkippedOwned = plan.SkippedOwned;
+        SkippedHopeless = plan.SkippedHopeless;
+        _steps = BuildSteps(_targets, plan.Skipped, options, os);
         Current = _targets.Count > 0 ? _targets[0].name : "-";
         Phase = "ENGAGING";
     }
@@ -426,10 +427,12 @@ internal sealed class HackRun
     /// 展开动作序列：连接 → 侦察 → 解跳板 → 逐端口攻破 → 提权 → 投放 → 清痕 → 断开。
     /// 清痕必须最后（提权与投放都会向 /log 追加记录），断开更在其后。
     /// 已连接的节点不再重复 connect（那会先断开再重连，徒增噪音）。
+    /// <paramref name="skipped"/> 是被剔除的机器，只在末尾追加清痕。
     /// </summary>
-    private static List<HackStep> BuildSteps(List<Computer> targets, HackOptions options, OS os)
+    private static List<HackStep> BuildSteps(
+        List<Computer> targets, IReadOnlyList<Computer> skipped, HackOptions options, OS os)
     {
-        var steps = new List<HackStep>(targets.Count * 10);
+        var steps = new List<HackStep>((targets.Count + skipped.Count) * 10);
 
         foreach (var target in targets)
         {
@@ -491,6 +494,18 @@ internal sealed class HackRun
             if (options.ClearLogs)
             {
                 steps.Add(new HackStep(HackStepKind.CleanLogs, target, default, null));
+            }
+        }
+
+        // 被剔除的机器照样清痕：它们此前进过、破过、侦察过，/log 里留着痕迹，
+        // 「跳过入侵」不等于「放过证据」。排在全部正常步骤之后 —— 正常流程不会再碰
+        // 这些机器，此刻清是终点动作，不会有新记录再追加进来。
+        // 对没有痕迹的机器是幂等的：ClearLogs 返回空列表，不产生任何输出。
+        if (options.ClearLogs)
+        {
+            foreach (var comp in skipped)
+            {
+                steps.Add(new HackStep(HackStepKind.CleanLogs, comp, default, null));
             }
         }
 

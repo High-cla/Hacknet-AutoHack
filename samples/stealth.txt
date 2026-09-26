@@ -1,0 +1,6 @@
+# 隐蔽模式：不碰端口，只靠已知账密登入，进门即清痕。
+# connect / neutralize / killtrace 由 AutoHack 自动补，不必写。
+probe $#%#$
+login $#%#$
+rm $#%#$
+dc $#%#$

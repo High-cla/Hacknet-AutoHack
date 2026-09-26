@@ -45,15 +45,23 @@ internal sealed class HackRun
     /// <summary>本次运行中靠已知凭据登入（即已提权）的机器，其破端口类步骤整体跳过。</summary>
     private readonly HashSet<Computer> _loggedIn = new();
 
+    /// <summary>本次运行的入侵脚本；null = 用内置次序。构造期已解析完成。</summary>
+    private readonly HackScript _script;
+
     internal HackRun(OS os, HackOptions options)
     {
         Options = options;
+
+        // 脚本在构造期解析一次：语法错/文件缺失在这里抛出，由调用方转成终端可见
+        // 的错误行。放进 Tick 会让错误每帧重复，放进 BuildSteps 会让「目标为空」
+        // 与「脚本坏了」两种情况混在一起。
+        _script = string.IsNullOrEmpty(options.Script) ? null : HackScript.Load(options.Script);
 
         var plan = HackEngine.ResolveTargets(os, options);
         _targets = plan.Targets;
         SkippedOwned = plan.SkippedOwned;
         SkippedHopeless = plan.SkippedHopeless;
-        _steps = BuildSteps(_targets, plan.Skipped, options, os);
+        _steps = BuildSteps(_targets, plan.Skipped, options, os, _script);
         Current = _targets.Count > 0 ? _targets[0].name : "-";
         Phase = "ENGAGING";
     }
@@ -159,6 +167,13 @@ internal sealed class HackRun
             return Options.PortDelay;
         }
 
+        // 脚本自带 delay 行时以它为准（游戏 HackerScript 的 config 第 4 参同义），
+        // 否则回到 speed 档位 —— 两者正交：档位管「多快」，脚本管「什么次序」。
+        if (_script?.StepDelay is { } scripted)
+        {
+            return scripted;
+        }
+
         return Options.Speed switch
         {
             HackSpeed.Instant => 0f,
@@ -216,7 +231,7 @@ internal sealed class HackRun
 
             case HackStepKind.Probe:
                 Phase = "PROBING " + Upper(target.name);
-                Echo(os, "probe");
+                Echo(os, step.Command ?? "probe");
                 foreach (var line in HackEngine.ProbeReport(target))
                 {
                     os.write(line);
@@ -239,7 +254,7 @@ internal sealed class HackRun
             case HackStepKind.Escalate:
                 Phase = "ESCALATING";
 
-                Echo(os, "porthack");
+                Echo(os, step.Command ?? "porthack");
 
                 // 只用 giveAdmin，不用 os.takeAdmin(ip)：后者内部还会 runCommand("connect " + ip)
                 // （OS.cs:1871-1879），而 connect 的第一件事就是无条件断开旧连接
@@ -268,7 +283,7 @@ internal sealed class HackRun
                 var onTarget = os.connectedComp == target;
                 if (onTarget)
                 {
-                    Echo(os, "rm /log/*");
+                    Echo(os, step.Command ?? "rm /log/*");
                 }
 
                 var wiped = HackEngine.ClearLogs(target, os.thisComputer.ip);
@@ -464,12 +479,19 @@ internal sealed class HackRun
     /// <paramref name="skipped"/> 是被剔除的机器，只在末尾追加清痕。
     /// </summary>
     private static List<HackStep> BuildSteps(
-        List<Computer> targets, IReadOnlyList<Computer> skipped, HackOptions options, OS os)
+        List<Computer> targets, IReadOnlyList<Computer> skipped, HackOptions options, OS os,
+        HackScript script)
     {
         var steps = new List<HackStep>((targets.Count + skipped.Count) * 10);
 
         foreach (var target in targets)
         {
+            if (script != null)
+            {
+                AppendScripted(steps, target, script, options, os);
+                continue;
+            }
+
             var alreadyConnected = ReferenceEquals(target, os.connectedComp);
             if (options.ConnectFirst && !alreadyConnected)
             {
@@ -547,4 +569,110 @@ internal sealed class HackRun
 
         return steps;
     }
+
+    /// <summary>
+    /// 按脚本给一个目标展开动作。脚本只描述「怎么打」，目标与源机由 scope 解析
+    /// —— 游戏 HackerScript 的 <c>config</c> 行同时指定目标与源机，但那是给 NPC
+    /// 用的（它的 connect 走 cConnection，目标机视角），对玩家终端无意义。
+    ///
+    /// 前置始终补三步（脚本不必写、写了也会去重）：<c>connect</c>（未连接时）、
+    /// <c>neutralize</c>（解除管理员反扑，否则断开后 0~20 秒肉鸡标记丢失）、
+    /// 末尾的 <c>killtrace</c>（零开销兜底）。这三步是正确性要求而非风格偏好，
+    /// 交给玩家手写只会漏。
+    /// </summary>
+    private static void AppendScripted(
+        List<HackStep> steps, Computer target, HackScript script, HackOptions options, OS os)
+    {
+        var emitted = new HashSet<HackStepKind>();
+        var connected = ReferenceEquals(target, os.connectedComp);
+
+        // 连接与解除反扑是前置条件，不是脚本可选项 —— 见方法注释。
+        // 但 direct 模式（ConnectFirst=false）下玩家可能就是要靠脚本自己连，
+        // 故那种情况不登记 connect，把决定权留给脚本。
+        var connectRequired = options.ConnectFirst;
+        if (connectRequired && !connected)
+        {
+            steps.Add(new HackStep(HackStepKind.Connect, target, default, "connect " + target.ip));
+            emitted.Add(HackStepKind.Connect);
+        }
+
+        steps.Add(new HackStep(HackStepKind.Neutralize, target, default, null));
+        emitted.Add(HackStepKind.Neutralize);
+
+        foreach (var action in script.Actions)
+        {
+            // connect 已被前置步骤登记过时（ConnectFirst 模式），脚本里再写就跳过。
+            if (action.Kind == HackStepKind.Connect)
+            {
+                if (connected || !emitted.Add(HackStepKind.Connect))
+                {
+                    continue;
+                }
+
+                steps.Add(new HackStep(HackStepKind.Connect, target, default, "connect " + target.ip));
+                continue;
+            }
+
+            // OpenPort 可重复（逐端口展开）。CleanLogs 也可重复 —— 它对空 /log
+            // 是幂等的（ClearLogs 返回空列表、不输出），而「证据必须消失」是硬承诺，
+            // 让玩家写两次就多清一次比静默吞掉第二个更符合预期。
+            // 其余动作改的是游戏状态，重复出现只取首次。
+            if (action.Kind is not (HackStepKind.OpenPort or HackStepKind.CleanLogs) &&
+                !emitted.Add(action.Kind))
+            {
+                continue;
+            }
+
+            if (action.Kind == HackStepKind.OpenPort)
+            {
+                foreach (var step in ExpandPorts(target, action.Port))
+                {
+                    steps.Add(step);
+                }
+
+                continue;
+            }
+
+            steps.Add(new HackStep(action.Kind, target, default, CommandFor(action.Kind)));
+        }
+
+        // 兜底反追踪：与内置次序同理，脚本没写也要有 —— 断开已让它失效，
+        // 这一步覆盖「脚本以 stay 结尾」与「最后一步之后才被点燃」的窗口。
+        if (emitted.Add(HackStepKind.KillTrace))
+        {
+            steps.Add(new HackStep(HackStepKind.KillTrace, target, default, null));
+        }
+    }
+
+    /// <summary>
+    /// 展开 <c>openPort</c> 动作。<paramref name="portNumber"/> 为 0 = 该目标上全部
+    /// 有原生破解程序的端口；否则只挑匹配的那一个（按显示端口号比对，与玩家在终端里
+    /// 敲的 <c>sshcrack 22</c> 同一个数）。指定的端口不存在或不含破解程序时展开为空 ——
+    /// 不臆造步骤。
+    /// </summary>
+    private static IEnumerable<HackStep> ExpandPorts(Computer target, int portNumber)
+    {
+        foreach (var port in HackEngine.CrackablePorts(target))
+        {
+            if (portNumber != 0 && port.DisplayPort != portNumber && port.CodePort != portNumber)
+            {
+                continue;
+            }
+
+            yield return new HackStep(HackStepKind.OpenPort, target, port, HackEngine.CrackCommand(port));
+        }
+    }
+
+    /// <summary>
+    /// 脚本动作对应的终端回显原文；返回 null 表示由 Apply 的分支自行处理
+    /// （<c>Connect</c> 拼 ip、<c>OpenPort</c> 用破解程序名、其余非终端指令一律不回显）。
+    /// </summary>
+    private static string CommandFor(HackStepKind kind) => kind switch
+    {
+        HackStepKind.Disconnect => "dc",
+        HackStepKind.Escalate => "porthack",
+        HackStepKind.Probe => "probe",
+        HackStepKind.CleanLogs => "rm /log/*",
+        _ => null,
+    };
 }

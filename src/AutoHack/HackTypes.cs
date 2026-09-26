@@ -41,7 +41,8 @@ internal sealed record HackOptions(
     bool SkipOwned,
     bool AllNodes,
     bool UseCredentials,
-    HackSpeed Speed)
+    HackSpeed Speed,
+    string Script)
 {
     internal const float DefaultPortDelay = 0.6f;
 
@@ -68,6 +69,12 @@ internal sealed record HackOptions(
     private static readonly string[] FastAliases = ["fast", "quick"];
     private static readonly string[] InstantAliases = ["instant", "turbo", "sameframe"];
 
+    /// <summary>
+    /// 脚本模式：用一份动作表取代内置次序。<c>script=&lt;文件名&gt;</c>，
+    /// 文件按游戏的加载前缀解析（扩展目录或 Content/），详见 <see cref="HackScript"/>。
+    /// </summary>
+    private const string ScriptPrefix = "script=";
+
     internal static HackOptions Parse(IReadOnlyList<string> args)
     {
         var ids = new List<string>();
@@ -81,6 +88,7 @@ internal sealed record HackOptions(
         var allNodes = false;
         var useCredentials = true;
         var speed = HackSpeed.Normal;
+        string script = null;
 
         foreach (var raw in args ?? Array.Empty<string>())
         {
@@ -114,6 +122,17 @@ internal sealed record HackOptions(
                 continue;
             }
 
+            if (lower.StartsWith(ScriptPrefix, StringComparison.Ordinal))
+            {
+                var name = token.Substring(ScriptPrefix.Length).Trim();
+                if (name.Length > 0)
+                {
+                    script = name;
+                }
+
+                continue;
+            }
+
             ids.Add(token);
         }
 
@@ -124,7 +143,7 @@ internal sealed record HackOptions(
 
         return new HackOptions(
             scope, ids, delay, clearLogs, uploadMarker, connectFirst, disconnect, skipOwned, allNodes,
-            useCredentials, speed);
+            useCredentials, speed, script);
     }
 }
 

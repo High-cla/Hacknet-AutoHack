@@ -1751,3 +1751,187 @@ if (!flag && !silent && !ipFrom.Equals(adminIP) && !ipFrom.Equals(ip)) { return 
 | `connectedComp.silent = true` | 1 | 静默断开 |
 | `Deleting ` | 1 | 战果摘要行 |
 | `UISmallfont` / `doCheckBox` / `hostileActionTaken` / `Thread.Sleep` | 0/0/0/0 | 禁项清白 |
+
+---
+
+## 15. v1.12：脚本驱动入侵（script=）
+
+### 15.1 起点：游戏自己的 HackerScript 能不能用
+
+用户给了官方参考页 `https://hacknet.wiki/reference/HackerScripts`。逐条核实后结论是
+**语法可借、执行器不可借**。
+
+HackerScript 是游戏内置的**对手黑客引擎**，由 `<LaunchHackScript>` 标签
+（`SALaunchHackScript.cs:70`）触发，读取 `Content/HackerScripts/*.txt`，在名为
+`OpposingHackerThread` 的后台线程上跑（`HackerScriptExecuter.cs:46`）。格式：
+
+```
+config [目标电脑ID] [源电脑ID] [每行延迟] $#%#$
+[行为类型] [...参数] $#%#$
+```
+
+`$#%#$` 是必须的分隔符（`splitDelimiter = " $#%#$\r\n"`，`HackerScriptExecuter.cs:13`）；
+官方**没有注释语法** —— wiki 原话是「没有对应命令的行就不会执行」。
+
+### 15.2 三条否决理由（逐条查源码）
+
+**① 没有提权动作。** `HackerScriptExecuter.executeThreadedScript` 的全部 case
+（`:81`–`:356`，共 28 个）里没有 `porthack`、没有 `giveAdmin`。唯一的「接管」是
+`systakeover`（`:161`）→ `HostileHackerBreakinSequence.Execute`，而该类会往
+**真实磁盘**写 `Documents/My Games/Hacknet/Libs/Injected/VMBootloaderTrap.dll` +
+`OpenCMD.bat` + `VM_Recovery_Guide.txt`（`HostileHackerBreakinSequence.cs:13-21`），
+是剧情级破坏序列 —— 绝不可用于自动入侵。
+
+**② `connect` 不驱动玩家终端。** `case "connect"`（`:120-127`）走
+`Multiplayer.parseInputMessage(getBasicNetworkCommand("cConnection", computer, computer2), os)`
+→ `Multiplayer.cs:53-64` 的 `comp.connect(array[2])`。这是**目标机视角**：
+目标机记录「有人从源 IP 连进来」，**完全不设 `os.connectedComp`**。
+对照游戏自带脚本 `Content/HackerScripts/TrackSequence.txt`：`config playerComp [SOURCE_COMP] 0.2`
+—— 目标就是玩家机，源才是攻击者。它是 NPC 引擎，驱动不了玩家。
+
+**③ `os.ActiveHackers` 的唯一写入点由此确认。** `config` 分支里
+`os.ActiveHackers.Add(...)`（`HackerScriptExecuter.cs:111`，在 `:417` 移除）。
+这补上了 v1.10 的一个悬案：`Computer.forkBombClients` 只遍历 `os.ActiveHackers`，
+而它只由 `HackerScriptExecuter` 填充 ⇒ ShellExe 的 Trap 对普通追踪无效 —— 当初
+「不实现 shell/Trap」的决策得到二次确认。
+
+### 15.3 但它给了两条有用的东西
+
+**（a）行式语法 + `config` 的延迟语义**。`config` 第 4 个参数是每行间隔
+（`timeout = TimeSpan.FromSeconds(Convert.ToDouble(array[3]))`，`:108`），
+每个动作末尾 `Thread.Sleep(timeout)`（`:412`）。AutoHack 的脚本沿用它，这样
+手写的动作表与游戏脚本的节奏直觉一致。
+
+**（b）静默变更的官方写法 —— 印证 v1.11.3。** `HackerScriptExecuter` 的所有状态变更
+都经 `Multiplayer.parseInputMessage`，而 `Multiplayer.cs` 里 **16 处** 都是同一模式：
+
+```csharp
+comp.silent = true;
+comp.<操作>(...);
+comp.silent = false;
+```
+
+涉及 `cConnection`(:61-63) `cDisconnect`(:69-71) `cAdmin`(:77-79) `cPortOpen`(:84-86)
+`cPortClose`(:91-93) `cFile`(:98-100) `cDelete`(:125-127) `cMake`(:141-143) 等。
+v1.11.3 给 `Leave` 加的静默断开是**游戏自己的标准做法**，逐字吻合。
+
+顺带读清 `silent` 的真实作用域：它**只**抑制 `sendNetworkMessage`
+（`Computer.cs:276`：`if (os.multiplayer && !silent)`，头部自带 `os.multiplayer` 门禁），
+**不**抑制 `log()`。故它在单机对清痕零影响，加它的意义只在多人对局不吞掉
+`cDisconnect` 同步。
+
+### 15.4 动作集：自己的，不是游戏的
+
+脚本动作映射到 `HackStepKind`，与内置次序共用同一套执行器：
+
+| 脚本动作 | 别名 | HackStepKind | 终端回显 |
+|---|---|---|---|
+| `connect` | `c` | `Connect` | `connect <ip>` |
+| `neutralize` | `anticounter` `noadmin` | `Neutralize` | 无（改游戏状态） |
+| `probe` | `p` | `Probe` | `probe` |
+| `login` | `creds` | `Login` | `login` |
+| `proxy` | `bypass` `overload` | `BypassProxy` | 无 |
+| `openPort [n]` | `crack` `port` | `OpenPort` | `<破解程序> <端口>` |
+| `solve` | `firewall` `analyze` | `SolveFirewall` | `solve <解>` |
+| `porthack` | `escalate` `admin` | `Escalate` | `porthack` |
+| `mark` | `upload` `marker` | `UploadMarker` | 无 |
+| `rm` | `clean` `wipe` `logs` | `CleanLogs` | `rm /log/*` |
+| `dc` | `disconnect` | `Disconnect` | `dc` |
+| `killtrace` | `stoptrace` `trace` | `KillTrace` | 无 |
+
+游戏有、AutoHack 没有的 26 个动作单列在 `HackScript.UnsupportedVerbs`，错误信息据此
+区分「这是游戏 NPC 动作，此处没有对应物」与「拼错了」—— 否则玩家拿自己那份
+在游戏里明明有效的脚本过来，只会看到一句莫名的「未知动作」。
+
+### 15.5 三个恒定补上的动作
+
+脚本不必写、写了也会去重：
+
+1. **`connect`**（仅 `ConnectFirst && !alreadyConnected` 时）—— `direct` 模式下不补，
+   把决定权留给脚本。
+2. **`neutralize`** —— 不解除反扑，断开后 0~20 秒
+   `BasicAdministrator.disconnectionDetected` 会把 `adminIP` 还原成机器自己，
+   肉鸡标记当场丢失。
+3. **`killtrace`** —— 兜底反追踪，覆盖「脚本以 `stay` 结尾」与「最后一步之后才被点燃」
+   的窗口。
+
+这三条是**正确性要求而非风格偏好**：交给玩家手写，漏一个是必然的。
+
+### 15.6 `rm` 早于 `dc` 的不变量
+
+违反即拒绝整份脚本（`HackScript.Validate`）。判据是「每个 `rm` 之前是否存在
+**未被 `connect` 抵消**的 `dc`」：
+
+```csharp
+var connected = true;
+foreach (var action in actions)
+{
+    switch (action.Kind)
+    {
+        case HackStepKind.Connect:    connected = true;  break;
+        case HackStepKind.Disconnect: connected = false; break;
+        case HackStepKind.CleanLogs when !connected:
+            throw new FormatException(...);
+    }
+}
+```
+
+不用「最后一个 `dc`」这种粗判 —— 那会把合法的 `dc / connect / rm`（rm 作用于新建立的
+连接）误拒。这是 §14.12 结论的可执行化：既然 `rm` 的作用域是当前连接，那么
+「断开之后清痕」就不该是能静默失败的东西，而该在解析期就拦住。
+
+### 15.7 解析细节
+
+- **`config` 行**取第 4 个参数作间隔，其余（目标 ID、源机 ID）整个忽略 ——
+  目标由 `scope` 解析（`here`/`network`/`allnodes`/显式），与脚本正交。
+  脚本只描述「怎么打」，不描述「打谁」。
+- **`openPort` 不带端口号** = 走 `HackEngine.CrackablePorts`，即该目标上全部
+  「有原生破解程序且未攻破」的端口。与内置次序同一数据源，不在脚本里硬编码端口。
+  带号时按**显示端口**与**原始端口**双匹配（与玩家在终端敲的 `sshcrack 22` 同一个数）。
+- **`CleanLogs` 允许重复**：它对空 `/log` 幂等（`ClearLogs` 返回空列表、不输出），
+  而「证据必须消失」是硬承诺，玩家写两次多清一次比静默吞掉第二个更符合预期。
+- **文件解析顺序**：原样路径 → `<加载前缀>/HackerScripts/<名>`（本地化版优先）
+  → 加 `.txt` 再试一遍 → 直接 `<加载前缀>/<名>`。`Utils.GetFileLoadPrefix()` 在
+  扩展模式下返回扩展目录、否则 `Content/`，故放在 `Content/HackerScripts/` 的脚本
+  能直接按名字引用。
+
+### 15.8 错误处理：边界前置 + 兜底
+
+脚本在**入队前**解析一遍（`AutoHackPlugin`），语法错当场报出行号与原因，
+报错即 `return`，不入队。`PendingRuns.OnOSUpdate` 另有一层 `catch` 兜底 ——
+那里是 Harmony Postfix，异常抛出去会打断 `OS.Update` 的整条补丁链。
+
+```csharp
+catch (Exception ex) when (ex is FormatException or IOException or UnauthorizedAccessException)
+{
+    __instance.write("[autohack] Script error: " + ex.Message);
+    Pending.TryRemove(__instance, out _);
+    return;
+}
+```
+
+过滤器只捕这三类（预期内的用户输入错误），其余照常抛出 —— 不吞未知异常。
+
+### 15.9 逐帧推进仍然复用
+
+脚本不引入新的执行模型：`BuildSteps` 产出同一种 `List<HackStep>`，
+`Tick`/`Apply`/`DelayFor` 原样工作。唯一的接触点是 `DelayFor` ——
+脚本自带 `delay` 行时以它为准，否则回到 `speed` 档位。两者正交：
+档位管「多快」，脚本管「什么次序」。
+
+### 15.10 验证
+
+反编译 `decompiled/autohack-v120/AutoHack.decompiled.cs`（2501 行）逐项核对：
+`"1.12.0"` 1、`"1.11."` 0、`class HackScript` 1、`Vocabulary` 3、
+`UnsupportedVerbs` 2、`AppendScripted`/`ExpandPorts`/`CommandFor` 各 2、
+`_script` 4、`StepDelay` 5、`script=` 5、`Script { get` 1、`Script error` 2、
+rm 不变量字符串 1（`:2193`）、`config` 取 `array2[3]`（`:2150-2152`）。
+禁项 `UISmallfont`/`doCheckBox`/`hostileActionTaken`/`Thread.Sleep` 全 0，
+`HostileHackerBreakin` 0（`systakeover` 仅出现在 `UnsupportedVerbs` 字面量里，`:2076`）。
+
+解析语义另用 Node 复刻同一算法做了边界表测试：
+自家三份脚本、游戏自带两份（`TrackSequence.txt` → `flash` 被识别为 NPC 动作、
+`ThemeHack.txt` → `delete`）、`dc/connect/rm` 合法、`dc→rm` 拒绝、
+重复 `rm` 合法、拼错报行号、`config` 第 4 参生效、空脚本报 `no actions`。
+
+**未验证**：真机加载脚本、终端回显观感需真人进游戏确认。

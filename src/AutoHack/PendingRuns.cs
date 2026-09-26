@@ -51,7 +51,19 @@ internal static class PendingRuns
         // 首次推进时才构造：把「读游戏状态并可能回写」的动作全部留在游戏线程。
         if (entry.Run == null)
         {
-            var run = new HackRun(__instance, entry.Options);
+            HackRun run;
+            try
+            {
+                run = new HackRun(__instance, entry.Options);
+            }
+            catch (Exception ex) when (ex is FormatException or IOException or UnauthorizedAccessException)
+            {
+                // 兜底：插件入口已前置校验过一次。这里是「别把异常抛进 Harmony
+                // Postfix」的护栏 —— 抛出去会打断 OS.Update 的整条补丁链。
+                __instance.write("[autohack] Script error: " + ex.Message);
+                Pending.TryRemove(__instance, out _);
+                return;
+            }
 
             if (run.Total == 0)
             {

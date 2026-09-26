@@ -1,0 +1,10 @@
+# 全套：登入失败也照样破端口，最后投放标记。
+probe $#%#$
+login $#%#$
+proxy $#%#$
+openPort $#%#$
+solve $#%#$
+porthack $#%#$
+mark $#%#$
+rm $#%#$
+dc $#%#$

@@ -33,6 +33,7 @@ dotnet build src/AutoHack/AutoHack.csproj -c Release
 ```
 autohack                                        # 开关控制面板
 autohack run [here] [delay=秒] [stay] [redo] [nologs] [nomark] [direct]   # 不开面板，直接执行
+autohack run script=stealth                     # 用脚本决定入侵次序（见下）
 autohack -h                                     # 帮助
 ```
 
@@ -82,10 +83,146 @@ autohack -h                                     # 帮助
 | `direct` | 跳过 connect / probe，直接就地破解（不再回显这两条指令） |
 | `stay` | 跑完**不**断开连接（缺省断开 = 回显并执行 `dc`，可中止追踪） |
 | `redo` | 全网扫描时**连已控节点一起重打**（缺省跳过肉鸡及永远提不了权的机器） |
+| `script=文件` | 用一份**动作表**取代内置次序（见「脚本模式」） |
 
 > `allnodes` 与缺省口径的差额实测（同一存档 147 节点）：沿连线广度优先 **7** 个目标，地图全表 **110** 个。
 > 差额是「可以直接敲 IP 连上、但不在连线上」的机器 —— `Programs.connect` 遍历的是
 > `netMap.nodes` 全表，本来就不检查 `links`（见「关键设计决策」#4c）。
+
+### 脚本模式（`script=`）
+
+一份纯文本动作表，决定每个目标按什么次序被打。文件放 `Content/HackerScripts/`，
+按名字引用即可（`.txt` 可省；本项目在 `samples/` 带了三份可直接拷用）。
+格式沿用游戏自己的 HackerScript 写法 —— 每行一个动作，行尾 `$#%## AutoHack — Hacknet 全自动入侵 Mod
+
+仓库：<https://github.com/High-cla/Hacknet-AutoHack> · 许可：[MIT](LICENSE)
+
+基于 Hacknet + Pathfinder 的自动入侵插件，带**交互式控制面板**。**优先使用游戏原生机制**：每个动作都先把对应指令回显进终端，再走原生 API（`Programs.connect` / `Computer.openPort` / `Computer.giveAdmin` / `makeFile`）执行，行为与真人敲 `connect` / `probe` / `sshcrack 22` / `porthack` 一致。四个游戏机制被显式处理：**管理员反扑**（断开时 `disconnectionDetected` 会关端口并把 `adminIP` 还原成机器自己，故离开前先解除反扑）、**跳板**（`proxyActive` 会拦下破解程序，先过载绕过）、**追踪**（`TraceTracker` 只在连着被追踪目标时推进，跑完即 `dc` 中止）、以及**肉鸡复用**（全网扫描默认跳过 `adminIP` 已是玩家的节点）。
+
+## 安装
+
+### 方式一：下载现成产物
+
+从 [Releases](https://github.com/High-cla/Hacknet-AutoHack/releases/latest) 取 `AutoHack.dll`，放进游戏的 `BepInEx/plugins/` 目录：
+
+```
+<Hacknet>/BepInEx/plugins/AutoHack.dll
+```
+
+### 方式二：从源码构建
+
+本仓库的构建配置会把产物**直接输出到游戏目录**，无需手工拷贝：
+
+```
+D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
+```
+
+```bash
+dotnet build src/AutoHack/AutoHack.csproj -c Release
+```
+
+## 使用
+
+游戏终端里输入 `autohack` 打开**控制面板**（再输一次关闭）：
+
+```
+autohack                                        # 开关控制面板
+autohack run [here] [delay=秒] [stay] [redo] [nologs] [nomark] [direct]   # 不开面板，直接执行
+autohack run script=stealth                     # 用脚本决定入侵次序（见下）
+autohack -h                                     # 帮助
+```
+
+### 面板
+
+面板浮在游戏画面右下角，**全部自绘**（不用游戏原生 `Button`/`CheckBox`/`SliderBar`），鼠标直接操作。拖动标题栏可移到任意位置，`-` 收起为一条状态栏，`x` 关闭。
+
+| 控件 | 作用 |
+|---|---|
+| `NETWORK SWEEP` / `CURRENT NODE` | 目标范围：沿网络连线可达的服务器 / 仅当前连接节点 |
+| `whole map` | 全网扫描口径：勾选 = 地图全表（含不在连线上的机器），缺省不勾 = 沿连线广度优先 |
+| `PORT INTERVAL` 滑条 | 每个端口的破解间隔，`0.05`–`5` 秒，默认 `0.6`；支持滚轮微调，`≤0.15` 时数值转为警示色 |
+| `wipe logs` | 是否在执行后清空目标日志 |
+| `connect first` | 每个目标先 `connect` 再动手（缺省开） |
+| `upload marker` | 是否上传 `~/autohack.txt` 标记（缺省**关**） |
+| `use known creds` | 用已知账密登入目标（缺省**开**）—— 成功即提权，跳过全部破端口 |
+| `NORMAL` / `FAST` / `INSTANT` | 推进节奏：非端口步保留真人间隔（0.35s）/ 压到 0.05s / 合并到**同一帧** |
+| `anti-trace dc` | 每个目标跑完 `dc`：追踪只在连着目标时推进，断开即中止（缺省开） |
+| `skip owned nodes` | 全网扫描时跳过已拿下的肉鸡，不重复入侵（缺省开） |
+| — | 永远提不了权的机器（端口表容量 ≤ `portsToCrack`）在全网扫描时一律跳过，见下 |
+| `RUN` | 按当前设置执行 |
+
+执行期间面板切换为进度视图：阶段 + 百分比、分段进度条、当前目标与动作计数，下方滚动显示逐目标战果。完成后显示 `LAST RUN` 与 `RUN AGAIN`。
+
+**为什么自绘而不是用原生控件**（三条都实测过）：
+
+1. `CheckBox.doCheckBox(id, x, y, on, color, text)` 只在 `GuiData.hot == id` 时才画文字（`Hacknet.Gui/CheckBox.cs:55-59`）——**标签平时不可见**，这是旧面板显脏的主因。
+2. 原生 `Button` 用 `tinyfont`（Font10）并自动缩放塞进按钮（`Button.cs:96-110`），字号与间距不可控；自绘统一用 `smallfont`（Font12）加显式缩放系数，得到 0.9 / 1.0 / 1.1 / 1.3 四级字号阶梯。
+3. 原生 `Button` 在宽度 > 65 时会额外画一条 13px 颜色标签条，与紧凑面板风格冲突。
+
+配色（`highlightColor` / `terminalTextColor`）**取自 `OS` 当前主题**，换主题时面板跟随，不会与游戏自身 UI 撞色。
+
+输入是模态的：`OS.Draw` 的 **Prefix** 在正文绘制前检查光标是否落在 `HackPanel.LastFrame` 内，是则置 `GuiData.blockingInput = true`。必须用 Prefix —— 正文里的游戏控件在 `Draw` 期间就消费输入，Postfix 已经太晚；只在光标位于面板上时抢占，面板之外照常操作游戏。
+
+### 命令行参数（`autohack run` 时）
+
+| 参数 | 说明 |
+|---|---|
+| `here` | 仅当前已连接的节点（缺省 = 沿网络连线可达的服务器） |
+| `delay=秒` | 每个端口的破解间隔，默认 `0.6`，范围 **`0.02`**–`5` |
+| `nologs` | 不清除目标日志 |
+| `nomark` | 不上传标记文件（**已是缺省**） |
+| `mark` | 上传标记文件 |
+| `allnodes` | 全网扫描改扫地图全表，不再只沿连线展开 |
+| `creds` / `nocreds` | 用 / 不用已知账密登入（**缺省用**；`nocreds` 强制走破解） |
+| `instant` / `fast` / `slow` | 节奏档位：非端口步同帧连跑 / 0.05s / 0.35s（**缺省 slow**） |
+| `direct` | 跳过 connect / probe，直接就地破解（不再回显这两条指令） |
+| `stay` | 跑完**不**断开连接（缺省断开 = 回显并执行 `dc`，可中止追踪） |
+| `redo` | 全网扫描时**连已控节点一起重打**（缺省跳过肉鸡及永远提不了权的机器） |
+| `script=文件` | 用一份**动作表**取代内置次序（见「脚本模式」） |
+
+> `allnodes` 与缺省口径的差额实测（同一存档 147 节点）：沿连线广度优先 **7** 个目标，地图全表 **110** 个。
+> 差额是「可以直接敲 IP 连上、但不在连线上」的机器 —— `Programs.connect` 遍历的是
+> `netMap.nodes` 全表，本来就不检查 `links`（见「关键设计决策」#4c）。
+
+ 可写可不写，
+`#` 开头是注释（游戏本身没有注释语法，这里补一个，是唯一比游戏宽松的地方）：
+
+```
+# samples/stealth.txt —— 不碰端口，只靠已知账密登入
+probe $#%#$
+login $#%#$
+rm    $#%#$
+dc    $#%#$
+```
+
+| 动作 | 含义 |
+|---|---|
+| `probe` | 读取并回显目标端口表 |
+| `login` | 用已知账密登入（成功即提权） |
+| `proxy` | 解除跳板（等价于过载跑完，但不等 30 秒） |
+| `openPort [端口]` | 攻破端口；**不带号 = 该目标上全部可破端口** |
+| `solve` | 解目标防火墙（`porthack` 的前置） |
+| `porthack` | 提权 |
+| `mark` | 投放 `~/autohack.txt` 标记 |
+| `rm` | 清除 `/log` |
+| `dc` | 断开连接 |
+| `delay 秒` / `config … 秒` | 设定每步间隔（`config` 按游戏原格式取第 4 个参数） |
+
+**三个动作不用写**，AutoHack 恒定补上 —— 它们是正确性要求而非风格偏好：
+`connect`（未连接时）、`neutralize`（解除管理员反扑，否则断开后 0~20 秒肉鸡标记丢失）、
+`killtrace`（收尾反追踪）。
+
+**`rm` 必须排在 `dc` 之前**，否则整份脚本被拒绝并说明原因。`rm` 的作用域是「当前连接」
+（`Programs.rm` 读 `os.connectedComp`），断开之后再执行，删的是**玩家自己**的文件系统 ——
+这正是玩家手敲时「命令敲对了却没有效果」的根因。
+
+> **不能直接跑游戏自带的脚本。** 游戏那 28 个动作里**没有提权**，唯一像「接管」的
+> `systakeover` 会往真实磁盘写 `VMBootloaderTrap.dll` 与 `OpenCMD.bat`
+> （`HostileHackerBreakinSequence.cs:15-21`），是剧情级破坏序列。它的 `connect` 也只是
+> `parseInputMessage("cConnection …")` —— 目标机视角记「有人连进来」，
+> **根本不设 `os.connectedComp`**（`HackerScriptExecuter.cs:121`），驱动不了玩家终端。
+> 喂错动作时插件会明确区分「这是游戏 NPC 动作，此处没有对应物」与「拼错了」，
+> 而不是笼统报「未知动作」。
 
 ## 行为：终端里看到什么
 
@@ -146,6 +283,7 @@ src/AutoHack/
 ├── HackRun.cs          执行模型：动作序列、逐帧推进、指令回显（与绘制解耦）
 ├── HackEngine.cs       决策逻辑：可连接目标遍历、端口表读取、提权门槛（含端口容量）、防火墙破解、反扑解除、跳板绕过、日志清理
 ├── HackTypes.cs        不可变数据：HackOptions（参数解析）/ HackStep（含回显指令）
+├── HackScript.cs       入侵脚本：行式动作表的解析与校验（script= 模式）
 ├── PendingRuns.cs      无面板运行的调度：命令线程只传参数，游戏线程构造并推进（按 OS 键控的 ConcurrentDictionary）
 ├── IsExternalInit.cs   net472 兼容垫片（record/init 需要）
 └── GlobalUsings.cs     全局 using
@@ -303,6 +441,26 @@ Pathfinder 用 `[HarmonyPrefix]` 接管了 `Computer.openPort(int, string)` 并 
 **6. 管理员反扑只能从源头解除。**
 `Computer.admin` `disconnectionDetected` 的延迟回调是在`断开那一刻`注册进 `os.delayer` 的（`BasicAdministrator` `20.0 * Utils.random.NextDouble()`），事后无法撤销；唯一可控的时点是**断开之前**。所以本插件把「解除反扑」做成独立步骤（`HackStepKind.Neutralize`），排在侦察之前 —— 而不是挂在 `connect` 上，因为 `direct`／已连接的路径根本没有 `connect` 步。置 null 而非替换成自定义 `Administrator`：`type="none"` 本就是游戏的原生状态，`admin?.` 是空条件调用，语义完全对齐，不需要新类型。
 
+#### 4h. 脚本驱动入侵（v1.12.0）
+
+`script=<文件>` 用一份动作表取代 `BuildSteps` 的内置次序。
+
+- **动作集是 AutoHack 自己的，不是游戏的**。游戏的 HackerScript 是 NPC 引擎：28 个动作
+  里没有提权，`connect` 不设 `os.connectedComp`（`HackerScriptExecuter.cs:121` 走
+  `cConnection`，目标机视角），`systakeover` 会往真实磁盘写文件
+  （`HostileHackerBreakinSequence.cs:15-21`）。**故不能复用它的执行器，只复用行式语法** ——
+  目标与源机由 `scope` 解析（`here`/`network`/`allnodes`/显式），脚本只描述「怎么打」。
+- **三个动作恒定补上**：`connect`（未连接时）、`neutralize`、`killtrace`。
+  这是正确性要求（反扑会让肉鸡标记丢失、追踪会端掉玩家），交给玩家手写只会漏。
+- **`rm` 必须早于 `dc`，违反即拒绝整份脚本**（`HackScript.Validate`）。判据是
+  「每个 `rm` 之前是否存在未被 `connect` 抵消的 `dc`」—— 不用「最后一个 `dc`」这种粗判，
+  否则合法的 `dc / connect / rm` 会被误拒。
+- **`openPort` 不带端口号 = 全部可破端口**，走 `HackEngine.CrackablePorts`，
+  与内置次序同一数据源，不在脚本里硬编码端口。
+- **脚本在入队前校验一次**（`AutoHackPlugin`），语法错当场报出行号与原因；
+  `PendingRuns` 另有一层 `catch` 兜底 —— 异常抛进 Harmony Postfix 会打断
+  `OS.Update` 的整条补丁链。
+
 ## 验证
 
 ### 加载顺序与注册（实测日志）
@@ -310,7 +468,7 @@ Pathfinder 用 `[HarmonyPrefix]` 接管了 `Computer.openPort(int, string)` 并 
 ```
 [Info : BepInEx] Loading [AutoUpdater 5.3.4]
 [Info : BepInEx] Loading [PathfinderAPI 5.3.4]   ← Pathfinder 先，安装属性扫描 hook
-[Info : BepInEx] Loading [AutoHack 1.11.3]        ← 本插件后，能被扫描到
+[Info : BepInEx] Loading [AutoHack 1.12.0]        ← 本插件后，能被扫描到
 [Info : AutoHack] AutoHack loaded (GUI).
 [Info : AutoHack] self-check OK: 'autohack' is registered and autocompletes.
 ```
@@ -320,7 +478,7 @@ Pathfinder 用 `[HarmonyPrefix]` 接管了 `Computer.openPort(int, string)` 并 
 ### 静态验证（反编译产物）
 
 ```
-[BepInPlugin("com.highcla.autohack", "AutoHack", "1.11.3")]
+[BepInPlugin("com.highcla.autohack", "AutoHack", "1.12.0")]
 [Command("autohack", true, false)]
 
 Echo:   os.write("\n" + os.terminal.prompt + command);
@@ -469,6 +627,22 @@ deleteFile(ipFrom              1    走游戏删除原语
 connectedComp.silent = true    1    断开静默，避免 Disconnected 写回刚清的 /log
 Deleting                       1    战果摘要行（沿用 Programs.rm 的措辞）
 UISmallfont / doCheckBox / hostileActionTaken / Thread.Sleep   0 / 0 / 0 / 0
+```
+
+v1.12.0 反编译产物逐项核对（`decompiled/autohack-v120/AutoHack.decompiled.cs`，2501 行）：
+
+```
+"1.12.0"                       1    BepInPlugin 版本（"1.11." 残留 0）
+class HackScript               1    脚本类；Parse(string / .Load( 各 1
+Vocabulary                     3    12 条动作词表（含别名）
+UnsupportedVerbs               2    游戏 NPC 动作单列，错误信息区分「NPC 动作」与「拼错」
+own file system                1    rm 早于 dc 的不变量校验
+AppendScripted / ExpandPorts   2/2  脚本驱动的步骤展开
+CommandFor                     2    脚本动作 → 终端回显原文
+_script / StepDelay            4/5  运行期字段与脚本自带间隔
+tokens[3] (反编译为 array2[3])  1    config 行取第 4 个参数作为间隔
+UISmallfont / doCheckBox / hostileActionTaken / Thread.Sleep   0 / 0 / 0 / 0
+HostileHackerBreakin           0    绝未引用剧情破坏序列（"systakeover" 仅在词表字符串中）
 ```
 
 ### 未验证

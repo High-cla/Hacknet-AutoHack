@@ -54,6 +54,15 @@ internal sealed class HackPanelState
     /// <summary>推进节奏档位。缺省 Normal = 与旧版行为一致，快档需显式选。</summary>
     internal HackSpeed Speed { get; set; } = HackSpeed.Normal;
 
+    /// <summary>
+    /// 入侵脚本文件名；null = 内置次序。
+    ///
+    /// 面板不提供脚本选择器 —— 一份脚本决定整轮的次序与动作集，要把它塞进面板
+    /// 就得带一整套文本编辑与语法校验 UI，收益不抵复杂度（YAGNI）。
+    /// 脚本模式由命令行进入：<c>autohack run script=&lt;文件&gt;</c>。
+    /// </summary>
+    internal string Script { get; set; }
+
     internal HackOptions ToOptions() => new(
         Scope,
         Array.Empty<string>(),
@@ -65,7 +74,8 @@ internal sealed class HackPanelState
         SkipOwned,
         AllNodes,
         UseCredentials,
-        Speed);
+        Speed,
+        Script);
 }
 
 /// <summary>

@@ -108,5 +108,5 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
 
 - [decompiled/game-proj/](decompiled/game-proj): **游戏本体**反编译（360 文件）。RESEARCH 里大量 `文件:行号` 引用都指向它，是全部改动的依据 —— 与「不核对 mod 产物」无关，必须保留
 - [decompiled/pathfinder/](decompiled/pathfinder): PathfinderAPI 反编译（135 文件）
-- [decompiled/](decompiled): 游戏本体 + Pathfinder 反编译（上两条）。各版本 mod 产物的反编译存档（`autohack-vNN/`）**已于 v1.15.0 全部删除**；`game/` 与 `workshop/` 为冗余旧形式与第三方研究材料，文档零引用
+- [decompiled/](decompiled): 只保留上两条（游戏本体 + Pathfinder，均为决策证据）。已删除：各版本 mod 产物存档（`autohack-vNN/`）与冗余的单文件旧形式（`game/`）。`workshop/` 为第三方 Workshop mod 研究材料，文档零引用
 - [.cbmignore](.cbmignore): codebase-memory 索引的排除规则。它把 `.gitignore` 一并当忽略源读，故 `decompiled/` 与 `upstream/` 不进索引 —— 索引只覆盖 mod 自身源码，这是有意为之

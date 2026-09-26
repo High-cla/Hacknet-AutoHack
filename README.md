@@ -368,7 +368,7 @@ Pathfinder 用 `[HarmonyPrefix]` 接管了 `Computer.openPort(int, string)` 并 
   `PendingRuns` 另有一层 `catch` 兜底 —— 异常抛进 Harmony Postfix 会打断
   `OS.Update` 的整条补丁链。
 
-#### 4i. 清痕不吃节流；目标为 0 必须说明原因（v1.12.3）
+#### 4i. 清痕不吃节流；目标为 0 必须说明原因（v1.12.3，探针于 v1.13.0 摘除）
 
 **清痕提速（用户提问：能否异步多线程？—— 答：不能，也不需要）。**
 清痕慢的原因不是 IO 也不是 CPU，而是 `Tick` 里每步 0.35 秒的节流等待。
@@ -407,18 +407,23 @@ Pathfinder 用 `[HarmonyPrefix]` 接管了 `Computer.openPort(int, string)` 并 
 
 同时登录失败不再静默（此前 `if (TryLogin(...)) { ... }` 失败分支什么都不打印，
 把问题藏了起来），改为打印 `login unavailable (<users=N known=M adminPass=set seclvl=S ports=P>)`，
-并经 `Diag.LogInfo` 落进 BepInEx 日志以便直接读取。运行计划也记一行：
-`plan: targets=... skipped=... owned=... hopeless=... steps=... creds=... loginSteps=... speed=...`。
+并经 `Diag.LogInfo` 落进 BepInEx 日志以便直接读取。运行计划也曾记一行 `plan: ...`。
+
+**v1.13.0 摘除全部日志探针**（用户：「bug 全部解决，清除所有日志探针」）：
+`Diag` 日志源、`plan:` 计划行、`HackEngine.CredentialReport` 及其在登录成功/失败
+两处的调用全部删除，BepInEx 日志不再有本插件的运行期输出（保留加载自检那两条）。
+登录失败仍保留一行终端可见的 `login unavailable - cracking ports` —— 那是 Fail Fast，
+不是探针；`No targets: all N ... (X already owned, Y cannot escalate)` 同理保留。
 
 ## 验证
 
-### v1.12.3 验证（只看产物 MD5）
+### v1.13.0 验证（只看产物 MD5）
 
 | 项 | 值 |
 |---|---|
 | 产物 | `<Hacknet>/BepInEx/plugins/AutoHack.dll` |
-| 字节数 | 67072 |
-| MD5 | `51cfa993824f6d5978ddcb6886a06d90` |
+| 字节数 | 66048 |
+| MD5 | `1f1630b978614e8020f72089fe7b115b` |
 | 构建 | `rm -rf src/AutoHack/obj src/AutoHack/bin && dotnet build ... -c Release` → 0 警告 0 错误 |
 
 改动两处，均为「节流与可观测性」：`DelayFor` 中 `CleanLogs` 返回 `0f`；
@@ -431,6 +436,8 @@ plan: targets=1 skipped=10 steps=21 creds=True loginSteps=1 speed=Normal
 网络教育档案馆 :: admin via login (admin) - skipping port cracks | users=1 known=1 adminPass=set seclevel=6 ports=1
 ```
 
+（该处的 `plan:` 行为 v1.12.3 的临时探针，已于 v1.13.0 摘除。）
+
 随后 10 次运行全部 `targets=0 skipped=11` —— 可达节点已全数归玩家，
 被 `skip owned` 过滤。`loginSteps=0` 是**因为没有目标**，不是登录失效。
 
@@ -439,7 +446,7 @@ plan: targets=1 skipped=10 steps=21 creds=True loginSteps=1 speed=Normal
 ```
 [Info : BepInEx] Loading [AutoUpdater 5.3.4]
 [Info : BepInEx] Loading [PathfinderAPI 5.3.4]   ← Pathfinder 先，安装属性扫描 hook
-[Info : BepInEx] Loading [AutoHack 1.12.3]        ← 本插件后，能被扫描到
+[Info : BepInEx] Loading [AutoHack 1.13.0]        ← 本插件后，能被扫描到
 [Info : AutoHack] AutoHack loaded (GUI).
 [Info : AutoHack] self-check OK: 'autohack' is registered and autocompletes.
 ```
@@ -453,10 +460,10 @@ plan: targets=1 skipped=10 steps=21 creds=True loginSteps=1 speed=Normal
 | 项 | 值 |
 |---|---|
 | 产物路径 | `D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll` |
-| 当前版本 | v1.12.3 |
+| 当前版本 | v1.13.0 |
 | 字节数 | 65536 |
-| MD5 | `51cfa993824f6d5978ddcb6886a06d90` |
-| 字节数 | 67072 |
+| MD5 | `1f1630b978614e8020f72089fe7b115b` |
+| 字节数 | 66048 |
 
 核对流程：清理 `obj`/`bin` → 构建（须 0 警告 0 错误）→ 记 `md5sum` 与字节数，
 与上一版比对。构建成功即证明源码已编入（增量缓存已清，漏编会报错）；
@@ -467,7 +474,7 @@ MD5 只用于确认部署确实是新的那个产物。
 > 若日后需要回溯「某版本究竟编进去了什么」仍可查。
 
 ```
-[BepInPlugin("com.highcla.autohack", "AutoHack", "1.12.3")]
+[BepInPlugin("com.highcla.autohack", "AutoHack", "1.13.0")]
 [Command("autohack", true, false)]
 
 Echo:   os.write("\n" + os.terminal.prompt + command);

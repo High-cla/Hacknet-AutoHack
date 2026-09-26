@@ -2126,3 +2126,30 @@ break;      // 失败分支什么都不打印
 - 构建：`rm -rf src/AutoHack/obj src/AutoHack/bin && dotnet build src/AutoHack/AutoHack.csproj -c Release`
   → 0 警告 0 错误
 - 版本：`AutoHackPlugin.cs` 的 `[BepInPlugin]` → `1.12.3`
+
+## 18. v1.13.0：摘除全部日志探针
+
+v1.12.2/v1.12.3 为定位「login 没跳过」曾临时加入三处诊断输出。问题查清后按用户
+要求（「bug 全部解决，清除所有日志探针」）全部摘除：
+
+| 探针 | 位置（v1.12.3） | 处置 |
+|---|---|---|
+| `Diag` 静态日志源 | `HackRun.cs` 字段 | 删除 |
+| `plan: targets=… creds=… loginSteps=… speed=…` | `HackRun` 构造函数 | 删除 |
+| `HackEngine.CredentialReport` | `HackEngine.cs` | 删除 |
+| 成功分支的 `Diag.LogInfo(okLine + " \| " + report)` | `Apply` Login | 删除 |
+| 失败分支的 `login unavailable (<诊断>)` + `Diag.LogInfo` | `Apply` Login | 降级为一行 `login unavailable - cracking ports` |
+
+**保留的两条不是探针，是 Fail Fast，不随摘除移除：**
+
+- `[autohack] <名> :: login unavailable - cracking ports` —— 失败可见，
+  避免重新陷入「静默失败」这个已确认的缺陷（§17.5）。
+- `[autohack] No targets: all N reachable node(s) were filtered out
+  (X already owned, Y cannot escalate).` + `'redo' … 'allnodes' …` ——
+  这是 §17.4 那个真实 UX 缺陷的修复，不是诊断。
+
+摘除后本插件在 BepInEx 日志里只剩加载期两条（`AutoHack loaded (GUI).` 与
+`self-check OK …`），运行期零输出。
+
+**交付**：`AutoHack.dll` 66048 字节，MD5 `1f1630b978614e8020f72089fe7b115b`，
+版本 `1.13.0`，构建 0 警告 0 错误。

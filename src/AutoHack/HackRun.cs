@@ -43,10 +43,6 @@ internal sealed class HackRun
     private float _timer;
 
     /// <summary>本次运行中靠已知凭据登入（即已提权）的机器，其破端口类步骤整体跳过。</summary>
-    /// <summary>诊断日志。BepInEx 日志里能直接读到，不必靠肉眼盯终端。</summary>
-    private static readonly BepInEx.Logging.ManualLogSource Diag =
-        BepInEx.Logging.Logger.CreateLogSource("AutoHack");
-
     private readonly HashSet<Computer> _loggedIn = new();
 
     /// <summary>本次运行的入侵脚本；null = 用内置次序。构造期已解析完成。</summary>
@@ -66,14 +62,6 @@ internal sealed class HackRun
         SkippedOwned = plan.SkippedOwned;
         SkippedHopeless = plan.SkippedHopeless;
         _steps = BuildSteps(_targets, plan.Skipped, options, os, _script);
-        Diag.LogInfo("[autohack] plan: targets=" + _targets.Count
-            + " skipped=" + (SkippedOwned + SkippedHopeless)
-            + " owned=" + SkippedOwned
-            + " hopeless=" + SkippedHopeless
-            + " steps=" + _steps.Count
-            + " creds=" + Options.UseCredentials
-            + " loginSteps=" + _steps.FindAll(st => st.Kind == HackStepKind.Login).Count
-            + " speed=" + Options.Speed);
         Current = _targets.Count > 0 ? _targets[0].name : "-";
         Phase = "ENGAGING";
     }
@@ -246,17 +234,12 @@ internal sealed class HackRun
                     // （重打已控节点）会连端口都不破，改变其语义。
                     _loggedIn.Add(target);
 
-                    var okLine = "[autohack] " + target.name + " :: admin via login (" + credential + ") - skipping port cracks";
-                    os.write(okLine);
-                    Diag.LogInfo(okLine + " | " + HackEngine.CredentialReport(target));
+                    os.write("[autohack] " + target.name + " :: admin via login (" + credential + ") - skipping port cracks");
                 }
                 else
                 {
-                    // 静默失败等于把问题藏起来：登录没成时必须说清是哪一项前提不成立。
-                    var why = HackEngine.CredentialReport(target);
-                    var failLine = "[autohack] " + target.name + " :: login unavailable (" + why + ")";
-                    os.write(failLine);
-                    Diag.LogInfo(failLine);
+                    // 失败必须可见：静默会把「为什么没跳过」这条最有价值的信息藏起来。
+                    os.write("[autohack] " + target.name + " :: login unavailable - cracking ports");
                 }
 
                 break;

@@ -41,6 +41,9 @@ internal static class HackOverlay
 
     internal static bool IsOpen => _state is { Open: true };
 
+    /// <summary>面板运行是否正在推进。供命令入口做互斥。</summary>
+    internal static bool IsRunning => _run is { Finished: false };
+
     internal static void Open(OS os)
     {
         _os = os;
@@ -104,8 +107,8 @@ internal static class HackOverlay
         }
         catch (InvalidOperationException)
         {
-            // Draw 的内层 catch 可能吞掉异常并留下未关闭的批次；
-            // 这种帧直接跳过，不打断游戏渲染。
+            // 面板绘制期的 SpriteBatch 状态异常：跳过错帧即可，
+            // finally 里的 End() 保证批次不会泄漏。
             return;
         }
         finally
@@ -141,6 +144,14 @@ internal static class HackOverlay
     {
         if (_os == null)
         {
+            return;
+        }
+
+        // 单写者：两条运行会同时 connect/disconnect 同一个 os.connectedComp，
+        // 互相把对方的目标换掉。已在跑的运行先跑完。
+        if (PendingRuns.BusyFor(_os))
+        {
+            _os.write("[autohack] A headless run is still in progress - wait for it to finish.");
             return;
         }
 

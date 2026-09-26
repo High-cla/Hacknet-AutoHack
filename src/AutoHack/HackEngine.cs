@@ -268,7 +268,7 @@ internal static class HackEngine
 
         var pool = options.Scope switch
         {
-            HackScope.Connected => os.connectedComp is { } connected ? new[] { connected } : Array.Empty<Computer>(),
+            HackScope.Connected => os.connectedComp is { } connected ? [connected] : [],
             HackScope.Network => ReachableComputers(os),
             _ => options.Targets
                     .Select(id => ComputerLookup.Find(id))
@@ -278,6 +278,10 @@ internal static class HackEngine
 
         var sweep = options.Scope == HackScope.Network;
         var result = new List<Computer>(pool.Length);
+
+        // 用哈希集去重，而不是 List.Contains：显式目标串可能重复点名，
+        // 而全网遍历的池本身已去重，两者都需要 O(1) 判重。
+        var seen = new HashSet<Computer>(pool.Length);
 
         foreach (var comp in pool)
         {
@@ -292,7 +296,7 @@ internal static class HackEngine
                 continue;
             }
 
-            if (!result.Contains(comp))
+            if (seen.Add(comp))
             {
                 result.Add(comp);
             }
@@ -328,6 +332,12 @@ internal static class HackEngine
         // 展开，既保证结果永不退化，又能越过原版 scan 的一跳极限。
         var seen = new HashSet<int>();
         var frontier = new Queue<int>();
+
+        // visibleNodes 是 List<int>，逐次 Contains 会退化成 O(V·E)；
+        // 先摊平成哈希集，供展开循环做 O(1) 判「已发现」。
+        var discovered = map.visibleNodes == null
+            ? new HashSet<int>()
+            : new HashSet<int>(map.visibleNodes);
         Seed(map, seen, frontier, os.thisComputer == null ? -1 : map.nodes.IndexOf(os.thisComputer));
         if (map.visibleNodes != null)
         {
@@ -376,7 +386,7 @@ internal static class HackEngine
                 }
 
                 // 新展开出来的机器按原生 scan 的后效标为已发现（NetworkMap.discoverNode）。
-                if (map.visibleNodes != null && !map.visibleNodes.Contains(next))
+                if (discovered.Add(next))
                 {
                     map.discoverNode(neighbor);
                 }

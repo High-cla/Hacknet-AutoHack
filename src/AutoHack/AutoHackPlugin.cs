@@ -9,7 +9,7 @@ using Pathfinder.Meta.Load;
 /// 命令与扩展点均通过 Pathfinder 的属性自动扫描注册（AttributeManager 挂载于
 /// HacknetChainloader.LoadPlugin），无需手动调用 Register* API。
 /// </summary>
-[BepInPlugin(Guid, "AutoHack", "1.7.0")]
+[BepInPlugin(Guid, "AutoHack", "1.8.0")]
 // Pathfinder 的属性扫描是 IL hook，在 PathfinderAPIPlugin.Load() 里才安装；
 // 缺此依赖本插件会先加载，扫描覆盖不到，命令静默失效。
 [BepInDependency("com.Pathfinder.API")]
@@ -54,7 +54,7 @@ public sealed class AutoHackPlugin : BepInEx.Hacknet.HacknetPlugin
         {
             os.write("autohack              - toggle the control panel");
             os.write("autohack run [options] [target...] - run headless");
-            os.write("  here      only the connected node (default: whole network)");
+            os.write("  here      only the connected node (default: all reachable servers)");
             os.write("  delay=s   seconds between port cracks (default 0.6)");
             os.write("  direct    skip connect, crack the node already connected");
             os.write("  stay      keep the connection at the end (default: dc, which aborts a trace)");
@@ -73,17 +73,22 @@ public sealed class AutoHackPlugin : BepInEx.Hacknet.HacknetPlugin
             return;
         }
 
-        var options = HackOptions.Parse(args.Skip(1).ToArray());
-        var run = new HackRun(os, options);
-
-        if (run.Total == 0)
+        // 单写者：面板运行与 headless 运行互斥 —— 两条会同时 connect/disconnect
+        // 同一个 os.connectedComp，互相把对方的目标换掉。
+        if (HackOverlay.IsRunning)
         {
-            os.write("[autohack] No eligible targets found.");
+            os.write("[autohack] A panel run is still in progress - wait for it to finish.");
             return;
         }
 
-        PendingRuns.Enqueue(os, run);
-        var skipped = run.SkippedOwned > 0 ? $", {run.SkippedOwned} owned node(s) skipped" : string.Empty;
-        os.write($"[autohack] Headless run: {run.Targets.Count} target(s), {run.Total} action(s){skipped}.");
+        // 只入队参数：HackRun 的构造含可达遍历（会改写网络地图），必须在游戏线程做。
+        // 目标数与动作数的汇总行由 PendingRuns 在首帧打印。TryAdd 自带互斥。
+        if (!PendingRuns.TryEnqueue(os, HackOptions.Parse(args.Skip(1).ToArray())))
+        {
+            os.write("[autohack] A run is already queued on this terminal - wait for it to finish.");
+            return;
+        }
+
+        os.write("[autohack] Headless run queued.");
     }
 }

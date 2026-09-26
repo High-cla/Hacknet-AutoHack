@@ -86,6 +86,9 @@ internal static class HackPanel
     private const int CheckRowHeight = 22;
     private const int ButtonHeight = 34;
     private const int OutcomeRowHeight = 16;
+
+    /// <summary>战果区最多展示的行数，超出部分折叠成 "+N more"。</summary>
+    private const int MaxOutcomeRows = 5;
     private const int Gap = 14;
     private const int BottomPadding = 12;
     private const int TopPadding = 10;
@@ -238,7 +241,7 @@ internal static class HackPanel
         var right = left + ContentWidth;
         var ratio = run.Total == 0 ? 0f : Math.Min(1f, run.Done / (float)run.Total);
 
-        DrawText(run.Phase?.ToUpperInvariant() ?? "ENGAGING", left, y, c.Accent, 1f);
+        DrawText(run.Phase ?? "ENGAGING", left, y, c.Accent, 1f);
         var percent = (int)(ratio * 100) + "%";
         DrawText(percent, right - Measure(percent, 1f).X, y, c.Text, 1f);
         y += PhaseRowHeight;
@@ -251,9 +254,9 @@ internal static class HackPanel
         DrawText(count, right - Measure(count, 1f).X, y, c.Dim, 1f);
         y += CurrentRowHeight;
 
-        foreach (var outcome in AtMost(run.Outcomes, 5))
+        for (var i = 0; i < Math.Min(run.Outcomes.Count, MaxOutcomeRows); i++)
         {
-            Outcome(outcome, left, right, y, c);
+            Outcome(run.Outcomes[i], left, right, y, c);
             y += OutcomeRowHeight;
         }
     }
@@ -265,15 +268,15 @@ internal static class HackPanel
         Section($"LAST RUN  {run.Outcomes.Count} NODE(S)", left, y, c);
         y += SectionHeight;
 
-        foreach (var outcome in AtMost(run.Outcomes, 5))
+        for (var i = 0; i < Math.Min(run.Outcomes.Count, MaxOutcomeRows); i++)
         {
-            Outcome(outcome, left, right, y, c);
+            Outcome(run.Outcomes[i], left, right, y, c);
             y += OutcomeRowHeight;
         }
 
-        if (run.Outcomes.Count > 5)
+        if (run.Outcomes.Count > MaxOutcomeRows)
         {
-            DrawText($"+{run.Outcomes.Count - 5} more", left, y, c.Dim, 1f);
+            DrawText($"+{run.Outcomes.Count - MaxOutcomeRows} more", left, y, c.Dim, 1f);
             y += OutcomeRowHeight;
         }
 
@@ -479,7 +482,7 @@ internal static class HackPanel
             else
             {
                 state.X = ClampInt(mp.X - _dragOffset.X, screen.Left + 4, MaxX(screen));
-                state.Y = ClampInt(mp.Y - _dragOffset.Y, screen.Top + 4, MaxY(screen));
+                state.Y = ClampInt(mp.Y - _dragOffset.Y, screen.Top + 4, MaxY(screen, LastFrame.Height));
                 GuiData.blockingInput = true;
             }
         }
@@ -496,14 +499,15 @@ internal static class HackPanel
         var x = state.X == int.MinValue ? screen.Right - Width - 18 : state.X;
         var y = state.Y == int.MinValue ? screen.Bottom - height - 18 : state.Y;
 
-        return (ClampInt(x, screen.Left + 4, MaxX(screen)), ClampInt(y, screen.Top + 4, MaxY(screen)));
+        return (ClampInt(x, screen.Left + 4, MaxX(screen)), ClampInt(y, screen.Top + 4, MaxY(screen, height)));
     }
 
     private static int MaxX(Rectangle screen)
         => Math.Max(screen.Left + 4, screen.Right - Width - 4);
 
-    private static int MaxY(Rectangle screen)
-        => Math.Max(screen.Top + 4, screen.Bottom - CollapsedHeight - 4);
+    /// <summary>纵向上限按面板当前高度算：展开态比收起条高得多，用收起高度会让它坠出屏幕。</summary>
+    private static int MaxY(Rectangle screen, int height)
+        => Math.Max(screen.Top + 4, screen.Bottom - height - 4);
 
     // ── 尺寸 ────────────────────────────────────────────────────
 
@@ -511,11 +515,11 @@ internal static class HackPanel
     private static int BodyHeight(HackRun run) => run switch
     {
         { Finished: false } => TopPadding + PhaseRowHeight + ProgressRowHeight + CurrentRowHeight
-                               + Math.Min(run.Outcomes.Count, 5) * OutcomeRowHeight + BottomPadding,
+                               + Math.Min(run.Outcomes.Count, MaxOutcomeRows) * OutcomeRowHeight + BottomPadding,
 
         { Finished: true } => TopPadding + OptionsBlockHeight + SectionHeight
-                              + Math.Min(run.Outcomes.Count, 5) * OutcomeRowHeight
-                              + (run.Outcomes.Count > 5 ? OutcomeRowHeight : 0)
+                              + Math.Min(run.Outcomes.Count, MaxOutcomeRows) * OutcomeRowHeight
+                              + (run.Outcomes.Count > MaxOutcomeRows ? OutcomeRowHeight : 0)
                               + Gap + ButtonHeight + BottomPadding,
 
         _ => TopPadding + OptionsBlockHeight + ButtonHeight + BottomPadding,
@@ -579,6 +583,13 @@ internal static class HackPanel
     private static Vector2 Measure(string text, float scale)
         => string.IsNullOrEmpty(text) ? Vector2.Zero : GuiData.smallfont.MeasureString(text) * scale;
 
+    /// <summary>
+    /// 超宽则截断并加省略号。
+    ///
+    /// 首字符宽度的比例估算 + 常数步修正，而非逐字符重测：后者每帧要为每个标签
+    /// 调用 O(长度) 次 <c>MeasureString</c>，而这是每帧都在跑的绘制路径。
+    /// 修正循环保证结果与逐字符法完全一致。
+    /// </summary>
     private static string Ellipsize(string value, float maxWidth)
     {
         if (string.IsNullOrEmpty(value))
@@ -586,22 +597,32 @@ internal static class HackPanel
             return string.Empty;
         }
 
-        if (Measure(value, 1f).X <= maxWidth)
+        var full = Measure(value, 1f).X;
+        if (full <= maxWidth)
         {
             return value;
         }
 
-        var cut = value;
-        while (cut.Length > 1 && Measure(cut + "..", 1f).X > maxWidth)
+        // 比例估算落点，再向两侧微调到位。
+        var cut = (int)(value.Length * maxWidth / full);
+        cut = ClampInt(cut, 1, value.Length - 1);
+
+        while (cut > 1 && Measure(Mid(value, cut), 1f).X > maxWidth)
         {
-            cut = cut.Substring(0, cut.Length - 1);
+            cut--;
         }
 
-        return cut + "..";
+        while (cut < value.Length - 1 && Measure(Mid(value, cut + 1), 1f).X <= maxWidth)
+        {
+            cut++;
+        }
+
+        return Mid(value, cut);
     }
 
-    private static IEnumerable<TargetOutcome> AtMost(IReadOnlyList<TargetOutcome> source, int count)
-        => source.Take(count);
+    /// <summary>取前 <paramref name="count"/> 个字符并追加省略号。</summary>
+    private static string Mid(string value, int count)
+        => value.Substring(0, count) + "..";
 
     private static Color Lighten(Color color, float amount)
         => Color.Lerp(color, Color.White, amount);

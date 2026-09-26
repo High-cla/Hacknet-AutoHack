@@ -722,6 +722,182 @@ comp.proxyActive = false;
 | `Seed` | 3 |
 | `proxyOverloadTicks = 0f` | :317 |
 | `proxyActive = false` | :318 |
-| 版本 | `1.7.0` |
+| 版本 | `1.7.0`（v1.8 复核见 §11） |
 
 构建：`0 个警告 0 个错误`；产物 `AutoHack.dll` 44032 B（v1.6 为 43520 B）。
+
+## 11. v1.8：坏味道审计与并发修正
+
+用户要求「更新索引。查找反模式死代码代码坏味道性能问题，优先使用语言特性异步多线程并发协程等优化手段」。
+审计对象是插件自身 1712 行源码，逐条给证据与修法。**不追求条目数量，只改有实据的问题**。
+
+### 11.1 并发：三处真实缺陷（本轮的实质发现）
+
+这一节是本次审计最有价值的部分 —— 三个都是会真实出问题的缺陷，不是风格问题。
+
+#### (a) 跨线程队列
+
+证据链：`AutoHackCommand` 由 `OS.execute` 执行，而后者是
+`new Thread(threadExecute)` 派生线程（OS.cs:1754-1767，日志里的
+`Spawning thread for command autohack` 就是它）。命令线程写入，
+游戏线程在 `OS.Update` Postfix 里读取 —— 原实现用 `Queue<T>`，
+不是线程安全的。
+
+修法不是加 `lock`（会引入新的阻塞点），而是换 BCL 并发集合。
+
+#### (b) `visibleNodes` 的跨线程改写（比 (a) 更隐蔽）
+
+`HackRun` 的**构造函数**里就有一次可达遍历，而遍历会调
+`NetworkMap.discoverNode` 把新节点写进 `netMap.visibleNodes`
+（NetworkMap.cs:415-431：`visibleNodes.Add(...)`）。
+
+原实现里 `HackRun` 是在**命令线程**构造的（`AutoHackCommand` 直接
+`new HackRun(os, options)`），于是命令线程对 `visibleNodes` 做 `Add`，
+而游戏线程每帧都在遍历同一个 `List<int>`（`HubServerAlertsIcon.cs:123`
+读它、`DLCIntroExe` 读它、`EndingSequenceModule` 改它）——
+典型的「一个线程 Add、另一个线程 foreach」，轻则
+`InvalidOperationException: Collection was modified`，重则索引错位。
+
+**修法**：入队只传参数，把 `HackRun` 的构造推迟到游戏线程首帧
+（`PendingRuns.OnOSUpdate`）。`Enqueue(OS, HackRun)` 因此改成
+`TryEnqueue(OS, HackOptions)`。
+
+#### (c) 两条运行同时改连接状态
+
+面板的 RUN 按钮与 `autohack run` 命令**互相不知道对方存在**，
+二者可以同时推进：两条 `HackRun` 各自 `Programs.connect` /
+`Programs.disconnect` 同一个 `os.connectedComp`，把对方正在攻打的
+目标换掉 —— 结果是两端都「失去效果」。
+
+**修法**：单写者仲裁。面板入口查 `PendingRuns.BusyFor(os)`，
+命令入口查 `HackOverlay.IsRunning` 并让 `TryEnqueue` 原子地拒绝重复入队。
+
+#### 为什么最终用 `ConcurrentDictionary<OS, Entry>` 而非 `ConcurrentQueue`
+
+中间版本用过 `ConcurrentQueue`，但暴露了两个问题，故换掉：
+
+| 问题 | `ConcurrentQueue` | `ConcurrentDictionary` |
+|---|---|---|
+| 跨 OS 实例堵塞 | `TryPeek` 只看队首；换过 OS（回主菜单再进）后旧条目卡在队首，新实例永远轮不到 | 按实例键控，各走各的 |
+| 重复入队判定 | `Count`+`Peek` 再 `Enqueue` 是 check-then-act，中间有窗口 | `TryAdd` 天然原子 |
+| 互斥查询 | 需遍历整个队列 | `ContainsKey` O(1) |
+
+`Entry.Run` 初值为 null 作为「尚未在游戏线程构造」的标记，
+构造完成后才赋值 —— 这个可空字段是刻意的状态机，不是疏忽。
+
+#### 为什么不用 `async`/`await` 与协程
+
+用户要求「优先使用语言特性异步多线程并发协程等优化手段」。本项目的判断是：
+**并发该用，异步不该用** —— 理由是可核查的，不是偏好。
+
+`async`/`await` 在 C# 里的语义是「在 `await` 处把后续代码交给线程池**或**某个
+`SynchronizationContext` 继续执行」。而本插件要做的每一件事 ——
+`target.openPort()`、`Programs.connect()`、`computer.files` 的增删 ——
+都只能碰游戏对象状态，必须在**游戏主线程**上执行。用 `async` 的结果是：
+`await` 之后的代码跑在**线程池线程**上，与游戏线程同时触摸 `visibleNodes`、
+`connectedComp` 等非线程安全字段 —— 正是 11.1(b) 描述的那类缺陷。
+
+游戏本身的架构也印证这一点：它只有**一个**位置把工作丢给派生线程
+（`OS.execute`，OS.cs:1754），且那里的 `threadExecute` 只做终端的文本处理。
+真正的状态变更全部由 `OS.Update` 在主线程逐帧推进 —— 本插件的
+`HackRun.Tick` 正是同一个模式。
+
+至于「协程」：Hacknet 基于 FNA/MonoGame，其更新循环是
+`Update(GameTime)` 每帧回调一次，没有 Unity 那样的 `IEnumerator` 协程原语。
+等价物就是本插件已有的做法 —— 把长动作拆成 `HackStep` 序列，
+每帧在 `OS.Update` Postfix 里推进一个（`_timer` 累积到 `delay` 才 `Apply`
+一步）。这就是协程语义，且天然在主线程上。
+
+**结论**：状态变更同步在主线程（逐帧状态机），跨线程只传**不可变参数**
+（`HackOptions` 是 `record`），用 BCL 并发集合兜住共享容器。
+`async` 在这里只会把「主线程顺序执行」拆成「不确定的线程池调度」，纯属负收益。
+
+### 11.2 死代码
+
+| 符号 | 判定依据 | 处置 |
+|---|---|---|
+| `HackRun.Elapsed` | 全仓仅两处：声明 +`+= deltaSeconds`；无任何读取者 | **删除**（连累加一起删） |
+| `HackPanel.AtMost` | 仅包装 `source.Take(count)`，两处调用点改为 `for` 后无引用 | **删除** |
+| `HackRun.Tick` 返回值 | 调用方（`HackOverlay`/`PendingRuns`）均丢弃；文档注释自称「供日志节流」但从未节流 | 改 `void` |
+| `HackPanel.Palette.Bad` | 有使用者（收起/展开态关闭按钮），**保留** | — |
+
+`Tick` 的返回值是 YAGNI 的典型：为不存在的需求（日志节流）预留了接口。
+
+### 11.3 性能：每帧执行路径上的三处浪费
+
+面板绘制每帧跑 60 次，是唯一的持续开销来源。
+
+| 问题 | 原实现 | 修法 |
+|---|---|---|
+| 字符串每帧重复大写 | `run.Phase?.ToUpperInvariant()` 在 `DrawRunning` 里，每帧对同一字符串转换一次 | Phase 在**赋值处**一次性大写（12 个赋值点），绘制期直接画 |
+| 超长文本截断 | `Ellipsize` 逐字符 `Substring` + 每轮重测 `MeasureString`，O(长度) 次测量 | 首字符宽度比例估算 + 常数步向两侧微调；结果与逐字符法一致 |
+| 每帧 LINQ 分配 | `AtMost` 用 `Take`，每次遍历分配枚举器 | 改 `for` 循环索引，并引入 `MaxOutcomeRows` 常量替代裸 `5` |
+
+`Segment`/`Check`/`Outcome` 的标签测量无法省（文本长度动态），保持原样。
+
+### 11.4 算法：两处超线性查找
+
+| 位置 | 原复杂度 | 修法 |
+|---|---|---|
+| `ResolveTargets` 去重 | `List.Contains` → O(n²) | `HashSet<Computer>` → O(n) |
+| `ReachableComputers` 展开循环 | `map.visibleNodes.Contains(next)`，`visibleNodes` 是 `List<int>` → O(V·E) | 先摊平成 `HashSet<int>` 供 O(1) 判「已发现」 |
+
+显式目标串可能重复点名同一台机器（用户手抖写两遍），全网池则可能因
+多源种子重叠而重复，两者都走同一条去重路径。
+
+### 11.5 一处布局 bug（自查）
+
+`MaxY` 原按 `CollapsedHeight`（30px）算纵向上限，但展开态面板高数百像素 ——
+拖到屏幕底部时面板会坠出可视区。改为按**当前帧实际高度**约束，`Drag` 与
+`ResolveOrigin` 都传入 `LastFrame.Height` / 当次高度。
+
+### 11.6 注释漂移
+
+| 位置 | 漂移 |
+|---|---|
+| `HackOverlay` catch 注释 | 自称「内层 catch 可能吞异常并留下未关闭批次」，但 `finally` 里 `begun` 时确会 `End()`，批次不会泄漏 |
+| `HackScope.Network` 注释 | 仍写「全部已发现节点」，而 v1.7 已改为「从玩家机与已发现节点出发的可达集合」 |
+| CLI help 的 `here` 说明 | 写 `default: whole network`，实际已是可达集合口径 |
+
+三处均已订正。注释漂移比无注释更坏 —— 它主动误导后续维护者。
+
+### 11.7 codebase-memory 索引退化（工具链修正）
+
+**现象**：索引从 25470 节点塌成 360 节点，`not_indexed` 指向 `decompiled/`。
+
+**根因**：`.gitignore` 为发布需要排除了 `decompiled/`（游戏反编译源码，版权物），
+而 codebase-memory **把 `.gitignore`、`.git/info/exclude` 与 `.cbmignore` 一并
+当忽略源读取**。`.cbmignore` 里写的「decompiled/ 与 upstream/ 必须保留」因此无效。
+
+**验证过程**（逐步排除，非猜测）：
+1. `.cbmignore` 追加 `!decompiled/` 取反行 → 无效（不认取反语法）。已回滚。
+2. 把两项从 `.gitignore` 挪到 `.git/info/exclude` → 仍无效（同样被读）。
+3. 临时移除 `.git/info/exclude` 中两行 → **索引立刻恢复到可索引状态**
+   （`excluded` 列表里 decompiled 消失，出现 42 个 `ignored-suffix` 的 PNG）。
+   决定性证据，确认三个文件都参与忽略判定。
+4. 全部回滚 —— 版权物必须留在 git 之外，不能为一时的索引便利牺牲发布正确性。
+
+**结论**：这是无法两全的约束，不是可修的缺陷。当前 360 节点的索引正好覆盖
+插件源码本身（89 个符号，`search_graph`/`trace_path` 可用）。需要查游戏或框架
+API 时直接用 grep 搜 `decompiled/` 与 `upstream/`。已在 `.cbmignore` 里写明
+这一限制与验证过程，避免下次重踩。
+
+### 11.8 验证
+
+- 构建：`dotnet build src/AutoHack/AutoHack.csproj -c Release` → 0 警告 0 错误。
+- 反编译核对（`decompiled/autohack-v8`，1852 行）：
+
+| 类别 | 项 | 结果 |
+|---|---|---|
+| 应消失 | `AtMost` / `float Elapsed` / `private static readonly Queue` | 0 / 0 / 0 |
+| 修复就位 | `ConcurrentDictionary<OS` / `TryEnqueue` / `BusyFor` / `IsRunning` / `TryAdd` | 1 / 2 / 2 / 2 / 1 |
+| 修复就位 | `internal void Tick` / `MaxOutcomeRows` / `MaxY(Rectangle, int)` / `Upper(string)` | 1 / 1 / 1 / 1 |
+| 内核无改动 | `ReachableComputers` / `discoverNode` / `BypassProxy` / `SuppressCounterattack` | 2 / 1 / 7 / 2 |
+| 内核无改动 | `OnOSDrawPrefix` / `proxyOverloadTicks = 0f` / `Programs.disconnect` | 1 / 1 / 1 |
+| 必须为 0 | 原生控件 + `UISmallfont`/`UITinyfont` / `hostileActionTaken` / `Thread.Sleep` | 0 / 0 / 0 |
+
+- 版本：`AutoHack", "1.8.0"`。
+
+未变的是内核语义：目标集合、跳板绕过、反追踪、管理员解除四条链路本轮**零改动** ——
+它们已在 v1.7 验证过，本次只动了外围。
+

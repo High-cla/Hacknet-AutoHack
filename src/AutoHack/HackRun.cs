@@ -43,7 +43,7 @@ internal sealed class HackRun
         SkippedOwned = skippedOwned;
         _steps = BuildSteps(_targets, options, os);
         Current = _targets.Count > 0 ? _targets[0].name : "-";
-        Phase = "Engaging";
+        Phase = "ENGAGING";
     }
 
     internal HackOptions Options { get; }
@@ -53,8 +53,6 @@ internal sealed class HackRun
     internal int Total => _steps.Count;
 
     internal int Done => Math.Min(_index, _steps.Count);
-
-    internal float Elapsed { get; private set; }
 
     internal bool Finished { get; private set; }
 
@@ -67,20 +65,25 @@ internal sealed class HackRun
     /// <summary>因已控（肉鸡）而跳过的机器数。</summary>
     internal int SkippedOwned { get; }
 
-    /// <summary>推进一帧；返回本帧新完成的动作数（供日志节流）。</summary>
-    internal int Tick(OS os, float deltaSeconds)
+    /// <summary>
+    /// 面板标题一律大写。在每个 Phase 赋值处转换一次，
+    /// 而不是在绘制期每帧对同一字符串重复转换。
+    /// </summary>
+    private static string Upper(string value)
+        => string.IsNullOrEmpty(value) ? string.Empty : value.ToUpperInvariant();
+
+    /// <summary>推进一帧。只允许游戏线程调用 —— 会改动游戏状态。</summary>
+    internal void Tick(OS os, float deltaSeconds)
     {
         if (Finished)
         {
-            return 0;
+            return;
         }
-
-        Elapsed += deltaSeconds;
 
         if (_index >= _steps.Count)
         {
             Finish(os);
-            return 0;
+            return;
         }
 
         var step = _steps[_index];
@@ -89,13 +92,12 @@ internal sealed class HackRun
         var delay = step.Kind == HackStepKind.OpenPort ? Options.PortDelay : NonPortDelay;
         if (_timer < delay)
         {
-            return 0;
+            return;
         }
 
         _timer = 0f;
         Apply(os, step);
         _index++;
-        return 1;
     }
 
     private void Apply(OS os, HackStep step)
@@ -106,23 +108,23 @@ internal sealed class HackRun
         switch (step.Kind)
         {
             case HackStepKind.Connect:
-                Phase = "Connecting to " + target.name;
+                Phase = "CONNECTING TO " + Upper(target.name);
                 Echo(os, step.Command);
                 Programs.connect(["connect", target.ip], os);
                 break;
 
             case HackStepKind.Neutralize:
-                Phase = "Disabling counterattack on " + target.name;
+                Phase = "DISABLING COUNTERATTACK ON " + Upper(target.name);
                 Neutralize(os, target);
                 break;
 
             case HackStepKind.BypassProxy:
-                Phase = "Bypassing proxy on " + target.name;
+                Phase = "BYPASSING PROXY ON " + Upper(target.name);
                 BypassProxy(os, target);
                 break;
 
             case HackStepKind.Probe:
-                Phase = "Probing " + target.name;
+                Phase = "PROBING " + Upper(target.name);
                 Echo(os, "probe");
                 foreach (var line in HackEngine.ProbeReport(target))
                 {
@@ -132,13 +134,13 @@ internal sealed class HackRun
                 break;
 
             case HackStepKind.OpenPort:
-                Phase = "Cracking port " + step.Port.DisplayPort;
+                Phase = "CRACKING PORT " + step.Port.DisplayPort;
                 Echo(os, step.Command);
                 HackEngine.OpenPort(target, step.Port, os.thisComputer.ip);
                 break;
 
             case HackStepKind.Escalate:
-                Phase = "Escalating";
+                Phase = "ESCALATING";
                 Echo(os, "porthack");
 
                 // 只用 giveAdmin，不用 os.takeAdmin(ip)：后者内部还会 runCommand("connect " + ip)
@@ -153,12 +155,12 @@ internal sealed class HackRun
                 break;
 
             case HackStepKind.UploadMarker:
-                Phase = "Uploading payload";
+                Phase = "UPLOADING PAYLOAD";
                 UploadMarker(os, target);
                 break;
 
             case HackStepKind.CleanLogs:
-                Phase = "Wiping logs";
+                Phase = "WIPING LOGS";
                 foreach (var name in HackEngine.ClearLogs(target))
                 {
                     Echo(os, "rm /log/" + name);
@@ -241,7 +243,7 @@ internal sealed class HackRun
     private void Finish(OS os)
     {
         Finished = true;
-        Phase = "Complete";
+        Phase = "COMPLETE";
 
         // 收尾反追踪：跑完仍连着且被追踪时，断开是唯一的止血动作。
         AbortTrace(os);

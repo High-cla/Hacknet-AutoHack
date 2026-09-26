@@ -117,7 +117,7 @@ src/AutoHack/
 ├── HackRun.cs          执行模型：动作序列、逐帧推进、指令回显（与绘制解耦）
 ├── HackEngine.cs       决策逻辑：可达目标遍历、端口表读取、提权门槛、反扑解除、跳板绕过、日志清理
 ├── HackTypes.cs        不可变数据：HackOptions（参数解析）/ HackStep（含回显指令）
-├── PendingRuns.cs      无面板运行的队列（命令线程 → 游戏线程）
+├── PendingRuns.cs      无面板运行的调度：命令线程只传参数，游戏线程构造并推进（按 OS 键控的 ConcurrentDictionary）
 ├── IsExternalInit.cs   net472 兼容垫片（record/init 需要）
 └── GlobalUsings.cs     全局 using
 ```
@@ -145,8 +145,13 @@ src/AutoHack/
 **4. 为什么端口状态必须读 Pathfinder 的端口表，而不是原版 `portsOpen`。**
 Pathfinder 用 `[HarmonyPrefix]` 接管了 `Computer.openPort(int, string)` 并 **return false 跳过原版实现**，端口状态改存自己的 `PortState.Cracked`（`ConditionalWeakTable` 里的 `PortTable`）。因此原版 `portsOpen` 数组永不更新 —— 直接读它会**恒为 0**，提权判断将永不成立。**读**状态一律走框架 API：`GetAllPortStates()` / `state.Cracked` / `state.PortNumber` / `Record.OriginalPortNumber` / `CountOpenPorts()`，**没有任何一条**读原版 `portsOpen` 的路径（该字段在装框架的游戏里恒为 0，读它就是 bug）。**写**状态则走游戏自身的签名 `Computer.openPort(int portNum, string ipFrom)`（传 `Record.OriginalPortNumber`）—— 它正是原生破解程序完成时的调用形态，也是 Pathfinder Prefix 接管的那个重载；只要不在它之后去读 `portsOpen`，两者完全同路。详见 `docs/RESEARCH.md`。
 
-**5. 跳板与追踪为什么是「按原生语义重演」而不是绕过。**
-跳板（`proxyActive`）与追踪（`TraceTracker`）都不是可跳过的标志位，而是**只有在正确的交互序列下才会失效**的状态：跳板必须由过载把 `proxyOverloadTicks` 逐帧减到 0（`ShellExe.cs:94-105`），追踪必须由断开连接让 `TraceTracker.Update` 判定 `connectedComp` 不再匹配（`TraceTracker.cs:60-66`）。直接置 `proxyActive = false` 或用 `traceTracker.active = false` 会跳过 `trace_close` 成就与警告闪烁等原生副作用，行为与真人操作不一致 —— 故本插件完整重演这两条路径（含终端的进度/中止提示）。**唯一刻意不重演的**是原生过载里那句 `hostileActionTaken()`：它不参与跳板失效，只负责点燃追踪（见 §行为）。
+**5. 跳板直接收敛到终态，追踪必须靠断开。**
+两者性质不同，处置也必须不同。
+- **跳板（`proxyActive`）**：把 `proxyOverloadTicks` 置 0、`proxyActive` 置 false —— 与 ShellExe 过载跑满的终态（`ShellExe.cs:96-99`）逐字节相同。游戏**没有**更快的路径：终端 `ComShell.exe -o` 启动的就是同一个逐帧扣减的 ShellExe，跑满要 `BASE_PROXY_TICKS = 30f` 秒（`Computer.cs:27`）。跳过等待无副作用 —— 全游戏 12 处 `AchievementsManager.Unlock` 里唯一与追踪相关的是 `TraceTracker.cs:70` 的 `trace_close`，与跳板无关（v1.5 曾误判「跳过会丢成就」，v1.7 已订正）。**唯一刻意不重演**的是过载循环里那句 `hostileActionTaken()`（`ShellExe.cs:105`）：它不参与跳板失效，只负责点燃追踪。
+- **追踪（`TraceTracker`）**：不能直接置 `active = false`，因为追踪的推进条件写在 `TraceTracker.Update` —— `connectedComp` 为空或已换目标即自动失效（`TraceTracker.cs:60-66`）。断开连接正是触发该条件的手段，且会正常走完 `trace_close` 成就与警告闪烁。故此处走原生路径：`Programs.disconnect("dc")`。
+
+**5b. 命令线程与游戏线程的分工（v1.8 修正）。**
+`autohack run` 由 `OS.execute` 在**派生线程**上执行（OS.cs:1754-1767，日志里的 `Spawning thread for command autohack` 就是它），而它触碰的每一样东西 —— 连接状态、`netMap.visibleNodes`、`Computer.files` —— 都属于游戏线程。故命令入口**只解析参数并入队**，真正的 `HackRun` 构造推迟到首帧的 `OS.Update`。构造里有一次可达遍历，遍历会调 `NetworkMap.discoverNode` 改写 `visibleNodes`（NetworkMap.cs:415-431），而游戏线程每帧都在遍历那个 `List<int>`。调度容器用按 OS 键控的 `ConcurrentDictionary`：`TryAdd` 同时充当「同一终端只允许一条运行」的原子互斥。
 
 **6. 管理员反扑只能从源头解除。**
 `Computer.admin` `disconnectionDetected` 的延迟回调是在`断开那一刻`注册进 `os.delayer` 的（`BasicAdministrator` `20.0 * Utils.random.NextDouble()`），事后无法撤销；唯一可控的时点是**断开之前**。所以本插件把「解除反扑」做成独立步骤（`HackStepKind.Neutralize`），排在侦察之前 —— 而不是挂在 `connect` 上，因为 `direct`／已连接的路径根本没有 `connect` 步。置 null 而非替换成自定义 `Administrator`：`type="none"` 本就是游戏的原生状态，`admin?.` 是空条件调用，语义完全对齐，不需要新类型。
@@ -158,7 +163,7 @@ Pathfinder 用 `[HarmonyPrefix]` 接管了 `Computer.openPort(int, string)` 并 
 ```
 [Info : BepInEx] Loading [AutoUpdater 5.3.4]
 [Info : BepInEx] Loading [PathfinderAPI 5.3.4]   ← Pathfinder 先，安装属性扫描 hook
-[Info : BepInEx] Loading [AutoHack 1.7.0]        ← 本插件后，能被扫描到
+[Info : BepInEx] Loading [AutoHack 1.8.0]        ← 本插件后，能被扫描到
 [Info : AutoHack] AutoHack loaded (GUI).
 [Info : AutoHack] self-check OK: 'autohack' is registered and autocompletes.
 ```
@@ -168,7 +173,7 @@ Pathfinder 用 `[HarmonyPrefix]` 接管了 `Computer.openPort(int, string)` 并 
 ### 静态验证（反编译产物）
 
 ```
-[BepInPlugin("com.highcla.autohack", "AutoHack", "1.7.0")]
+[BepInPlugin("com.highcla.autohack", "AutoHack", "1.8.0")]
 [Command("autohack", true, false)]
 
 Echo:   os.write("\n" + os.terminal.prompt + command);
@@ -214,6 +219,23 @@ BypassProxy          7    跳板一次收敛
 Seed                 3    BFS 种子（含边界判断去重）
 proxyOverloadTicks = 0f @317 / proxyActive = false @318   同 ShellExe 终态
 ```
+
+v1.8 反编译产物逐项核对（`decompiled/autohack-v8/AutoHack.decompiled.cs`，1807 行）：
+
+```
+Elapsed              2    仅剩 gameTime.ElapsedGameTime（死属性已删）
+AtMost               0    已删（LINQ Take 换成 for 索引循环）
+ConcurrentQueue      1    跨线程队列换并发集合
+TryPeek/TryDequeue   2    游戏线程出队，命令线程入队
+internal void Tick   1    Tick 不再返回无用的动作计数
+MaxOutcomeRows       1    取代裸魔法值 5
+MaxY(Rectangle,int)  1    纵向上限按当前高度，不再用收起高度
+Upper(string)        1    Phase 在赋值处大写，绘制期零转换
+原生控件 / UISmallfont / UITinyfont   0
+```
+
+本轮只动外围（死代码、并发、每帧开销、注释），**四条内核链路零改动** ——
+目标集合、跳板绕过、反追踪、管理员解除均保持 v1.7 已验证的行为。
 
 ### 未验证
 

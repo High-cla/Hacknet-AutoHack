@@ -9,7 +9,7 @@ internal enum HackScope
     /// <summary>仅当前已连接的节点。</summary>
     Connected,
 
-    /// <summary>网络地图上全部已发现节点。</summary>
+    /// <summary>从玩家机与已发现节点出发、沿网络连线可达的全部服务器。</summary>
     Network,
 
     /// <summary>仅显式指定的目标。</summary>

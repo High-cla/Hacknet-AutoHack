@@ -2373,6 +2373,80 @@ DETECTED」特效分支，只按数字位数生成随机字符串，**不遍历�
 - 入口：`AutoHackPlugin.cs`（子命令分派 + help）、`HackPanel.cs`（TOOLS 区，
   `PanelAction` 改为 `(Kind, Verb)` 记录结构）、`HackOverlay.cs`（工具执行路径）
 - 产物：`<Hacknet>/BepInEx/plugins/AutoHack.dll`，81408 字节
-- MD5：`0220d6ad083d792753be1ce8bd1a725d`
+- MD5：`0220d6ad083d792753be1ce8bd1a725d`（已被 v1.14.1 取代）
 - 构建：`rm -rf src/AutoHack/obj src/AutoHack/bin && dotnet build src/AutoHack/AutoHack.csproj -c Release` → 0 警告 0 错误
 - 验收读数：DEC 反推 39/39 通过（43 层）；内存切分偏移 441 与往返逐字节一致
+
+## 21. v1.14.1：两处工具缺陷修复
+
+用户实测报回两条：「清理 log 没包括玩家的机器」「全部程序显示给予但实际无效果」。
+两条都是真缺陷，根因都已定位到具体代码行。
+
+### 21.1 全部程序无效果 —— 自造的长度守卫恒真
+
+`ExeTools` 原本用 `data.Length == PortExploits.EXE_FILE_LENGTH` 判「这份数据可用」。
+该判据是错的，两层原因：
+
+1. **`EXE_FILE_LENGTH = 500` 是"请求长度"，不是产物长度。** 它在游戏里从未被任何代码
+   使用（全仓 grep 只有 `PortExploits.cs:10` 一处声明，无读者）。`Computer.generateBinaryString(500)`
+   （`Computer.cs:1578-1588`）先开 `byte[length / 8]` —— 即 `byte[62]` —— 再逐字节
+   `text += Convert.ToString(array[i], 2)`（`:1585`）。**`Convert.ToString(byte, 2)` 不补前导零**，
+   每字节产出 1~8 位，62 字节合计约 445 字符。
+2. 存档实证：玩家 `/bin` 里 `SSHcrack.exe` 的 data 实测 **len = 445**。
+
+于是 `data.Length == 500` 恒假 → 表核对打印 `0/37`，循环里 37 个程序全部判为
+"has no usable exe data" 而 skip，最终 `added 0, skipped 37`。这就是「显示给予但无效果」
+的全部原因 —— **数据源本身是对的**（`PortExploits.crackExeData[port]`，与游戏
+`ComputerLoader.filter` 的占位符实现 `#SSH_CRACK#` 等取的是同一张表，`ComputerLoader.cs:2001-2029`）。
+
+**修法**：判据改成「非空/非空白」。不引入任何长度门槛 —— 长度是游戏 RNG 的产物，
+不是契约。修复后同一份存档的预期读数：`added 28, skipped 9`（9 个已存在；
+`SSHcrack.exe(1)` 是重复副本，`cracks` 表里没有这个名字，不计入）。
+
+游戏侧消费链已逐环核实自洽，无需改动：`ProgramRunner.AttemptExeProgramExecution`
+（`ProgramRunner.cs:686`）→ `GetFileIndexOfExeProgram`（`:658-684`，查询名先
+`.Replace(".exe","").ToLower()`；内置程序 `porthack/forkbomb/shell/tutorial/notes`
+返回 `int.MaxValue` 不走 /bin；其余在 `folder.files` 里按「原名 / 去 .exe / 去 .exe 且小写」
+三种比较）→ `:689` 只从 `os.thisComputer.files.root.searchForFolder("bin")` 取 →
+`:700-710` 按**内容**匹配 `crackExeData[n]` 或 `crackExeDataLocalRNG[n]` →
+`:768-800` `needsPort` 类程序要求目标机开着对应端口（否则 "Target Port is Closed"）→
+`:796` 兼容性闸门 → `:802` `os.launchExecutable`。
+
+### 21.2 清痕不含玩家机器 —— 玩家机被两处显式排除
+
+- `HackEngine.ResolveTargets`（`HackEngine.cs:423`）：
+  `if (comp == null || comp.disabled || ReferenceEquals(comp, os.thisComputer)) { continue; }`
+  —— 玩家机既不入 `Targets` 也不入 `Skipped`。
+- `HackRun.BuildSteps` 只对 `targets`（`:580-583`）与 `skipped`（`:599-605`）追加 `CleanLogs`，
+  玩家机两处都不在。
+
+**结果**：玩家 `/log` 从来没被清过。存档实证 —— 玩家机 `/log` 有 21 条痕迹
+（`@0_Connection:_from_…`、`@298_FileDeleted:…` 等），全部来自玩家自己的连接动作。
+
+**修法**：`options.ClearLogs` 时在**全部步骤之后**追加一条
+`new HackStep(HackStepKind.CleanLogs, os.thisComputer, default, null)`。
+
+排序是刻意的，不是随手放末尾：玩家的 `/log` 记的是「谁连过我」，入侵过程中每连一台
+都会往玩家自己机器上写一条，提前清会被后续步骤重新写回来。放末尾才是终点动作。
+
+**不需要等断开** —— 这是与普通目标的关键差别。普通目标的 `CleanLogs` 必须排在
+`Disconnect` 之前，因为回显的 `rm` 走 `Programs.rm`，作用域取自
+`os.connectedComp`（`Programs.cs:956`）。但玩家机的这条 `CleanLogs` 的 command 传
+`null`（不产生 `rm` 回显），实际删除走 `HackEngine.ClearLogs` →
+`Computer.deleteFile(ipFrom, "*", folderPath)`，而
+`Programs.getFolderFromNavigationPath`（`Programs.cs:1749-1770`）**只读 `path` 与
+`startFolder`，不看 `os.connectedComp` / `os.navigationPath`**。故任何时刻调用结果一致。
+
+**权限门禁**：`Computer.deleteFile`（`Computer.cs:508-517`）对玩家机放行 ——
+`ipFrom == ip == os.thisComputer.ip` 命中 `!ipFrom.Equals(ip)` 的反面。
+`Folder.searchForFolder`（`Folder.cs:76-86`）**不递归**，只比直接子夹，而玩家
+`files.root` 下 `home/log/bin/sys` 平级，故 `root.searchForFolder("log")` 直接命中。
+
+### 21.3 交付
+
+- 改动：`ExeTools.cs`（两处判据）、`HackRun.cs`（BuildSteps 末尾追加玩家机清痕）
+- 产物：`<Hacknet>/BepInEx/plugins/AutoHack.dll`，81408 字节
+- MD5：`2c9ab2c456ce36a4e038803415e371ad`
+- 构建：0 警告 0 错误
+- 验收读数（离线推算，基于 `save_1.xml`）：exes `added 28 / skipped 9`（修复前 0/37）；
+  cleanlogs 新增覆盖玩家机 `/log` 的 21 条痕迹

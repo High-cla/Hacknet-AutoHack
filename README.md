@@ -92,7 +92,7 @@ autohack -h                                     # 帮助
 > 差额是「可以直接敲 IP 连上、但不在连线上」的机器 —— `Programs.connect` 遍历的是
 > `netMap.nodes` 全表，本来就不检查 `links`（见「关键设计决策」#4c）。
 
-### 工具（v1.14.0）
+### 工具（v1.14.0 起，v1.14.1 修缺陷）
 
 四个工具与入侵流程**完全独立** —— 不进 `autohack run` 的自动流程，命令与面板 TOOLS 区按钮走**同一份实现**。面板按钮**单击立即执行**，不弹二次确认（`UNBREAKABLE` 用告警色 + 回显里的 `irreversible` 代替）。
 
@@ -147,6 +147,30 @@ passcode = 头部第 4 段首个密文数字 - 158485
 
 端口走 Pathfinder 的 `PortState.SetCracked`（15 个原版协议），**不写原版 `portsOpen`** ——
 Pathfinder 已用 Harmony Prefix 接管 `openPort`/`openPorts`（`ComputerExtensions.cs:184-204`），原版列表永不更新。
+
+#### v1.14.1 修的两个缺陷
+
+用户实测报回，两条都是真缺陷，根因都在代码里定位到行。
+
+**① 清痕没覆盖玩家自己的机器。**
+`HackEngine.ResolveTargets` 显式跳过 `os.thisComputer`（`HackEngine.cs:423`），
+玩家机因此既不入 `Targets` 也不入 `Skipped`，`BuildSteps` 的两处清痕追加都够不着它 ——
+玩家 `/log` 从来没被清过（存档实证：21 条 `Connection`/`Disconnected`/`FileRead` 痕迹）。
+修法是在**全部步骤之后**追加一条玩家机清痕。排序刻意放末尾：玩家的 `/log` 记的是
+「谁连过我」，入侵途中每连一台都会往自己机器上写一条，提前清会被写回来。
+**不需要等断开** —— 这条清痕不产生 `rm` 回显，实际删除走 `Computer.deleteFile(ipFrom, "*", path)`，
+而 `Programs.getFolderFromNavigationPath`（`Programs.cs:1749-1770`）只读 `path` 与 `startFolder`，
+不看 `os.connectedComp`，与 `rm` 命令的作用域规则不同。
+
+**② 「全部程序」显示给予但无效果。**
+原判据 `data.Length == PortExploits.EXE_FILE_LENGTH`（500）**恒假**：
+`EXE_FILE_LENGTH` 是 `generateBinaryString` 的**请求**长度，不是产物长度 ——
+`generateBinaryString(500)` 开 `byte[500/8]` 即 62 字节（`Computer.cs:1580`），
+而 `Convert.ToString(b, 2)` **不补前导零**（`:1585`），每字节出 1~8 位，实测产物 **445 字符**
+（存档里 `SSHcrack.exe` 的 data 就是 445）。该常量在游戏里**从未被任何代码使用**。
+判据改成「非空」后，同一份存档的读数从 `added 0 / skipped 37` 变为
+`added 28 / skipped 9`。数据源本身一直是对的（`PortExploits.crackExeData`，与游戏
+`ComputerLoader.filter` 的 `#SSH_CRACK#` 等占位符取同一张表）。
 
 ### 脚本模式
 
@@ -478,13 +502,27 @@ Pathfinder 用 `[HarmonyPrefix]` 接管了 `Computer.openPort(int, string)` 并 
 
 ## 验证
 
-### v1.14.0 验证（只看产物 MD5）
+**4j. 清痕覆盖玩家自己；程序补全不设长度门槛（v1.14.1 修正）。**
+
+两条都源于**用错了判据**，而非逻辑写错：
+
+- **清痕的判据是「有痕迹的机器」，不是「被我打过或跳过的机器」。** 前者按定义包含玩家
+  自己（玩家的 `/log` 记的是别人连他的记录），后者的枚举来源是 `ResolveTargets`，
+  而它按设计排除 `os.thisComputer`。用后者的枚举去覆盖前者的语义，玩家机就漏了。
+  修法不是把玩家机塞进 `Targets`（那会连带产生入侵动作），而是在清痕段末尾单独追加一条。
+- **程序补全的判据是「数据非空」，不是「数据等于某个长度」。** `EXE_FILE_LENGTH = 500`
+  看着像契约，实则是 `generateBinaryString` 的入参 —— 该函数先 `byte[length / 8]`，
+  再 `Convert.ToString(b, 2)` 不补零，产出长度由 RNG 决定，与 500 无固定关系。
+  且这个常量在游戏里**零引用**（全仓只有声明一处），拿它当门槛等于自造契约。
+  凡「拿某个常量当数据校验」的地方，先确认那个常量有真实读者。
+
+### v1.14.1 验证（只看产物 MD5）
 
 | 项 | 值 |
 |---|---|
 | 产物 | `<Hacknet>/BepInEx/plugins/AutoHack.dll` |
 | 字节数 | 81408 |
-| MD5 | `0220d6ad083d792753be1ce8bd1a725d` |
+| MD5 | `2c9ab2c456ce36a4e038803415e371ad` |
 | 构建 | `rm -rf src/AutoHack/obj src/AutoHack/bin && dotnet build ... -c Release` → 0 警告 0 错误 |
 
 新增四个独立工具（DEC 解密 / 内存转储 / 程序补全 / 自身加固），源码为
@@ -545,9 +583,9 @@ plan: targets=1 skipped=10 steps=21 creds=True loginSteps=1 speed=Normal
 | 项 | 值 |
 |---|---|
 | 产物路径 | `D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll` |
-| 当前版本 | v1.14.0 |
+| 当前版本 | v1.14.1 |
 | 字节数 | 81408 |
-| MD5 | `0220d6ad083d792753be1ce8bd1a725d` |
+| MD5 | `2c9ab2c456ce36a4e038803415e371ad` |
 
 核对流程：清理 `obj`/`bin` → 构建（须 0 警告 0 错误）→ 记 `md5sum` 与字节数，
 与上一版比对。构建成功即证明源码已编入（增量缓存已清，漏编会报错）；

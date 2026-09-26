@@ -24,19 +24,23 @@ internal static class ExeTools
         var total = PortExploits.cracks.Count;
 
         // 数据源核对：先证明表本身可用，再谈补全。缺数据的 port 如实报出来。
+        //
+        // 判据只能是「非空」—— 不要拿长度做门槛。PortExploits.EXE_FILE_LENGTH(500)
+        // 是 generateBinaryString 的**请求**长度，不是产物长度：generateBinaryString
+        // 开 byte[length/8] 即 62 字节（Computer.cs:1580），而 Convert.ToString(b,2)
+        // 不补前导零（:1585），每字节出 1~8 位，实测产物约 445 字符。
+        // 拿 500 当门槛会把 37 个程序全判成「无数据」—— 曾经的 added 0 就是这么来的。
         var usable = 0;
         foreach (var port in PortExploits.cracks.Keys)
         {
             if (PortExploits.crackExeData.TryGetValue(port, out var probe)
-                && !string.IsNullOrEmpty(probe)
-                && probe.Length == PortExploits.EXE_FILE_LENGTH)
+                && !string.IsNullOrWhiteSpace(probe))
             {
                 usable++;
             }
         }
 
-        os.write("[autohack] exes: table check - " + usable + "/" + total + " entr(ies) carry "
-                 + PortExploits.EXE_FILE_LENGTH + "-char exe data.");
+        os.write("[autohack] exes: table check - " + usable + "/" + total + " entr(ies) carry exe data.");
 
         var root = os.thisComputer.files.root;
         var bin = root.searchForFolder("bin");
@@ -60,8 +64,7 @@ internal static class ExeTools
             }
 
             if (!PortExploits.crackExeData.TryGetValue(pair.Key, out var data)
-                || string.IsNullOrEmpty(data)
-                || data.Length != PortExploits.EXE_FILE_LENGTH)
+                || string.IsNullOrWhiteSpace(data))
             {
                 skipped++;
                 os.write("[autohack] exes: port " + pair.Key + " (" + name + ") has no usable exe data - skipped.");

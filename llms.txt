@@ -3,7 +3,7 @@
 > Hacknet 的 BepInEx / Pathfinder 插件：用游戏自身的原生机制一键入侵全网，带控制面板与脚本驱动。
 > 本文件面向要理解或修改本仓库的编码 agent。规范见 https://llmstxt.org
 
-当前 v1.14.0。构建产物直投游戏插件目录，无需手动拷贝：
+当前 v1.14.1。构建产物直投游戏插件目录，无需手动拷贝：
 
 ```
 D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
@@ -20,7 +20,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    MD5 只回答「部署是否新鲜」。副产品判据：改源码 MD5 必变，只改注释/文档 MD5 不变（注释不进 IL）。
 3. **`gh release create` 绝不自动执行** —— 等用户显式发令。`git push` 可以直接做。
 
-**六个最容易踩的坑**（都带行号，可直接 grep）
+**十个最容易踩的坑**（都带行号，可直接 grep）
 
 1. `Computer.portsOpen` 恒为 0 —— Pathfinder 用 Harmony Prefix 接管 `openPort`/`openPorts`
    并 `return false`，状态改存 `PortState.Cracked`。任何读 `portsOpen` 的判断都是错的，
@@ -44,6 +44,16 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    catch 吞掉，表现为「面板莫名其妙不显示」。只可用 `smallfont`/`tinyfont`/`font`/`detailfont`。
    同理不用原生 `CheckBox`/`Button`（前者只在 hover 时画文字，后者自动缩字并加 13px 色块），
    面板是自绘的。
+9. **清痕要覆盖玩家自己的机器** —— 玩家机被 `ResolveTargets` 显式跳过（`HackEngine.cs:423`），
+   既不入 `Targets` 也不入 `Skipped`，两处清痕追加都够不着它。`BuildSteps` 须在**全部步骤
+   之后**单独追加一条玩家机清痕（放末尾是因为入侵途中每连一台都会往玩家 `/log` 写一条）。
+   这条不需要等断开：它不产生 `rm` 回显，删除走 `Computer.deleteFile` + 显式 `folderPath`，
+   而 `getFolderFromNavigationPath`（`Programs.cs:1749-1770`）只读 `path` 与 `startFolder`，
+   不看 `os.connectedComp` —— 与坑 3 的 `rm` 作用域规则**不同**，别混。
+10. **别拿常量当数据长度门槛** —— `PortExploits.EXE_FILE_LENGTH = 500`（`PortExploits.cs:10`）
+   在游戏里**零引用**，它是 `generateBinaryString` 的**请求**长度：该函数开 `byte[length/8]`
+   再 `Convert.ToString(b, 2)`（**不补前导零**，`Computer.cs:1580-1585`），产物约 445 字符。
+   拿它校验曾让程序补全 `added 0 / skipped 37`（表面「给了但没效果」）。判据用「非空」。
 
 另附一条反直觉事实：**Hacknet 没有绝对路径**。`getFolderAtPath`（`Programs.cs:1582-1593`）
 按 `/` 切分后把空段整个跳过，`/log` 与 `log` 都按「当前目录下的 log 子文件夹」解析。
@@ -52,7 +62,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
 ## 仓库文档
 
 - [README.md](README.md): 安装、面板与命令行用法（含四个独立工具）、终端行为、架构、关键设计决策 #1–#4h、验证方式
-- [docs/RESEARCH.md](docs/RESEARCH.md): 源码级取证，§1–§20，每条结论都带 `文件:行号`
+- [docs/RESEARCH.md](docs/RESEARCH.md): 源码级取证，§1–§21，每条结论都带 `文件:行号`
 - [llms.txt](llms.txt): 本文件
 
 ## 源码

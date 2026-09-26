@@ -102,15 +102,15 @@ autohack -h                                     # 帮助
 | `[autohack] <名> :: admin via login (<账号>)` | 上一步命中的凭据（非指令，故无回显） |
 | `10.0.0.5@> dc` | 断开前先 `Computer.admin = null`，再 `Programs.disconnect`（原生）。**同时**解除延迟反扑与中止追踪：前者见下，后者因 `TraceTracker.Update` 见 `connectedComp == null` 立刻置 `active = false` |
 | `[autohack] trace killed - timer stopped.` | `TraceTracker.stop()` —— 直接毙掉追踪（非指令，故无回显）。断开已让它失效，这步是确定性的兜底 |
-| `10.0.0.5@> rm /log/*` | 清空该目标的整个 `/log`。走游戏自己的删除原语 `Computer.deleteFile(ipFrom, "*", path)`（`Computer.cs:508`），权限门禁与多人同步都交回游戏。因断开自身会追加一条记录，清痕排在 `dc` **之后**，此时已不在目标上，故回显一行状态：`[autohack] <名> :: rm /log/* -> 3 log file(s) wiped` |
-| `[autohack] <名> :: rm /log/* -> 3 log file(s) wiped` | 被 `skip owned`／无望过滤**剔除**的机器同样清痕 —— 「跳过入侵」不等于「放过证据」。无痕迹时静默跳过 |
+| `10.0.0.5@> rm /log/*` | 清空该目标的整个 `/log`。**排在 `dc` 之前**，此刻 `os.connectedComp` 就是目标，回显的是条真能跑的命令（`rm` 的目标机取自连接，`Programs.cs:956`）。底层走游戏自己的删除原语 `Computer.deleteFile(ipFrom, "*", path)`（`Computer.cs:508`），权限门禁与多人同步都交回游戏。战果压成一行 `Deleting 3 file(s)... Done`（沿用游戏自己的措辞） |
+| `[autohack] <名> :: rm /log/* -> 3 log file(s) wiped` | 被 `skip owned`／无望过滤**剔除**的机器同样清痕 —— 「跳过入侵」不等于「放过证据」。它们没有连接，故不出命令回显而走这行状态。无痕迹时静默跳过 |
 | `[autohack] <名> :: proxy bypassed` | 跳板解除（非指令，故无回显） |
 | `[autohack] <名> :: 3/5 ports, admin=yes` | 收尾战果行（非指令） |
 
-> **顺序是刻意的**：提权、上传、**以及断开连接**都会向 `/log` 追加记录（`Computer.disconnecting` 写 `"<玩家IP> Disconnected"`，`Computer.cs:722-727`），所以清痕必须排在本目标的**最后**（`dc` 之后），否则痕迹残留。
+> **顺序是刻意的**：清痕排在本目标的 `dc` **之前**，理由有两条。① `rm` 这类命令的**目标机取自连接** —— `Programs.rm` 第一件事就是 `Computer computer = os.connectedComp != null ? os.connectedComp : os.thisComputer`（`Programs.cs:956`），且 `Programs.disconnect` 会 `navigationPath.Clear()`；断开之后再清，回显的 `rm` 就是条假命令（玩家手敲时也是这个坑）。② 断开自身会向目标 `/log` 追加 `"<玩家IP> Disconnected"`（`Computer.disconnecting`，`Computer.cs:722-727`），所以 `Leave` 在断开时把 `Computer.silent` 临时置真（游戏自己的开关，`Multiplayer.cs:125-127` 就是 set-true→操作→还原），刚清干净的痕迹不会被写回。
 >
 > **删除动作本身不留新痕迹**：`/log` 里的文件名恒为 `@<时间>_<消息>`（`Computer.log` 用 `text.Replace(" ", "_")` 作 `FileEntry.name`，`Computer.cs:338-354`），以 `@` 开头 ⇒ `deleteFile` 跳过 `log("FileDeleted: ...")` 自写（`Computer.cs:543`）。这正是「用游戏原语删 log」不会自我污染的原因。
-> 被剔除的机器（已控／无望）没有入侵步骤可排，其清痕步统一追加在**全部正常步骤之后** —— 此刻不会再有人碰它们，清就是终点动作，不会有新记录再追加进来。
+> 被剔除的机器（已控／无望）没有入侵步骤可排，其清痕步统一追加在**全部正常步骤之后**；它们全程没有连接，删除走 `Computer.deleteFile` 原语（与该命令同一条底层路径），另出一行状态交代战果。
 > 破解指令名取自游戏数据（`PortExploits.cracks`），显示端口取自框架端口表（`PortState.PortNumber`），均不硬编码。
 >
 > **跳板**：目标 `proxyActive` 时，`OS.addExe` 会拦下所有 `needsProxyAccess` 的破解程序（`Proxy Active -- Cannot Execute`），破解必然失败。解除方式是把 `proxyOverloadTicks` 收敛到 0、`proxyActive` 置 false —— 与原生 `ShellExe` 过载跑完的终态逐字节相同（`ShellExe.cs:96-99`），但**不等**那 30 秒。
@@ -264,17 +264,29 @@ Pathfinder 用 `[HarmonyPrefix]` 接管了 `Computer.openPort(int, string)` 并 
   `FileEntry.name`（`Computer.cs:338-354`）。⇒ 删 log 这个动作被 `deleteFile` 自己豁免，
   删完不会多出 `FileDeleted` 记录。存档实证佐证：14 台有痕迹机器的文件名**全部**以 `@` 开头。
 - **权限门禁**（`Computer.cs:511-517`）：`currentUser.type` 为 0/1 即放行；该字段是
-  `UserDetail` 结构体，`type` 默认 0 ⇒ 门禁恒开。真正兜底的是下方 `deleteFile` 返回
-  `false` 时的回退 `files.Clear()` —— 保证「清痕」这个目标不会悄无声息地失败。
-- **回显收敛**：不再逐文件 `rm /log/<名>`（那样会刷出 N 行假命令），
-  改成一条 `rm /log/*`，与真实动作一一对应。已断开时（默认路径）写状态行
+  `UserDetail` 结构体，`type` 默认 0 ⇒ 门禁恒开。但 `login` 成功后 `currentUser` 可能是
+  type 2（`Computer.cs:860` 直接赋 `users[i]`），此时落到 `:515` 的 `ipFrom.Equals(adminIP)`
+  判定 —— 未提权的目标会被拒。故**不看返回值，无条件校验**：`deleteFile` 之后若
+  `logFolder.files.Count > 0` 就 `files.Clear()`。清痕是「证据必须消失」的硬承诺，
+  不能建立在「返回值可信」之上 —— `"*"` 分支是 `flag2 &= deleteFile(...)` 逐个递归后
+  返回 `flag2`，若 `folderPath` 解析偏了它会去删别的文件夹并照样返回 true。
+- **回显收敛 + 顺序修正（v1.11.3）**：清痕改排到 `dc` **之前**，回显一条 `rm /log/*`
+  —— 与真实动作一一对应，且此刻连接在目标上，这是条真命令。战果压成一行
+  `Deleting N file(s)... Done`（沿用游戏 `Programs.rm` 自己的措辞，`Programs.cs:1018-1031`），
+  删 0 条时不吭声。被剔除的机器（全程无连接）走状态行
   `[autohack] <名> :: rm /log/* -> N log file(s) wiped`。
-- **实测发现（存档实证）**：清痕本身**早已生效** —— 参考存档 169 台机器中 9 台已被控制
-  （`adminIP` == 玩家 IP），其 `/log` 里 `Became_Admin` 记录**为 0 条**（`giveAdmin`
-  必写此条，证明清痕确实跑过）。用户看到的"没被删"残留是
-  `Connection:_from` / `Disconnected` / `FileRead` —— 前者是**游玩中重新连接**时游戏自己写的
-  （`Computer.connect` → `log("Connection: from ...")`，`Computer.cs:389`），
-  后者来自玩家手工 `cat` 文件。这两类动作 mod 不参与，也不该替玩家抹掉"清完之后"的新操作。
+- **顺序反转（v1.11.3）**：清痕从 `dc` **之后**改到 **之前**。理由是 `rm` 这类命令的
+  **目标机取自连接** —— `Programs.rm` 第一件事就是取 `os.connectedComp`（`Programs.cs:956`），
+  且 `Programs.disconnect` 会 `navigationPath.Clear()`；断开之后再清，回显的 `rm` 就是假命令。
+  断开本身会写 `"<玩家IP> Disconnected"`（`Computer.cs:722-727`），故 `Leave` 断开时把
+  `Computer.silent` 临时置真（游戏自己的开关，`Multiplayer.cs:125-127` 就是该用法），
+  刚清干净的痕迹不会被写回。详见 `docs/RESEARCH.md` §14.12。
+- **实测发现（存档实证）**：参考存档 169 台机器中仅 **14 台** `/log` 非空（共 94 条记录），
+  9 台已被控制（`adminIP` == 玩家 IP）的机器里 `Became_Admin` 记录**为 0 条**（`giveAdmin`
+  必写此条，证明清痕确实跑过）。残留内容是 `Connection:_from` / `Disconnected` / `FileRead` ——
+  前者是**游玩中重新连接**时游戏自己写的（`Computer.connect` → `log("Connection: from ...")`，
+  `Computer.cs:389`），后者来自玩家手工 `cat` 文件。清痕覆盖面远大于 14 台，
+  绝大多数删除都是空操作（`ClearLogs` 早退，无输出）。
 
 **5. 跳板收敛到终态，追踪直接毙掉。**
 两者性质不同，处置也必须不同。
@@ -296,7 +308,7 @@ Pathfinder 用 `[HarmonyPrefix]` 接管了 `Computer.openPort(int, string)` 并 
 ```
 [Info : BepInEx] Loading [AutoUpdater 5.3.4]
 [Info : BepInEx] Loading [PathfinderAPI 5.3.4]   ← Pathfinder 先，安装属性扫描 hook
-[Info : BepInEx] Loading [AutoHack 1.11.2]        ← 本插件后，能被扫描到
+[Info : BepInEx] Loading [AutoHack 1.11.3]        ← 本插件后，能被扫描到
 [Info : AutoHack] AutoHack loaded (GUI).
 [Info : AutoHack] self-check OK: 'autohack' is registered and autocompletes.
 ```
@@ -306,7 +318,7 @@ Pathfinder 用 `[HarmonyPrefix]` 接管了 `Computer.openPort(int, string)` 并 
 ### 静态验证（反编译产物）
 
 ```
-[BepInPlugin("com.highcla.autohack", "AutoHack", "1.11.2")]
+[BepInPlugin("com.highcla.autohack", "AutoHack", "1.11.3")]
 [Command("autohack", true, false)]
 
 Echo:   os.write("\n" + os.terminal.prompt + command);
@@ -323,7 +335,7 @@ Escalate: HackEngine.CanEscalate(target) && target.giveAdmin(os.thisComputer.ip)
 Speed:   DelayFor(kind) -> Normal 0.35s / Fast 0.05s / Instant 0；端口步恒为 PortDelay
 Owned:   comp.adminIP == os.thisComputer.ip                                  // 肉鸡判定
 Hopeless: Ports(comp).Count <= comp.portsNeededForCrack                      // 永远开不满 -> 跳过
-Clean:   comp.deleteFile(ipFrom, "*", [IndexOf(log)])  -> "rm /log/*"（连着时）/ 状态行（已断开）
+Clean:   comp.deleteFile(ipFrom, "*", [IndexOf(log)])  -> "rm /log/*"（目标上）/ 状态行（无连接）
 Skipped: TargetPlan.Skipped -> 被剔除的机器在全部正常步骤之后补 CleanLogs（清痕不受跳过影响）
 Proxy:   HackEngine.BypassProxy(target) -> proxyOverloadTicks = 0f; proxyActive = false  // 同 ShellExe 过载终态
 Neutral: HackEngine.SuppressCounterattack(target) -> comp.admin = null             // 断开前解除反扑
@@ -387,7 +399,7 @@ SolveFirewall          7    步类型 + 决策 + 执行 + 回显
 attemptSolve           1    走游戏自身入口（不用 Programs.solve 的 doDots 阻塞）
 SkippedHopeless        6    跳过计数（决策/属性/报告/面板/终端）
 HackStepKind.SolveFirewall 2  新步骤
-Disconnect @1693 -> CleanLogs @1697   清痕排在本目标最后（断开自身会写 /log）
+CleanLogs @1937 -> Disconnect @1941 -> KillTrace @1943   清痕排在 dc 之前（rm 的目标机取自连接）
 原生控件 / UISmallfont / hostileActionTaken   0 / 0 / 0
 ```
 
@@ -440,6 +452,20 @@ rm /log/*                      2    一条回显（连着时）+ 一条状态行
 FileDeleted                    0    本插件不产生该记录（@ 前缀豁免，非本插件所致）
 TargetPlan                     5    目标解析结构仍在
 in skipped                     1    被剔除机器的补步仍在
+UISmallfont / doCheckBox / hostileActionTaken / Thread.Sleep   0 / 0 / 0 / 0
+```
+
+v1.11.3 反编译产物逐项核对（`decompiled/autohack-v113/AutoHack.decompiled.cs`，2166 行）：
+
+```
+"1.11.3"                       1    BepInPlugin 版本（"1.11.2" / "1.11.1" 均 0 残留）
+CleanLogs @1937 -> Disconnect @1941 -> KillTrace @1943
+                                    清痕排在 dc 之前（rm 的目标机取自连接）
+"rm /log/*"                    2    一条回显（在目标上）+ 一条状态行（无连接）
+deleteFile(ipFrom              1    走游戏删除原语
+.files.Clear()                 1    无条件兜底（不看返回值）
+connectedComp.silent = true    1    断开静默，避免 Disconnected 写回刚清的 /log
+Deleting                       1    战果摘要行（沿用 Programs.rm 的措辞）
 UISmallfont / doCheckBox / hostileActionTaken / Thread.Sleep   0 / 0 / 0 / 0
 ```
 

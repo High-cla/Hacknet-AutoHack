@@ -651,11 +651,20 @@ internal static class HackEngine
         }
 
         // 相对 files.root 的索引路径 —— 用 IndexOf 实求，不硬编码 log 的位置。
+        // Folder 未重写 Equals（Folder.cs:15），IndexOf 是引用比较，而 logFolder
+        // 正是从 root.folders 里取出来的，故必然命中其真实下标。
         var folderPath = new List<int> { root.folders.IndexOf(logFolder) };
-        if (!comp.deleteFile(ipFrom, "*", folderPath))
+
+        // 走游戏的删除原语 —— 这就是 Programs.rm 真正的动作
+        // （Programs.cs:1024 只调这一句），与回显的 rm 语义一致。
+        comp.deleteFile(ipFrom, "*", folderPath);
+
+        // 无条件校验，不看返回值。"*" 分支是 flag2 &= deleteFile(...) 逐个递归后
+        // 返回 flag2 —— 若 folderPath 解析偏了，它会去删别的文件夹并照样返回 true；
+        // 权限门禁（Computer.cs:511-517）拒绝时也只是静默 false。
+        // 清痕是「证据必须消失」的硬承诺，不能建立在「返回值可信」之上。
+        if (logFolder.files.Count > 0)
         {
-            // 兜底：权限门禁（Computer.cs:511-517）拒绝时 deleteFile 静默返回 false，
-            // 此时退回直接清空 —— 保证「清痕」这个目标不会悄无声息地失败。
             logFolder.files.Clear();
         }
 

@@ -990,7 +990,14 @@ v1.7/v1.8 的 `ReachableComputers` 按 `visibleNodes` + `Computer.links` 做多�
 而游戏线程每帧都在遍历那个 `List<int>`（`HubServerAlertsIcon.cs:123` 等）——
 v1.8 为此专门把 `HackRun` 构造推迟到游戏线程。新实现是纯读，不再触碰该表。
 
-### 12.3 根因三：清痕排在断开之前，等于白清
+### 12.3 根因三：清痕与断开的先后 —— 本节结论已被 §14.12 推翻
+
+> ⚠️ **本节的历史结论是错的，保留在此仅作记录。** 当时把 `CleanLogs` 挪到
+> `Disconnect` **之后**，理由是「断开自身会往 /log 写一条 Disconnected」。
+> 这只对了一半：`rm` 这类命令的**目标机取自连接**（`Programs.cs:956` 取
+> `os.connectedComp`），断开之后再清，回显的 `rm` 就是条假命令 ——
+> 与玩家手敲「没有效果」是同一个坑。正确解法是清痕排在断开**之前**，
+> 再把断开本身静音（`Computer.silent`）。详见 §14.12。
 
 `Computer.disconnecting`（`Computer.cs:722-727`）：
 
@@ -1006,12 +1013,15 @@ v1.8 的步骤顺序是 `CleanLogs → Disconnect` —— 清完立刻又追加�
 `"124.205.173.252 Disconnected"`，痕迹原样留存。这就是「已连接的服务器依旧会删 log」
 （看起来删了，其实目标上还有记录）。
 
-处置：把 `CleanLogs` 挪到 `Disconnect` 之后，成为本目标的**最后一步**。
-新顺序：`Connect → Neutralize → Probe → BypassProxy → OpenPort×N → SolveFirewall → Escalate → UploadMarker → Disconnect → CleanLogs`。
+~~处置：把 `CleanLogs` 挪到 `Disconnect` 之后，成为本目标的**最后一步**。
+新顺序：`… → UploadMarker → Disconnect → CleanLogs`。~~
 
-连带修正回显的真实性：清痕时已不在目标上，再回显 `rm /log/xxx` 就是假命令。
+~~连带修正回显的真实性：清痕时已不在目标上，再回显 `rm /log/xxx` 就是假命令。
 故按 `os.connectedComp == null` 分支 —— 连着才回显真 `rm`（`here`／已连接路径），
-否则写一行状态 `[autohack] <名> :: wiped N log file(s)`。
+否则写一行状态 `[autohack] <名> :: wiped N log file(s)`。~~
+
+**以上处置在 v1.11.3 被推翻**：真正的顺序是 `CleanLogs → Disconnect`，
+断开改为静默。详见 §14.12。
 
 ### 12.4 根因四：无提权可能的机器每次都被打
 
@@ -1462,7 +1472,7 @@ if (options.ClearLogs)
 ```
 
 **为什么排在最后**：正常流程不会再碰这些机器，此刻清是终点动作，
-不会有新记录再追加进来（对比 §12.3：正常目标的清痕必须排在 `dc` 之后，
+不会有新记录再追加进来（正常目标的清痕排在 `dc` 之前，见 §14.12；
 同样是为了「清完不再有人写」这个不变量）。
 
 **边界**：`disabled` 机器与玩家自己**不进** `Skipped` —— 既没打过，也不该碰。
@@ -1595,3 +1605,136 @@ if (!flag && !silent && !ipFrom.Equals(adminIP) && !ipFrom.Equals(ip)) return fa
 `deleteFile` 1、`ClearLogs(Computer comp, string ipFrom)` 1、`rm /log/*` 2、
 `FileDeleted` 0、`"1.11.2"` 1、`"1.11.1"` 0；禁项
 `UISmallfont`/`doCheckBox`/`hostileActionTaken`/`Thread.Sleep` 全 0。
+
+
+### 14.12 清痕必须排在断开之前，断开改为静默（v1.11.3 修正）
+
+**用户指令（决定性）**：「我给的命令是要连接上对方的文件系统才能有效果的。还是没有效果」
+
+这一句点破了 v1.11.2 的根因。此前把清痕排在 `dc` 之后，理由是不让
+`disconnecting` 写的那条 `Disconnected` 残留 —— 但那个理由只对了一半。
+
+#### 14.12.1 命令的作用域由连接决定
+
+`Programs.rm`（`Programs.cs:948-1034`）第一件事：
+
+```csharp
+Computer computer = ((os.connectedComp != null) ? os.connectedComp : os.thisComputer);
+```
+
+**第 956 行 —— 目标机就是"当前连接"。** `navigationPath` 只负责在目标上选文件夹：
+
+```csharp
+public static Folder getCurrentFolder(OS os)
+    => getFolderAtDepth(os, os.navigationPath.Count);          // Programs.cs:1531
+
+public static Folder getFolderAtDepth(OS os, int depth)
+{
+    Folder folder = ((os.connectedComp != null)
+        ? os.connectedComp.files.root : os.thisComputer.files.root);  // :1538
+    ...
+}
+```
+
+而 `Programs.disconnect` 会 `os.navigationPath.Clear()`。⇒ **断开之后再 `rm`，
+操作的是玩家自己的文件系统**。清痕排在 `dc` 之后，语义上就是一条假命令 ——
+正是玩家手敲时踩的同一个坑。
+
+#### 14.12.2 玩家手敲的那条命令为什么也失败
+
+插件日志（`BepInEx/LogOutput.log`）末尾：
+
+```
+Spawning thread for command cd log
+Spawning thread for command ls
+Spawning thread for command rm log/*
+Spawning thread for command cd log
+```
+
+玩家在 `cd log` 之后敲 `rm log/*`。`Programs.rm` 把参数拆成 path=`log`、name=`*`：
+
+```csharp
+int num = args[1].LastIndexOf('/');                    // Programs.cs:957
+if (num > 0 && num < args[1].Length - 1) {
+    text = args[1].Substring(num + 1);                 // "*"
+    text2 = args[1].Substring(0, num);                 // "log"
+}
+folder = getFolderAtPath(text2, os, folder, returnsNullOnNoFind: true);  // :968
+if (folder == null) { os.write("Folder " + text2 + " Not found!"); return; }
+```
+
+`getFolderAtPath` 从**当前目录**（已在 `/log`）往下找名为 `log` 的子文件夹
+（`Programs.cs:1582+`，`folder.folders[j].name == array[i]`；`Folder.searchForFolder`
+同理，`Folder.cs:76-86`）⇒ 不存在 ⇒ `Folder log Not found!` 直接返回。
+正确敲法是 `cd log` 后 `rm *`，或根目录下 `rm /log/*`。
+
+#### 14.12.3 改法
+
+**① 顺序反转**（`HackRun.BuildSteps`）：`CleanLogs` 提到 `Disconnect` 之前，
+命令从 `null` 改为字面量 `"rm /log/*"`。新顺序：
+
+```
+… → Escalate → UploadMarker → CleanLogs → Disconnect → KillTrace
+```
+
+**② 断开静音**（`HackRun.Leave`）：
+
+```csharp
+var wasSilent = leaving.silent;
+leaving.silent = true;
+try { Programs.disconnect(["dc"], os); }
+finally { leaving.silent = wasSilent; }
+```
+
+`silent` 是游戏自己的 public 字段（`Computer.cs:57` `public bool silent = false;`），
+`Multiplayer.cs:125-127` 就是「set true → 操作 → 还原」这个用法。
+`disconnecting` 写日志的门正是它（`Computer.cs:723` `if (!silent)`）。
+只影响这一台、只影响这一次调用，`finally` 保证还原。
+
+**③ 兜底改为无条件校验**（`HackEngine.ClearLogs`）：
+
+```csharp
+comp.deleteFile(ipFrom, "*", folderPath);
+if (logFolder.files.Count > 0) { logFolder.files.Clear(); }
+```
+
+原实现只在 `deleteFile` 返回 `false` 时回退。但 `"*"` 分支是
+`flag2 &= deleteFile(...)` 逐个递归后返回 `flag2`（`Computer.cs:526-539`）——
+若 `folderPath` 解析偏了，它会去删**别的文件夹**并照样返回 true。
+清痕是「证据必须消失」的硬承诺，不能建立在「返回值可信」之上。
+
+**④ 战果可见**：原版 `rm` 逐文件打印 `"Deleting <名>." + "Done"`
+（`Programs.cs:1018-1031`），全自动跑 100+ 台会刷屏，压成一行
+`Deleting N file(s)... Done`（沿用游戏自己的两个词）；删 0 条时不吭声。
+被剔除的机器没有连接，走状态行 `[autohack] <名> :: rm /log/* -> N log file(s) wiped`。
+
+#### 14.12.4 权限门禁的再核对
+
+```csharp
+bool flag = false;
+if (currentUser.type == 1 || currentUser.type == 0) { flag = true; }        // Computer.cs:511
+if (!flag && !silent && !ipFrom.Equals(adminIP) && !ipFrom.Equals(ip)) { return false; }
+```
+
+`currentUser` 是 `UserDetail` 结构体字段（`Computer.cs:65`），`type` 默认 0
+⇒ 门禁恒开。但 `Computer.login` 命中 `users[i]` 时直接 `currentUser = users[i]`
+（`Computer.cs:860`），若是 type 2 账号则落到 `:515` 的 `ipFrom.Equals(adminIP)`
+判定 —— 未提权的目标会被拒。这正是「无条件校验」不可省的原因。
+
+存档实证：参考存档 169 台机器中仅 **14 台** `/log` 非空（共 94 条记录），
+清痕覆盖面远大于此，绝大多数删除都是空操作（`ClearLogs` 早退，无输出）。
+
+#### 14.12.5 反编译核对
+
+`decompiled/autohack-v113/AutoHack.decompiled.cs`（2166 行）：
+
+| 项 | 计数 | 说明 |
+|---|---|---|
+| `"1.11.3"` / `"1.11.2"` / `"1.11.1"` | 1 / 0 / 0 | 版本唯一 |
+| `CleanLogs @1937 → Disconnect @1941 → KillTrace @1943` | — | 顺序反转实证 |
+| `"rm /log/*"` | 2 | 一条回显 + 一条状态行 |
+| `deleteFile(ipFrom` | 1 | 走游戏删除原语 |
+| `.files.Clear()` | 1 | 无条件兜底 |
+| `connectedComp.silent = true` | 1 | 静默断开 |
+| `Deleting ` | 1 | 战果摘要行 |
+| `UISmallfont` / `doCheckBox` / `hostileActionTaken` / `Thread.Sleep` | 0/0/0/0 | 禁项清白 |

@@ -21,9 +21,11 @@ internal sealed record TargetOutcome(string Name, int Opened, int Total, bool Es
 /// 2. 追踪：TraceTracker 只在「连着被追踪目标」时推进（Update 见 connectedComp 为空
 ///    即刻置 active = false），故跑完一个目标就断开连接即等于反追踪；
 ///    否则计时归零会走 OS.timerExpired() 端掉玩家。
-/// 3. 清痕必须在断开**之后**：Computer.disconnecting 会往目标 /log 写
-///    "&lt;玩家IP&gt; Disconnected"（Computer.cs:722-727），先清后断会留下这条痕迹。
-///    断开后的清痕不再回显 rm（那时不在目标上），改为一行状态。
+/// 3. 清痕必须在断开**之前**：rm 这类命令的目标机取自 os.connectedComp
+///    （Programs.rm，Programs.cs:956），且 Programs.disconnect 会清空
+///    os.navigationPath —— 断开之后再清，回显的 rm 就是条假命令，正如玩家
+///    手敲时那样「没有效果」。断开本身会写 "&lt;玩家IP&gt; Disconnected"
+///    （Computer.cs:722-727），故 Leave 断开时把 silent 置真，避免刚清的痕迹被写回。
 /// 4. 跳板：proxyActive 的机器上，需要跳板访问权的破解程序被 OS.addExe 门禁拦下
 ///    （OS.cs:2165）。解除即把 proxyOverloadTicks 收敛到 0、proxyActive 置 false ——
 ///    与 ShellExe 过载跑完的终态逐字节相同，只是不等那 30 秒。
@@ -257,27 +259,31 @@ internal sealed class HackRun
 
             case HackStepKind.CleanLogs:
                 Phase = "WIPING LOGS";
-                var wiped = HackEngine.ClearLogs(target, os.thisComputer.ip);
 
-                // 回显的 rm 只有在「还连着目标」时才是真命令；清痕排在 dc 之后
-                // （断开本身会往目标 /log 写一条 "<ip> Disconnected"，先清后断等于白清），
-                // 此时已不在目标上，再回显 rm 就是假的 —— 改为一行状态。
-                if (os.connectedComp == null)
+                // 正常目标：清痕排在它自己的 Disconnect 之前，此刻 os.connectedComp
+                // 就是 target，回显的 rm 是一条真能跑的命令（正是玩家手敲的那条）。
+                // 先回显后执行，与其余步骤同一约定。
+                // 命令的作用域由连接决定（Programs.rm，Programs.cs:956 取
+                // os.connectedComp），清痕排在 Disconnect 之前，此刻正在目标上。
+                var onTarget = os.connectedComp == target;
+                if (onTarget)
                 {
-                    // 已断开：断开本身会写一条 "<ip> Disconnected"（Computer.cs:722-727），
-                    // 清痕排在它之后，所以这里报的是真实删除结果。
-                    // 无论是否连着都把 rm /log/* 写出来 —— 它就是这个动作的语义。
-                    if (wiped.Count > 0)
-                    {
-                        os.write("[autohack] " + target.name + " :: rm /log/* -> "
-                            + wiped.Count + " log file(s) wiped");
-                    }
-
-                    break;
+                    Echo(os, "rm /log/*");
                 }
 
-                // stay 模式（不断开）下目标还在连接上：回显真实可跑的 rm 命令。
-                Echo(os, "rm /log/*");
+                var wiped = HackEngine.ClearLogs(target, os.thisComputer.ip);
+
+                // 战果必须可见。原版 rm 逐文件打印 "Deleting <名>." + "Done"
+                // （Programs.cs:1018-1031），全自动跑 100+ 台会刷屏，压成一行摘要，
+                // 措辞沿用游戏自己的两个词。删 0 条时不吭声 —— 无痕迹的机器是多数。
+                if (wiped.Count > 0)
+                {
+                    os.write(onTarget
+                        ? "Deleting " + wiped.Count + " file(s)... Done"
+                        : "[autohack] " + target.name + " :: rm /log/* -> "
+                            + wiped.Count + " log file(s) wiped");
+                }
+
                 break;
 
             case HackStepKind.Disconnect:
@@ -304,14 +310,31 @@ internal sealed class HackRun
     /// </summary>
     private static void Leave(OS os, Computer target, string command)
     {
-        if (os.connectedComp == null)
+        var leaving = os.connectedComp;
+        if (leaving == null)
         {
             return;
         }
 
         Neutralize(os, target);
         Echo(os, command);
-        Programs.disconnect(["dc"], os);
+
+        // 静默断开。<c>silent</c> 是游戏自己的 public 开关（Computer.cs:57），
+        // Multiplayer.cs:125-127 就是「set true → 操作 → 还原」这个用法。
+        // 断开本身会往目标 /log 写 "<ip> Disconnected"（Computer.disconnecting，
+        // Computer.cs:722-727），而清痕排在断开之前（要连着目标的文件系统才作数），
+        // 不静音就等于清完立刻被写回一条。
+        // 只影响这一台、只影响这一次调用，finally 保证还原。
+        var wasSilent = leaving.silent;
+        leaving.silent = true;
+        try
+        {
+            Programs.disconnect(["dc"], os);
+        }
+        finally
+        {
+            leaving.silent = wasSilent;
+        }
     }
 
     /// <summary>
@@ -480,6 +503,16 @@ internal sealed class HackRun
                 steps.Add(new HackStep(HackStepKind.UploadMarker, target, default, null));
             }
 
+            // 清痕必须排在断开**之前**：rm 的语义是「操作当前连接的文件系统」
+            // —— Programs.rm 的作用域来自 getCurrentFolder(os)，而它读的是
+            // os.connectedComp 与 os.navigationPath（Programs.cs:1531-1534 →
+            // getFolderAtDepth :1536-1560），Programs.disconnect 又会把
+            // navigationPath 清空。断开之后再清，回显的 rm 就是条假命令。
+            if (options.ClearLogs)
+            {
+                steps.Add(new HackStep(HackStepKind.CleanLogs, target, default, "rm /log/*"));
+            }
+
             if (options.Disconnect)
             {
                 steps.Add(new HackStep(HackStepKind.Disconnect, target, default, "dc"));
@@ -488,14 +521,6 @@ internal sealed class HackRun
             // 断开已让 TraceTracker 自己失效；这一步是确定性的兜底 ——
             // stay 模式（不断开）下它是唯一的止血点。走 stop()，零每帧开销。
             steps.Add(new HackStep(HackStepKind.KillTrace, target, default, null));
-
-            // 清痕必须是本目标的最后一步：提权、投放、**以及断开**都会向目标 /log
-            // 追加记录（Computer.disconnecting 写 "&lt;ip&gt; Disconnected"，
-            // Computer.cs:722-727），先清后断等于白清。
-            if (options.ClearLogs)
-            {
-                steps.Add(new HackStep(HackStepKind.CleanLogs, target, default, null));
-            }
         }
 
         // 被剔除的机器照样清痕：它们此前进过、破过、侦察过，/log 里留着痕迹，

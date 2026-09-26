@@ -2586,3 +2586,121 @@ v1.14.1 把玩家机清痕塞进了 `if (options.ClearLogs)`（目标清痕开�
   `ToOptions` + 新勾选框 `IdBase+23` + 标签改名）。
 - **未标定分级计划树**：面板显示的 0/12 是「从未调用 `mark_task`」，
   与实际完成度无关（四工具 v1.14.0/1/2 已交付并发布）。
+
+## 24. v1.16.0：两条缺省翻转 + 三个远程工具
+
+本轮改动的依据是 `docs/EXTENSIONS.md` §5.2「Action 全集」—— 那张表列的是游戏
+自己往节点塞文件、删文件、摘节点时用的官方动作。三个新工具不是「另起一套」，
+而是把官方动作的语义搬到玩家侧，并保留游戏自身的权限门禁。
+
+### 24.1 两条缺省翻转为「关」
+
+| 项 | 原缺省 | 新缺省 | 理由 |
+|---|---|---|---|
+| `ClearLogs`（`wipe target logs`） | 开 | **关** | 清痕会**改写对方机器状态**（抹掉它的操作史），属「玩家明确要求才做」的动作。默认开会让只想打下来看看的玩家在不知情时抹掉对方 `/log` |
+| `Disconnect`（`anti-trace dc`） | 开 | **关** | 保持连接是更中性的默认；断开是「反追踪」这一**特定目的**的手段（追踪只在连着目标时推进），且它同时终止会话、清空 `navigationPath` |
+
+`ClearOwnLogs` 在 v1.15.0 已是缺省关（§23.1），本轮不变。
+三处同步：`HackTypes.Parse` 的局部缺省、`HackPanelState` 的属性缺省、
+`AutoHackPlugin` 的 help 文本。
+
+**反向别名（必补）**：缺省翻转后，原有的 `nologs` / `stay` 变成空操作 ——
+它们表达的是「新缺省」，玩家无从命令行**打开**这两项。故新增：
+
+- `WipeLogsAliases = ["logs", "wipelogs", "wipe-logs"]` → `clearLogs = true`
+- `LeaveAliases = ["dc", "leave", "disconnect"]` → `disconnect = true`
+
+这与 v1.15.0 翻转 `useCredentials` 时的处理一致（`creds` / `nocreds` 两个方向
+都保留）。**翻转缺省必须同时保证两个方向都可表达**，否则等于删掉功能。
+
+### 24.2 三个远程工具（`RemoteTools.cs`）
+
+依据 `EXTENSIONS.md` §5.2 的三个官方 Action：
+
+| 官方 Action | 实现类 | 官方做法 | 本 mod 取法 |
+|---|---|---|---|
+| `<CopyAsset>` | `SACopyAsset` | `folderFromPath.files.Add(new FileEntry(fileEntry.data, DestFileName))` —— 无权限门禁、无重名处理 | `Computer.canCopyFile` + `ToolFiles.Write`（保留权限语义与联机同步，重名走游戏 `GetNonRepeatingFilename`） |
+| `<DeleteFile>` | `SADeleteFile` | `folderAtPath.files.Remove(fileEntry)` —— 无权限门禁 | `Computer.deleteFile(ip, "*", path)`（保留权限门禁） |
+| `<HideNode>` | `SAHideNode` | `do { visibleNodes.Remove(IndexOf(c)) } while (Contains(IndexOf(c)))` | **逐字照抄该循环**（见下） |
+
+**为什么不直接调 `Programs.scp` / `Programs.rm`**：两者内部都有 `Thread.Sleep`
+（`scp` 每文件 250ms + 进度点 200ms×最多 20 次，`Programs.cs:629/697`；
+`rm` 每文件 200ms×3~26，`Programs.cs:1017`），在游戏线程同步跑会整帧卡住 ——
+与「不在游戏线程调 `probe`/`login`」同一条约束。故只取它们的**语义**，
+动作走不睡的原语。
+
+#### 24.2.1 `pull`：下载当前目录全部文件
+
+落点路由**逐条照抄** `Programs.scp`（`Programs.cs:632-655`）：
+`.exe` → `/bin`（落下即可运行）、`.sys` → `/sys`、`@` 开头 → `/home/dl_logs`、
+其余 → `/home`。改掉会让「下载的破解程序不能直接跑」。
+
+「当前目录」由 `Programs.getFolderFromNavigationPath(os.navigationPath, comp.files.root, os)`
+解出（`Programs.cs:1749`）—— 与 `Computer.deleteFile` 内部用的是**同一个函数**
+（`Computer.cs:523/549`），故报告与动作按构造一致，不会「报 A 删 B」。
+**路径必须先快照**：`Programs.disconnect` 会 `os.navigationPath.Clear()`
+（`Programs.cs:328`），断开后再读就是根目录。
+
+#### 24.2.2 `purge`：删除当前目录全部文件
+
+走 `Computer.deleteFile(ip, "*", path)`。其 `"*"` 分支**先快照文件名再逐个递归**，
+故遍历中删除不会漏项。
+
+**与 `ClearLogs` 的关键差别（刻意不统一）**：`HackEngine.ClearLogs` 在
+`deleteFile` 之后**无条件** `logFolder.files.Clear()` —— 那是「证据必须消失」的
+硬承诺，玩家要求的是结果而非过程。`purge` 则**如实复核**（`before - after`）并
+回显被拒数量：这是玩家显式发起的删除，权限门禁是**游戏自己的访问控制**，
+不该被绕过。同一套原语，两种承诺，故两种写法。
+
+#### 24.2.3 `drop`：断开并摘掉当前节点
+
+**摘节点的权威实现**是 `SAHideNode.Trigger`：
+
+```csharp
+do { oS.netMap.visibleNodes.Remove(oS.netMap.nodes.IndexOf(computer)); }
+while (oS.netMap.visibleNodes.Contains(oS.netMap.nodes.IndexOf(computer)));
+```
+
+**循环而非单次 `Remove`** —— `visibleNodes` 里可能有重复下标：
+`NetworkMap.discoverNode` 自带判重（`NetworkMap.cs:415-423`），但存档载入与
+`DLC1SessionUpgrader` 等路径会直接 `Add`。单次删只去掉第一个，是静默的半成品。
+
+**必须先断开**：官方三处摘节点都在断开之后 —— `AircraftDaemon.cs:229-234`、
+`EndingSequenceModule.cs:244-245`、`ExtensionSequencerExe.cs:208-210`。
+连着的时候摘，追踪与延迟反扑状态机还在跑一个已不在图上的节点。
+
+**不设 `comp.disabled`**（反直觉，已取证）：`NetworkMap.Update` 每帧对 disabled
+节点调 `bootupTick`（`NetworkMap.cs:126-131`），而 `bootTimer` 缺省 `0f`
+（`Computer.cs:61`），`bootupTick` 立刻把它置回 `false`（`Computer.cs:311-317`）。
+`disabled` 只在 `crash()`（:436）与 `reboot()`（:457）里被设成有意义的时长，
+是 crash/reboot 的**临时态**，拿来当「已删除」是假的。
+
+**边界如实记录**：节点仍在 `map.nodes` 里，只是不在 `visibleNodes`。默认口径
+`ReachableComputers` 以 visibleNodes 为种子沿 links 展开（`HackEngine.cs:490-498`），
+故摘掉后**默认扫描再也够不着它**；但显式 `allnodes` 走 `ConnectableComputers`
+（`HackEngine.cs:600-602` 记录了这个全表口径的设计），仍会看到它。
+逆操作是 `netMap.discoverNode(comp)`（`SAShowNode` 的写法）。
+
+### 24.3 `HackEngine.SilentDisconnect` 抽取
+
+`HackRun.Leave` 里的静默断开内联代码（约 30 行）抽成 `HackEngine.SilentDisconnect(os)`，
+`Leave` 与 `RemoteTools.Drop` 共用一条。理由（为什么静音、为什么多人不静音）
+随方法迁移，调用点只留一句 `<see cref>` 指向 —— 同一知识只写一次。
+
+### 24.4 面板：三个按钮零高度改动
+
+`HackPanel.Tools` 数组加三项（`PULL FILES` / `PURGE FILES` / `DROP NODE`，
+后两个 `Danger: true` 用告警色）。行数由 `ToolRows` 自动算
+（`(Tools.Length + ToolColumns - 1) / ToolColumns`，2 列 → 4 行），
+`BodyHeight` 三个分支读的都是 `ToolsBlockHeight`，`DrawTools` 的推进量也读同一个
+属性 —— **故加按钮不必改任何高度常量**（7 个按钮仍是 4 行，恰好未越界）。
+
+### 24.5 交付
+
+- 版本 1.15.0 → **1.16.0**（`AutoHackPlugin.cs:12`）。
+- 产物 85504 B / MD5 `b062b6428d8c7d0c743639a20c87d654`（v1.15.0 为 81920 B /
+  `6823f1de25a98881dd6577cc944fd9df`，已变 → 改动确已进 IL）；构建 0 警告 0 错误。
+- 改动文件：新增 `RemoteTools.cs`；`ToolDispatch.cs`（三个动词 + help + 分派）、
+  `HackEngine.cs`（`SilentDisconnect`）、`HackRun.cs`（`Leave` 改为委托）、
+  `HackTypes.cs`（两个缺省 + 两组反向别名）、`HackPanel.cs`（两个属性缺省 +
+  三个按钮）、`AutoHackPlugin.cs`（版本 + help）。

@@ -31,7 +31,12 @@ internal sealed class HackPanelState
     /// <summary>端口间隔，秒。</summary>
     internal float PortDelay { get; set; } = HackOptions.DefaultPortDelay;
 
-    internal bool ClearLogs { get; set; } = true;
+    /// <summary>
+    /// 是否清目标机的 /log。缺省**关**（v1.16.0 起）—— 清痕会改写目标机状态
+    /// （抹掉对方的操作史），属「玩家明确要求才做」的动作；默认开会让只想打下来
+    /// 看看的玩家在不知情时抹掉对方日志。要清须显式勾选或传 <c>nologs</c> 的反面。
+    /// </summary>
+    internal bool ClearLogs { get; set; } = false;
 
     /// <summary>
     /// 是否连玩家自己的 /log 一起清。缺省**关** —— 那是玩家自己的操作史
@@ -45,8 +50,12 @@ internal sealed class HackPanelState
     /// <summary>每个目标先 connect 再动手（原生 probe/upload 都要求已连接）。</summary>
     internal bool ConnectFirst { get; set; } = true;
 
-    /// <summary>每个目标跑完就 dc：追踪只在连着目标时推进，断开即中止。</summary>
-    internal bool Disconnect { get; set; } = true;
+    /// <summary>
+    /// 每个目标跑完就 dc。缺省**关**（v1.16.0 起）—— 保持连接是更中性的默认，
+    /// 断开是「反追踪」这一特定目的的手段（追踪只在连着目标时推进，断开即中止），
+    /// 而它同时会终止会话、清空 navigationPath。要反追踪须显式勾选。
+    /// </summary>
+    internal bool Disconnect { get; set; } = false;
 
     /// <summary>全网扫描时跳过已拿下的机器（肉鸡），不重复入侵。</summary>
     internal bool SkipOwned { get; set; } = true;
@@ -139,6 +148,13 @@ internal static class HackPanel
         (ToolDispatch.Mem, "MEMORY DUMP", false),
         (ToolDispatch.Exes, "ALL PROGRAMS", false),
         (ToolDispatch.Unbreakable, "UNBREAKABLE", true),
+
+        // 三个远程动作，作用于**当前连接的节点**（未连接时各自报错，不静默）。
+        // 前两个看的是当前目录（= os.navigationPath 在目标上的投影），
+        // 与游戏自己的 scp/rm 同口径。
+        (ToolDispatch.Pull, "PULL FILES", false),
+        (ToolDispatch.Purge, "PURGE FILES", true),
+        (ToolDispatch.Drop, "DROP NODE", true),
     };
 
     /// <summary>TOOLS 区列数；行数由按钮数算出，故加按钮不必改任何高度常量。</summary>

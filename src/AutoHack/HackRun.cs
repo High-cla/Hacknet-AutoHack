@@ -351,8 +351,8 @@ internal sealed class HackRun
     /// </summary>
     private static void Leave(OS os, Computer target, string command)
     {
-        var leaving = os.connectedComp;
-        if (leaving == null)
+        // 未连接时连回显都不做：Leave 是「收尾」，没连接就没有可收的尾。
+        if (os.connectedComp == null)
         {
             return;
         }
@@ -360,32 +360,9 @@ internal sealed class HackRun
         Neutralize(os, target);
         Echo(os, command);
 
-        // 静默断开。<c>silent</c> 是游戏自己的 public 开关（Computer.cs:57），
-        // Multiplayer.cs:125-127 就是「set true → 操作 → 还原」这个用法。
-        // 断开本身会往目标 /log 写 "<ip> Disconnected"（Computer.disconnecting，
-        // Computer.cs:722-727），而清痕排在断开之前（要连着目标的文件系统才作数），
-        // 不静音就等于清完立刻被写回一条。
-        //
-        // 多人对局不对它静音：同一个 <c>!silent</c> 门还守着
-        // <c>sendNetworkMessage("cDisconnect ...")</c>（Computer.cs:728-731），
-        // 静音会连断线同步一起吞掉，对面看到的还是「连着」。
-        // 日志保真让位于联机状态保真 —— 单机下这个分支恒真，多人才走 else。
-        if (os.multiplayer)
-        {
-            Programs.disconnect(["dc"], os);
-            return;
-        }
-
-        var wasSilent = leaving.silent;
-        leaving.silent = true;
-        try
-        {
-            Programs.disconnect(["dc"], os);
-        }
-        finally
-        {
-            leaving.silent = wasSilent;
-        }
+        // 静默断开的全部理由（为什么静音、为什么多人不静音）见
+        // <see cref="HackEngine.SilentDisconnect"/> —— 面板的 drop 工具走同一条。
+        HackEngine.SilentDisconnect(os);
     }
 
     /// <summary>

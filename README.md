@@ -34,7 +34,8 @@ dotnet build src/AutoHack/AutoHack.csproj -c Release
 autohack                                        # 开关控制面板
 autohack run [here] [delay=秒] [stay] [redo] [nologs] [nomark] [direct]   # 不开面板，直接执行
 autohack run script=stealth                     # 用脚本决定入侵次序（见下）
-autohack dec|mem|exes|unbreakable [allnodes]    # 四个独立工具（见「工具」）
+autohack dec|mem|exes|unbreakable [allnodes]    # 独立工具（见「工具」）
+autohack pull|purge|drop                        # 对当前连接节点动手
 autohack -h                                     # 帮助
 ```
 
@@ -47,17 +48,18 @@ autohack -h                                     # 帮助
 | `NETWORK SWEEP` / `CURRENT NODE` | 目标范围：沿网络连线可达的服务器 / 仅当前连接节点 |
 | `whole map` | 全网扫描口径：勾选 = 地图全表（含不在连线上的机器），缺省不勾 = 沿连线广度优先 |
 | `PORT INTERVAL` 滑条 | 每个端口的破解间隔，`0.05`–`5` 秒，默认 `0.6`；支持滚轮微调，`≤0.15` 时数值转为警示色 |
-| `wipe target logs` | 是否在执行后清空**目标**日志（缺省开） |
+| `wipe target logs` | 是否在执行后清空**目标**日志（缺省**关**，v1.16.0 起）—— 清痕会改写对方状态，要清须显式勾 |
 | `wipe my logs` | 是否连**自己机器**的 `/log` 一起清（缺省**关**）—— 那是你自己的操作史（谁连过你、你读过什么），要清须显式勾 |
 | `connect first` | 每个目标先 `connect` 再动手（缺省开） |
 | `upload marker` | 是否上传 `~/autohack.txt` 标记（缺省**关**） |
 | `use known creds` | 用已知账密登入目标（缺省**关**，v1.15.0 起）—— 成功即提权，跳过全部破端口 |
 | `NORMAL` / `FAST` / `INSTANT` | 推进节奏：非端口步保留真人间隔（0.35s）/ 压到 0.05s / 合并到**同一帧** |
-| `anti-trace dc` | 每个目标跑完 `dc`：追踪只在连着目标时推进，断开即中止（缺省开） |
+| `anti-trace dc` | 每个目标跑完 `dc`：追踪只在连着目标时推进，断开即中止（缺省**关**，v1.16.0 起）—— 断开是反追踪的手段，不是中性默认 |
 | `skip owned nodes` | 全网扫描时跳过已拿下的肉鸡，不重复入侵（缺省开） |
 | — | 永远提不了权的机器（端口表容量 ≤ `portsToCrack`）在全网扫描时一律跳过，见下 |
 | `RUN` | 按当前设置执行 |
 | TOOLS 区 `DEC DECRYPT` / `MEMORY DUMP` / `ALL PROGRAMS` | 见「工具」，单击**立即执行**，无二次确认 |
+| TOOLS 区 `PULL FILES` / `PURGE FILES` / `DROP NODE` | 对**当前连接的节点**动手：下载 / 删除当前目录下全部文件、把节点从网络图摘掉（后两个用告警色） |
 | TOOLS 区 `UNBREAKABLE` | 加固本机，**不可逆**，用告警色标注 |
 
 执行期间面板切换为进度视图：阶段 + 百分比、分段进度条、当前目标与动作计数，下方滚动显示逐目标战果。完成后显示 `LAST RUN` 与 `RUN AGAIN`。
@@ -78,7 +80,8 @@ autohack -h                                     # 帮助
 |---|---|
 | `here` | 仅当前已连接的节点（缺省 = 沿网络连线可达的服务器） |
 | `delay=秒` | 每个端口的破解间隔，默认 `0.6`，范围 **`0.02`**–`5` |
-| `nologs` | 不清除目标日志 |
+| `nologs` | 不清除目标日志（**已是缺省**） |
+| `logs` | 清除目标日志（v1.16.0 起缺省改为不清，要清须显式传） |
 | `ownlogs` | **连自己机器的 `/log` 一起清**（缺省**不清**）—— 玩家自己的操作史，默认保留 |
 | `noownlogs` | 明确不清自己机器的日志（**已是缺省**） |
 | `nomark` | 不上传标记文件（**已是缺省**） |
@@ -87,7 +90,8 @@ autohack -h                                     # 帮助
 | `creds` / `nocreds` | 用 / 不用已知账密登入（**缺省不用**，v1.15.0 起；`creds` 显式开启，`nocreds` 已是缺省） |
 | `instant` / `fast` / `slow` | 节奏档位：非端口步同帧连跑 / 0.05s / 0.35s（**缺省 slow**） |
 | `direct` | 跳过 connect / probe，直接就地破解（不再回显这两条指令） |
-| `stay` | 跑完**不**断开连接（缺省断开 = 回显并执行 `dc`，可中止追踪） |
+| `stay` | 跑完**不**断开连接（**已是缺省**，v1.16.0 起） |
+| `dc` | 每个目标跑完断开（反追踪：追踪只在连着目标时推进） |
 | `redo` | 全网扫描时**连已控节点一起重打**（缺省跳过肉鸡及永远提不了权的机器） |
 | `script=文件` | 用一份**动作表**取代内置次序（见「脚本模式」） |
 
@@ -95,9 +99,9 @@ autohack -h                                     # 帮助
 > 差额是「可以直接敲 IP 连上、但不在连线上」的机器 —— `Programs.connect` 遍历的是
 > `netMap.nodes` 全表，本来就不检查 `links`（见「关键设计决策」#4c）。
 
-### 工具（v1.14.0 起，v1.14.1 / v1.14.2 修缺陷与优化）
+### 工具（v1.14.0 起；v1.14.1 / v1.14.2 修缺陷；v1.16.0 加三个远程动作）
 
-四个工具与入侵流程**完全独立** —— 不进 `autohack run` 的自动流程，命令与面板 TOOLS 区按钮走**同一份实现**。面板按钮**单击立即执行**，不弹二次确认（`UNBREAKABLE` 用告警色 + 回显里的 `irreversible` 代替）。
+工具与入侵流程**完全独立** —— 不进 `autohack run` 的自动流程，命令与面板 TOOLS 区按钮走**同一份实现**。面板按钮**单击立即执行**，不弹二次确认（`UNBREAKABLE` / `PURGE FILES` / `DROP NODE` 用告警色 + 回显里的 `irreversible` 代替）。
 
 | 命令 | 作用 |
 |---|---|
@@ -105,6 +109,9 @@ autohack -h                                     # 帮助
 | `autohack mem [allnodes]` | 查看本机内存转储（紧凑格式，截断显示）、导出到 `/home/MemDumps`、扫描节点上的 `.mem` 并解其内嵌 DEC |
 | `autohack exes` | 把游戏能生成的破解程序全部补进玩家 `/bin`（幂等） |
 | `autohack unbreakable` | 加固玩家自己这台机器（**不可逆**） |
+| `autohack pull` | 把**当前目录**下全部文件下载到本机 `/home`（按扩展名分流，同游戏 `scp`） |
+| `autohack purge` | 删除**当前目录**下全部文件（同游戏 `rm`，权限门禁照旧） |
+| `autohack drop` | 断开并把当前连接的节点从网络图上摘掉 |
 
 `allnodes` 只对 `dec` / `mem` 有意义（缺省只作用于当前连接节点，与 `run` 口径一致）；`exes` 与 `unbreakable` 天然只针对玩家自己。
 
@@ -218,9 +225,9 @@ src/AutoHack/
 | 项 | 值 |
 |---|---|
 | 产物路径 | `D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll` |
-| 当前版本 | v1.14.2 |
-| 字节数 | 81408 |
-| MD5 | `7ee5d4bb15490985599557e1cc06a904` |
+| 当前版本 | v1.16.0 |
+| 字节数 | 85504 |
+| MD5 | `b062b6428d8c7d0c743639a20c87d654` |
 
 核对流程：清理 `obj`/`bin` → 构建（须 0 警告 0 错误）→ 记 `md5sum` 与字节数，
 与上一版比对。构建成功即证明源码已编入（增量缓存已清，漏编会报错）；
@@ -230,6 +237,8 @@ MD5 只用于确认部署确实是新的那个产物。
 
 | 版本 | 字节数 | MD5 | 要点 |
 |---|---|---|---|
+| v1.16.0 | 85504 | `b062b6428d8c7d0c743639a20c87d654` | 清痕与断连两条缺省翻转为**关**（新增 `logs`/`dc` 反向别名）；三个远程工具 `pull`/`purge`/`drop`（#4k、§24） |
+| v1.15.0 | 81920 | `6823f1de25a98881dd6577cc944fd9df` | 凭据登入缺省翻转为**关**；玩家自机清痕独立成开关（缺省关）；删除全部 `decompiled/autohack-vNN`（#4i2、§23） |
 | v1.14.2 | 81408 | `7ee5d4bb15490985599557e1cc06a904` | 审计后六项修复（#4j、`docs/RESEARCH.md` §22） |
 | v1.14.1 | 81408 | `2c9ab2c456ce36a4e038803415e371ad` | 清痕补上玩家机；程序补全判据改为「非空」 |
 | v1.14.0 | — | — | 四个独立工具（DEC / 内存 / 程序 / 加固），未单独发版 |

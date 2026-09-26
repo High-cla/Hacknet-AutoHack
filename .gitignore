@@ -18,6 +18,10 @@ release/
 buildlogs/
 tools/
 
+# ── 工具缓存 ─────────────────────────────────────────────
+# .codebase-memory/  codebase-memory 的索引（graph.db.zst，二进制），可随时重建。
+.codebase-memory/
+
 # ── 产物 ─────────────────────────────────────────────────
 *.zip
 *.nupkg

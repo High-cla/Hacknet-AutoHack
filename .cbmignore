@@ -10,9 +10,9 @@ release/
 # codebase-memory 把 .gitignore 与 .git/info/exclude 一并当忽略源读取，
 # 而 .gitignore 必须排除 decompiled/（游戏与 workshop 反编译源码，版权物，不可发布）
 # 与 upstream/（自带 .git 的独立 clone）。实测三者都读，无法只对 CBM 放行：
-#   - .gitignore            排除这两棵树 -> CBM 索引塌成 360 节点（本文件所在仓库现状）
+#   - .gitignore            排除这两棵树 -> 索引只剩 mod 自身源码（本仓库现状）
 #   - .git/info/exclude     同样被读，同样塌
 #   - 仅移除 exclude 中的两行 -> 索引立刻恢复到 25470 节点（已实验证实）
-# 故当前索引只覆盖本插件源码（约 1700 行）+ 少量脚本，正好是「找 mod 自身坏味道」
-# 所需的范围。若需查询游戏/框架 API 符号，用 grep 直接搜 decompiled/ 与 upstream/，
-# 或临时移除上述忽略行后重索引（记得还原，否则版权物会被 git 跟踪）。
+# 故当前索引只覆盖本插件源码（实测 737 节点 / 3963 行）+ 少量脚本，正好是
+# 「找 mod 自身坏味道」所需的范围。若需查询游戏/框架 API 符号，用 grep 直接搜
+# decompiled/ 与 upstream/，或临时移除上述忽略行后重索引（记得还原，否则版权物会被 git 跟踪）。

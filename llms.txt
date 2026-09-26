@@ -3,7 +3,7 @@
 > Hacknet 的 BepInEx / Pathfinder 插件：用游戏自身的原生机制一键入侵全网，带控制面板与脚本驱动。
 > 本文件面向要理解或修改本仓库的编码 agent。规范见 https://llmstxt.org
 
-当前 v1.15.0。构建产物直投游戏插件目录，无需手动拷贝：
+当前 v1.16.0。构建产物直投游戏插件目录，无需手动拷贝：
 
 ```
 D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
@@ -20,7 +20,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    MD5 只回答「部署是否新鲜」。副产品判据：改源码 MD5 必变，只改注释/文档 MD5 不变（注释不进 IL）。
 3. **`gh release create` 绝不自动执行** —— 等用户显式发令。`git push` 可以直接做。
 
-**十个最容易踩的坑**（都带行号，可直接 grep）
+**十二个最容易踩的坑**（都带行号，可直接 grep）
 
 1. `Computer.portsOpen` 恒为 0 —— Pathfinder 用 Harmony Prefix 接管 `openPort`/`openPorts`
    并 `return false`，状态改存 `PortState.Cracked`。任何读 `portsOpen` 的判断都是错的，
@@ -55,10 +55,18 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    再 `Convert.ToString(b, 2)`（**不补前导零**，`Computer.cs:1580-1585`），产物约 445 字符。
    拿它校验曾让程序补全 `added 0 / skipped 37`（表面「给了但没效果」）。判据用「非空」。
 11. **目标清痕与自己的清痕是两回事** —— `ClearLogs`（`wipe target logs`）抹「入侵别人的证据」，
-   缺省开；`ClearOwnLogs`（`wipe my logs`）抹「玩家自己的操作史」，**缺省关**，须显式开。
+   `ClearOwnLogs`（`wipe my logs`）抹「玩家自己的操作史」。**两条缺省都是关**
+   （v1.16.0 起；清痕会改写对方状态，属「玩家明确要求才做」）。
    玩家机不在 `Targets` 也不在 `Skipped`（`HackEngine.cs:423` 显式跳过），必须单独追加。
    同理 `use known creds` 缺省**关**（v1.15.0 起）—— `adminPass` 是公开字段，开着等于
    默认跳过破端口/防火墙/porthack 三套机制，架空玩法。
+12. **三个远程工具的动作全在「当前连接」，且「当前目录」= `os.navigationPath` 的投影** ——
+   `pull`/`purge` 看的是 `Programs.getFolderFromNavigationPath(os.navigationPath, comp.files.root, os)`
+   （`RemoteTools.cs:28`）。**路径必须先快照**：`Programs.disconnect` 会 `os.navigationPath.Clear()`
+   （`Programs.cs:328`），断开后再读就是根目录。`drop` 摘节点照抄官方 `SAHideNode`
+   的 `while (visibleNodes.Remove(index)) {}`（**循环**，visibleNodes 可能有重复下标），
+   且必须先断开（官方三处摘节点都在断开之后）。绝不可设 `comp.disabled`：
+   `NetworkMap.Update` 每帧对 disabled 节点调 `bootupTick`，`bootTimer` 缺省 0 → 下一帧就恢复 false。
 
 另附一条反直觉事实：**Hacknet 没有绝对路径**。`getFolderAtPath`（`Programs.cs:1582-1593`）
 按 `/` 切分后把空段整个跳过，`/log` 与 `log` 都按「当前目录下的 log 子文件夹」解析。
@@ -66,15 +74,15 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
 
 ## 仓库文档
 
-- [README.md](README.md): 面向使用者的说明 —— 安装、面板与命令行用法（含四个独立工具）、脚本模式、架构、验证方式。**刻意保持精简**，设计决策与取证细节一律在 docs/RESEARCH.md
-- [docs/RESEARCH.md](docs/RESEARCH.md): 源码级取证与设计决策，§1–§22，每条结论都带 `文件:行号`。**细节的唯一归属地**（README 只留给人看的结论）
+- [README.md](README.md): 面向使用者的说明 —— 安装、面板与命令行用法（含七个独立工具）、脚本模式、架构、验证方式。**刻意保持精简**，设计决策与取证细节一律在 docs/RESEARCH.md
+- [docs/RESEARCH.md](docs/RESEARCH.md): 源码级取证与设计决策，§1–§24，每条结论都带 `文件:行号`。**细节的唯一归属地**（README 只留给人看的结论）
 - [docs/EXTENSIONS.md](docs/EXTENSIONS.md): 游戏自带 `Extensions/` 官方样本的格式参考 —— 节点 XML、占位符、行为系统、任务、阵营、主题
 - [docs/HACKERSCRIPTS.md](docs/HACKERSCRIPTS.md): 自替换占位符全表 + HackerScript 动词表（以游戏实现与官方样本为准，已标出 wiki 错漏处）
 - [llms.txt](llms.txt): 本文件
 
 ## 源码
 
-- [src/AutoHack/ToolDispatch.cs](src/AutoHack/ToolDispatch.cs): 四个工具的唯一入口（命令与面板共用）
+- [src/AutoHack/ToolDispatch.cs](src/AutoHack/ToolDispatch.cs): 七个工具的唯一入口（命令与面板共用）；`RemoteTools.cs` 是其中三个远程动作的实现
 - [src/AutoHack/DecTools.cs](src/AutoHack/DecTools.cs): DEC 解密 —— 反推 passcode + 多层递归 + 批量落盘
 - [src/AutoHack/MemTools.cs](src/AutoHack/MemTools.cs): 内存转储 —— 查看 / 导出 / 扫描内嵌 DEC
 - [src/AutoHack/ExeTools.cs](src/AutoHack/ExeTools.cs): 程序补全 —— 幂等填充 `/bin`

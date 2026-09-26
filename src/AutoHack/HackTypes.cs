@@ -58,6 +58,7 @@ internal sealed record HackOptions(
     private static readonly string[] ConnectedAliases = ["here", "local", "current", "connected"];
     private static readonly string[] NetworkAliases = ["all", "net", "network", "scan"];
     private static readonly string[] KeepLogsAliases = ["nologs", "keep-logs", "keep"];
+    private static readonly string[] WipeLogsAliases = ["logs", "wipelogs", "wipe-logs"];
     private static readonly string[] OwnLogsAliases = ["ownlogs", "my-logs", "selflogs", "clean-own"];
     private static readonly string[] NoOwnLogsAliases = ["noownlogs", "keep-own", "keep-my-logs"];
     private static readonly string[] NoMarkerAliases = ["nomark", "no-upload"];
@@ -65,6 +66,7 @@ internal sealed record HackOptions(
     private static readonly string[] AllNodesAliases = ["allnodes", "all-nodes", "full", "wide"];
     private static readonly string[] DirectAliases = ["direct", "noconnect", "no-connect"];
     private static readonly string[] StayAliases = ["stay", "keepconn", "keep-connection"];
+    private static readonly string[] LeaveAliases = ["dc", "leave", "disconnect"];
     private static readonly string[] RedoAliases = ["redo", "force"];
     private static readonly string[] CredentialAliases = ["creds", "credentials", "login", "known"];
     private static readonly string[] NoCredentialAliases = ["nocreds", "no-login", "brute"];
@@ -83,14 +85,21 @@ internal sealed record HackOptions(
         var ids = new List<string>();
         var scope = HackScope.Network;
         var delay = DefaultPortDelay;
-        var clearLogs = true;
 
-        // 玩家自己 /log 的清理，独立于目标清痕，且缺省关：
-        // 那是玩家自己的操作史，抹掉属于「玩家明确要求才做」的动作。
+        // 缺省关（v1.16.0 起）：清痕会改写目标机的状态，属于「玩家明确要求才做」的
+        // 动作。默认开会让「只想打下来看看」的玩家在不知情时抹掉对方的 /log。
+        var clearLogs = false;
+
+        // 玩家自己 /log 的清理，独立于目标清痕，同样缺省关：
+        // 那是玩家自己的操作史（谁连过他、他读过什么），更不该被顺手抹掉。
         var clearOwnLogs = false;
         var uploadMarker = false;
         var connectFirst = true;
-        var disconnect = true;
+
+        // 缺省关（v1.16.0 起）：保持连接是更中性的默认 —— 断开是「反追踪」这一
+        // 特定目的的手段，而它同时会终止会话、清空 navigationPath。
+        // 需要反追踪就显式 dc（或面板勾 anti-trace dc）。
+        var disconnect = false;
         var skipOwned = true;
         var allNodes = false;
         // 缺省关（v1.15.0 起）：adminPass 是公开字段，开启后能登入全部机器，
@@ -113,6 +122,7 @@ internal sealed record HackOptions(
             if (ConnectedAliases.Contains(lower)) { scope = HackScope.Connected; continue; }
             if (NetworkAliases.Contains(lower)) { scope = HackScope.Network; continue; }
             if (KeepLogsAliases.Contains(lower)) { clearLogs = false; continue; }
+            if (WipeLogsAliases.Contains(lower)) { clearLogs = true; continue; }
             if (OwnLogsAliases.Contains(lower)) { clearOwnLogs = true; continue; }
             if (NoOwnLogsAliases.Contains(lower)) { clearOwnLogs = false; continue; }
             if (MarkerAliases.Contains(lower)) { uploadMarker = true; continue; }
@@ -120,6 +130,7 @@ internal sealed record HackOptions(
             if (AllNodesAliases.Contains(lower)) { allNodes = true; continue; }
             if (DirectAliases.Contains(lower)) { connectFirst = false; continue; }
             if (StayAliases.Contains(lower)) { disconnect = false; continue; }
+            if (LeaveAliases.Contains(lower)) { disconnect = true; continue; }
             if (RedoAliases.Contains(lower)) { skipOwned = false; continue; }
             if (CredentialAliases.Contains(lower)) { useCredentials = true; continue; }
             if (NoCredentialAliases.Contains(lower)) { useCredentials = false; continue; }

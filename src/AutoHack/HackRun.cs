@@ -257,26 +257,27 @@ internal sealed class HackRun
 
             case HackStepKind.CleanLogs:
                 Phase = "WIPING LOGS";
-                var wiped = HackEngine.ClearLogs(target);
+                var wiped = HackEngine.ClearLogs(target, os.thisComputer.ip);
 
-                // 回显的 rm 只有在「还连着目标」时才是真命令；清痕现在排在 dc 之后
+                // 回显的 rm 只有在「还连着目标」时才是真命令；清痕排在 dc 之后
                 // （断开本身会往目标 /log 写一条 "<ip> Disconnected"，先清后断等于白清），
                 // 此时已不在目标上，再回显 rm 就是假的 —— 改为一行状态。
                 if (os.connectedComp == null)
                 {
+                    // 已断开：断开本身会写一条 "<ip> Disconnected"（Computer.cs:722-727），
+                    // 清痕排在它之后，所以这里报的是真实删除结果。
+                    // 无论是否连着都把 rm /log/* 写出来 —— 它就是这个动作的语义。
                     if (wiped.Count > 0)
                     {
-                        os.write("[autohack] " + target.name + " :: wiped " + wiped.Count + " log file(s)");
+                        os.write("[autohack] " + target.name + " :: rm /log/* -> "
+                            + wiped.Count + " log file(s) wiped");
                     }
 
                     break;
                 }
 
-                foreach (var name in wiped)
-                {
-                    Echo(os, "rm /log/" + name);
-                }
-
+                // stay 模式（不断开）下目标还在连接上：回显真实可跑的 rm 命令。
+                Echo(os, "rm /log/*");
                 break;
 
             case HackStepKind.Disconnect:

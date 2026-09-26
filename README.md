@@ -102,12 +102,14 @@ autohack -h                                     # 帮助
 | `[autohack] <名> :: admin via login (<账号>)` | 上一步命中的凭据（非指令，故无回显） |
 | `10.0.0.5@> dc` | 断开前先 `Computer.admin = null`，再 `Programs.disconnect`（原生）。**同时**解除延迟反扑与中止追踪：前者见下，后者因 `TraceTracker.Update` 见 `connectedComp == null` 立刻置 `active = false` |
 | `[autohack] trace killed - timer stopped.` | `TraceTracker.stop()` —— 直接毙掉追踪（非指令，故无回显）。断开已让它失效，这步是确定性的兜底 |
-| `10.0.0.5@> rm /log/Connection:_from_10.0.0.1` | 逐条抹除该目标的 `/log` 文件。因断开自身会追加一条记录，清痕排在 `dc` **之后**，此时已不在目标上，故改为一行状态：`[autohack] <名> :: wiped 3 log file(s)` |
-| `[autohack] <名> :: wiped 3 log file(s)` | 被 `skip owned`／无望过滤**剔除**的机器同样清痕 —— 「跳过入侵」不等于「放过证据」。无痕迹时静默跳过 |
+| `10.0.0.5@> rm /log/*` | 清空该目标的整个 `/log`。走游戏自己的删除原语 `Computer.deleteFile(ipFrom, "*", path)`（`Computer.cs:508`），权限门禁与多人同步都交回游戏。因断开自身会追加一条记录，清痕排在 `dc` **之后**，此时已不在目标上，故回显一行状态：`[autohack] <名> :: rm /log/* -> 3 log file(s) wiped` |
+| `[autohack] <名> :: rm /log/* -> 3 log file(s) wiped` | 被 `skip owned`／无望过滤**剔除**的机器同样清痕 —— 「跳过入侵」不等于「放过证据」。无痕迹时静默跳过 |
 | `[autohack] <名> :: proxy bypassed` | 跳板解除（非指令，故无回显） |
 | `[autohack] <名> :: 3/5 ports, admin=yes` | 收尾战果行（非指令） |
 
 > **顺序是刻意的**：提权、上传、**以及断开连接**都会向 `/log` 追加记录（`Computer.disconnecting` 写 `"<玩家IP> Disconnected"`，`Computer.cs:722-727`），所以清痕必须排在本目标的**最后**（`dc` 之后），否则痕迹残留。
+>
+> **删除动作本身不留新痕迹**：`/log` 里的文件名恒为 `@<时间>_<消息>`（`Computer.log` 用 `text.Replace(" ", "_")` 作 `FileEntry.name`，`Computer.cs:338-354`），以 `@` 开头 ⇒ `deleteFile` 跳过 `log("FileDeleted: ...")` 自写（`Computer.cs:543`）。这正是「用游戏原语删 log」不会自我污染的原因。
 > 被剔除的机器（已控／无望）没有入侵步骤可排，其清痕步统一追加在**全部正常步骤之后** —— 此刻不会再有人碰它们，清就是终点动作，不会有新记录再追加进来。
 > 破解指令名取自游戏数据（`PortExploits.cracks`），显示端口取自框架端口表（`PortState.PortNumber`），均不硬编码。
 >
@@ -248,6 +250,32 @@ Pathfinder 用 `[HarmonyPrefix]` 接管了 `Computer.openPort(int, string)` 并 
   改为 `TargetPlan` 记录结构（`Targets` / `Skipped` / `SkippedOwned` / `SkippedHopeless`）——
   三个并行返回值本就是同一份解析的产出，收进一个结构才符合单一职责。
 
+**4g. 清痕改用游戏删除原语，不再是内存直删（v1.11.2 修正）。**
+原实现是 `logFolder.files.Clear()` —— 直接操作游戏内存，绕开了权限门禁、绕开了多人同步。
+现在改走 `Computer.deleteFile(ipFrom, "*", folderPath)`（`Computer.cs:508`），即原版
+终端 `rm /log/*` 走的那条路径。
+
+- **为什么敢用 `deleteFile`**：它的 `"*"` 分支先快照文件名列表、再逐个递归调用，
+  遍历中删除不会漏项（`Computer.cs:519-537`）。
+- **为什么删除动作不会自我污染**：`deleteFile` 里唯一写 log 的地方是
+  `if (name[0] != '@') log("FileDeleted: by " + ipFrom + " - file:" + name)`（`Computer.cs:543`）。
+  而 `/log` 里的文件名**恒以 `@` 开头** —— `Computer.log` 用
+  `("@" + (int)OS.currentElapsedTime + " " + message).Replace(" ", "_")` 作
+  `FileEntry.name`（`Computer.cs:338-354`）。⇒ 删 log 这个动作被 `deleteFile` 自己豁免，
+  删完不会多出 `FileDeleted` 记录。存档实证佐证：14 台有痕迹机器的文件名**全部**以 `@` 开头。
+- **权限门禁**（`Computer.cs:511-517`）：`currentUser.type` 为 0/1 即放行；该字段是
+  `UserDetail` 结构体，`type` 默认 0 ⇒ 门禁恒开。真正兜底的是下方 `deleteFile` 返回
+  `false` 时的回退 `files.Clear()` —— 保证「清痕」这个目标不会悄无声息地失败。
+- **回显收敛**：不再逐文件 `rm /log/<名>`（那样会刷出 N 行假命令），
+  改成一条 `rm /log/*`，与真实动作一一对应。已断开时（默认路径）写状态行
+  `[autohack] <名> :: rm /log/* -> N log file(s) wiped`。
+- **实测发现（存档实证）**：清痕本身**早已生效** —— 参考存档 169 台机器中 9 台已被控制
+  （`adminIP` == 玩家 IP），其 `/log` 里 `Became_Admin` 记录**为 0 条**（`giveAdmin`
+  必写此条，证明清痕确实跑过）。用户看到的"没被删"残留是
+  `Connection:_from` / `Disconnected` / `FileRead` —— 前者是**游玩中重新连接**时游戏自己写的
+  （`Computer.connect` → `log("Connection: from ...")`，`Computer.cs:389`），
+  后者来自玩家手工 `cat` 文件。这两类动作 mod 不参与，也不该替玩家抹掉"清完之后"的新操作。
+
 **5. 跳板收敛到终态，追踪直接毙掉。**
 两者性质不同，处置也必须不同。
 - **跳板（`proxyActive`）**：把 `proxyOverloadTicks` 置 0、`proxyActive` 置 false —— 与 ShellExe 过载跑满的终态（`ShellExe.cs:96-99`）逐字节相同。游戏**没有**更快的路径：终端 `ComShell.exe -o` 启动的就是同一个逐帧扣减的 ShellExe，跑满要 `BASE_PROXY_TICKS = 30f` 秒（`Computer.cs:27`）。跳过等待无副作用 —— 全游戏 12 处 `AchievementsManager.Unlock` 里唯一与追踪相关的是 `TraceTracker.cs:70` 的 `trace_close`，与跳板无关（v1.5 曾误判「跳过会丢成就」，v1.7 已订正）。**唯一刻意不重演**的是过载循环里那句 `hostileActionTaken()`（`ShellExe.cs:105`）：它不参与跳板失效，只负责点燃追踪。
@@ -268,7 +296,7 @@ Pathfinder 用 `[HarmonyPrefix]` 接管了 `Computer.openPort(int, string)` 并 
 ```
 [Info : BepInEx] Loading [AutoUpdater 5.3.4]
 [Info : BepInEx] Loading [PathfinderAPI 5.3.4]   ← Pathfinder 先，安装属性扫描 hook
-[Info : BepInEx] Loading [AutoHack 1.11.1]        ← 本插件后，能被扫描到
+[Info : BepInEx] Loading [AutoHack 1.11.2]        ← 本插件后，能被扫描到
 [Info : AutoHack] AutoHack loaded (GUI).
 [Info : AutoHack] self-check OK: 'autohack' is registered and autocompletes.
 ```
@@ -278,7 +306,7 @@ Pathfinder 用 `[HarmonyPrefix]` 接管了 `Computer.openPort(int, string)` 并 
 ### 静态验证（反编译产物）
 
 ```
-[BepInPlugin("com.highcla.autohack", "AutoHack", "1.11.1")]
+[BepInPlugin("com.highcla.autohack", "AutoHack", "1.11.2")]
 [Command("autohack", true, false)]
 
 Echo:   os.write("\n" + os.terminal.prompt + command);
@@ -295,7 +323,7 @@ Escalate: HackEngine.CanEscalate(target) && target.giveAdmin(os.thisComputer.ip)
 Speed:   DelayFor(kind) -> Normal 0.35s / Fast 0.05s / Instant 0；端口步恒为 PortDelay
 Owned:   comp.adminIP == os.thisComputer.ip                                  // 肉鸡判定
 Hopeless: Ports(comp).Count <= comp.portsNeededForCrack                      // 永远开不满 -> 跳过
-Clean:   root.searchForFolder("log").files.Clear()  -> 回显 "rm /log/<名>"（连着时）
+Clean:   comp.deleteFile(ipFrom, "*", [IndexOf(log)])  -> "rm /log/*"（连着时）/ 状态行（已断开）
 Skipped: TargetPlan.Skipped -> 被剔除的机器在全部正常步骤之后补 CleanLogs（清痕不受跳过影响）
 Proxy:   HackEngine.BypassProxy(target) -> proxyOverloadTicks = 0f; proxyActive = false  // 同 ShellExe 过载终态
 Neutral: HackEngine.SuppressCounterattack(target) -> comp.admin = null             // 断开前解除反扑
@@ -398,6 +426,20 @@ list2.Add                    2    两处剔除各登记一次（:452 已控 / :4
 in skipped                   1    BuildSteps 末尾为被剔除机器补步
 HackStepKind.CleanLogs, item2  1  补的正是清痕步，排在全部正常步骤之后
 out int skippedOwned         0    已随签名收敛删除
+UISmallfont / doCheckBox / hostileActionTaken / Thread.Sleep   0 / 0 / 0 / 0
+```
+
+v1.11.2 反编译产物逐项核对（`decompiled/autohack-v112/AutoHack.decompiled.cs`，2156 行）：
+
+```
+"1.11.2"                       1    BepInPlugin 版本
+"1.11.1"                       0    无残留
+ClearLogs(Computer, string)    1    新签名：带上 ipFrom 供 deleteFile 用
+deleteFile                     1    改走游戏删除原语（原为 files.Clear()）
+rm /log/*                      2    一条回显（连着时）+ 一条状态行（已断开）
+FileDeleted                    0    本插件不产生该记录（@ 前缀豁免，非本插件所致）
+TargetPlan                     5    目标解析结构仍在
+in skipped                     1    被剔除机器的补步仍在
 UISmallfont / doCheckBox / hostileActionTaken / Thread.Sleep   0 / 0 / 0 / 0
 ```
 

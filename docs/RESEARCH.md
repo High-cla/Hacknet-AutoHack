@@ -1475,3 +1475,123 @@ if (options.ClearLogs)
 反编译核对（`decompiled/autohack-v111/AutoHack.decompiled.cs`，2169 行）：
 `list2.Add` 在 :452 与 :458 各一次（两处剔除）、`in skipped` 1（补步循环）、
 `HackStepKind.CleanLogs, item2` 1（补的正是清痕步）、`out int skippedOwned` 0（已随签名删除）。
+
+### 14.11 清痕改用游戏删除原语（v1.11.2 修正）
+
+**用户指令**：「就是攻破的机器同样删除log,是不是写错了？」「命令系统。rm log/*」
+—— 要求改走游戏命令系统，而不是 mod 直接操作内存。
+
+**先做的取证**：拿参考存档全量统计，检验「攻破的机器没被删」这一假设。
+
+| 判据 | 数值 |
+|---|---|
+| 玩家机 | `1 PC @ 51.87.123.209`（`spec="player"`） |
+| 总机数 | 169 |
+| 已被控制（`<security adminIP>` == 玩家 IP） | **9** 台 |
+| 其中 `/log` 已清空 | **0** 台 |
+| 其中 `/log` 有残留 | **9** 台 |
+| 全档 `Became_Admin` 记录 | **0** 条 |
+
+**结论**：清痕**早已生效**。`Computer.giveAdmin` 必写 `"<ip> Became Admin"`
+（`Computer.cs:741`），9 台已控却一条不剩 —— 只有"被清过"能解释。
+残留内容全是 `Connection:_from`（25 条）、`Disconnected`（62 条）、
+`FileRead`，其中 `@616_Connection` 与 `@616_Disconnected` **时间戳同秒**，
+而 mod 一条目标的 Connect→Disconnect 间隔至少 2.5 秒（0.35s/步 × ~7 步）——
+这正是**玩家清完之后自己 `connect` 去检查**时游戏新写的
+（`Computer.connect` → `log("Connection: from " + ipFrom)`，`Computer.cs:389`）。
+
+**写 log 的全部 15 个调用点**（`grep '\.log(' decompiled/game-proj/Hacknet/*.cs`）：
+
+| 行 | 内容 | 触发者 |
+|---|---|---|
+| `Computer.cs:389` | `Connection: from <ip>` | 被连方，每次 connect |
+| `Computer.cs:409` | `User Account Added` | `addUser` |
+| `Computer.cs:434` | `CRASH REPORT` | 崩溃 |
+| `Computer.cs:455` | `Rebooting system` | 重启 |
+| `Computer.cs:490` | `FileRead: by <ip>` | `cat` 等读取 |
+| `Computer.cs:502` | `FileCopied` | 拷贝 |
+| `Computer.cs:543` | `FileDeleted` | `deleteFile` 且**文件名不以 `@` 开头** |
+| `Computer.cs:649` | `FileMoved` | 移动 |
+| `Computer.cs:661` | `FileCreated` | 新建 |
+| `Computer.cs:699` | `FolderCreated` | 建目录 |
+| `Computer.cs:726` | `<ip> Disconnected` | 断开 |
+| `Computer.cs:741` | `<ip> Became Admin` | 提权 |
+| `Computer.cs:767` | `<ip> Opened Port#` | 开端口（仅 vanilla `portsOpen` 路，Pathfinder 下不触发） |
+| `Computer.cs:793` | `<ip> Closed Port#` | 关端口（同上，恒不触发） |
+| `ShellExe.cs:52/142/155/193/228` | `#SHELL_*` | 本插件不使用 Shell |
+
+**改法**：`ClearLogs(Computer)` → `ClearLogs(Computer, string ipFrom)`。
+
+```csharp
+var root = comp?.files?.root;
+var logFolder = root?.searchForFolder(LogFolderName);
+if (root == null || logFolder == null || logFolder.files.Count == 0)
+{
+    return Array.Empty<string>();
+}
+
+var removed = new List<string>(logFolder.files.Count);
+foreach (var file in logFolder.files)
+{
+    if (!string.IsNullOrWhiteSpace(file?.name)) removed.Add(file.name);
+}
+
+var folderPath = new List<int> { root.folders.IndexOf(logFolder) };
+if (!comp.deleteFile(ipFrom, "*", folderPath))
+{
+    logFolder.files.Clear();      // 兜底：门禁拒绝时不让清痕静默失败
+}
+return removed;
+```
+
+**为什么 `deleteFile` 不会自我污染** —— 这是本次最关键的发现：
+
+```csharp
+// Computer.deleteFile(ipFrom, name, folderPath)，Computer.cs:541-545
+if (name[0] != '@')
+{
+    log("FileDeleted: by " + ipFrom + " - file:" + name);
+}
+```
+
+而 `/log` 里的文件名**恒以 `@` 开头**：
+
+```csharp
+// Computer.log(string message)，Computer.cs:337-355
+message = "@" + (int)OS.currentElapsedTime + " " + message;
+string text2 = text.Replace(" ", "_");            // ← 这就是 FileEntry.name
+files.root.searchForFolder("log").files.Insert(0, new FileEntry(message, text2));
+```
+
+⇒ 删 log 文件时 `name[0] == '@'` 成立，`FileDeleted` 这条 log **被 `deleteFile` 自己豁免**。
+存档实证佐证：14 台有痕迹机器的文件名**全部**以 `@` 开头
+（如 `@616_Connection:_from_51.87.123.209`）。所以"用游戏原语删除"与"不留下删除痕迹"
+这两个目标不冲突 —— 原先担心的 `rm /log/*` 会残留 N 条 `FileDeleted` 并不成立。
+
+**权限门禁**（`Computer.cs:511-517`）：
+
+```csharp
+if (currentUser.type == 1 || currentUser.type == 0) flag = true;
+if (!flag && !silent && !ipFrom.Equals(adminIP) && !ipFrom.Equals(ip)) return false;
+```
+
+`currentUser` 是 `UserDetail`（结构体，`UserDetail.cs:5`），`type` 字段默认 `0` ⇒ 门禁恒开。
+真正的保障是上面那行返回 `false` 时的 `files.Clear()` 回退。
+
+**`"*"` 分支的安全性**（`Computer.cs:519-537`）：先快照 `folder.files` 的**名字**到局部
+`List<string>`，再逐个递归调用 —— 遍历期间删元素不会漏项。这是能安全用 `"*"` 的前提。
+
+**回显收敛**：原先逐文件 `Echo(os, "rm /log/" + name)`，N 个文件刷 N 行命令。
+改为一条 `rm /log/*`（stay 模式下是真实可跑的命令）；默认已断开时写状态行
+`[autohack] <名> :: rm /log/* -> N log file(s) wiped`。
+
+**为什么不用 `Programs.rm`**：它逐文件 `for j in 0..min(max(size/1000,3),26): Thread.Sleep(200)`
+（`Programs.cs:1013-1017`），每个文件最多 5.2 秒动画，且必须跑在非游戏线程
+（`OS.execute` 派生线程，`OS.cs:1754-1767`）。挪进 mod 等于强行插入秒级等待，
+而它的实质只是转调 `computer.deleteFile(os.thisComputer.ip, list[i].name, list2)`
+（`Programs.cs:1019`）—— 直接调这一句即可，语义完全相同而无动画。
+
+**验证**（`decompiled/autohack-v112/AutoHack.decompiled.cs`，2156 行）：
+`deleteFile` 1、`ClearLogs(Computer comp, string ipFrom)` 1、`rm /log/*` 2、
+`FileDeleted` 0、`"1.11.2"` 1、`"1.11.1"` 0；禁项
+`UISmallfont`/`doCheckBox`/`hostileActionTaken`/`Thread.Sleep` 全 0。

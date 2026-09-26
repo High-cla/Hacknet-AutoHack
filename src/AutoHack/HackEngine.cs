@@ -618,22 +618,47 @@ internal static class HackEngine
         return found.ToArray();
     }
 
-    /// <summary>抹除目标的 /log 目录；返回被删除的文件名，供回显 rm 指令。</summary>
-    internal static IReadOnlyList<string> ClearLogs(Computer comp)
+    /// <summary>
+    /// 抹除目标的 /log 目录，等价于原版终端 <c>rm /log/*</c>；返回被删除的文件名，供回显与计数。
+    ///
+    /// 走游戏自己的删除原语 <c>Computer.deleteFile(ipFrom, "*", folderPath)</c>
+    /// （Computer.cs:508），而不是就地清 <c>List</c>：权限门禁与多人同步都交回游戏。
+    /// 该方法的 <c>"*"</c> 分支先快照文件名再逐个递归，故遍历中删除不会漏项。
+    ///
+    /// 「删除动作本身不留新痕迹」的来源：/log 里的文件名形如
+    /// <c>@&lt;时间&gt;_&lt;消息&gt;</c>（<c>Computer.log</c> 用
+    /// <c>text.Replace(" ", "_")</c> 作 <see cref="FileEntry.name"/>，
+    /// Computer.cs:338-354），以 '@' 开头 ⇒ deleteFile 跳过
+    /// <c>log("FileDeleted: ...")</c> 自写（Computer.cs:543）。
+    /// </summary>
+    internal static IReadOnlyList<string> ClearLogs(Computer comp, string ipFrom)
     {
-        var logFolder = comp?.files?.root?.searchForFolder(LogFolderName);
-        if (logFolder == null || logFolder.files.Count == 0)
+        var root = comp?.files?.root;
+        var logFolder = root?.searchForFolder(LogFolderName);
+        if (root == null || logFolder == null || logFolder.files.Count == 0)
         {
             return Array.Empty<string>();
         }
 
+        // 快照待删文件名（与 deleteFile 的 "*" 分支同一过滤条件），供回显与计数。
         var removed = new List<string>(logFolder.files.Count);
         foreach (var file in logFolder.files)
         {
-            removed.Add(file.name);
+            if (!string.IsNullOrWhiteSpace(file?.name))
+            {
+                removed.Add(file.name);
+            }
         }
 
-        logFolder.files.Clear();
+        // 相对 files.root 的索引路径 —— 用 IndexOf 实求，不硬编码 log 的位置。
+        var folderPath = new List<int> { root.folders.IndexOf(logFolder) };
+        if (!comp.deleteFile(ipFrom, "*", folderPath))
+        {
+            // 兜底：权限门禁（Computer.cs:511-517）拒绝时 deleteFile 静默返回 false，
+            // 此时退回直接清空 —— 保证「清痕」这个目标不会悄无声息地失败。
+            logFolder.files.Clear();
+        }
+
         return removed;
     }
 

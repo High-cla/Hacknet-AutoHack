@@ -1708,6 +1708,13 @@ if (logFolder.files.Count > 0) { logFolder.files.Clear(); }
 `Deleting N file(s)... Done`（沿用游戏自己的两个词）；删 0 条时不吭声。
 被剔除的机器没有连接，走状态行 `[autohack] <名> :: rm /log/* -> N log file(s) wiped`。
 
+> **本地化核对**：原版走 `LocaleTerms.Loc("Deleting")` / `Loc("Done")`
+> （`LocaleTerms.cs:53-64`：非 en-us 时查 `ActiveTerms`，查不到就返回原文）。
+> 实测 `Content/Locales/zh-cn/Hacknet_UI_Terms.txt`（UTF-16LE，529 行）
+> **没有** `Deleting` 与 `Done` 词条 ⇒ 游戏在中文下本身就打印英文
+> `Deleting <名>.` / `Done`。故这里硬编码英文与游戏实际输出**逐字一致**，
+> 不引入自造译文。
+
 #### 14.12.4 权限门禁的再核对
 
 ```csharp

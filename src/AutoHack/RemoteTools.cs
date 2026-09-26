@@ -33,29 +33,70 @@ internal static class RemoteTools
         return (comp, dir, path);
     }
 
-    /// <summary>人类可读的当前目录（根目录显示为 "/"）。</summary>
-    private static string Where(Computer comp, Folder dir)
-        => ReferenceEquals(dir, comp.files.root) ? "/" : "/" + dir.name;
+    /// <summary>
+    /// 人类可读的当前目录**全路径**（根目录显示为 "/"）。
+    ///
+    /// 显示全路径而非末层名（原为 <c>"/" + dir.name</c>）：末层名分不清
+    /// <c>/home/dl_logs</c> 与 <c>/stash/dl_logs</c>，一旦解析偏了，
+    /// 回显看着正常而删的是别处 —— 玩家没有任何办法察觉。
+    /// </summary>
+    private static string Where(Computer comp, List<int> path)
+    {
+        if (path.Count == 0)
+        {
+            return "/";
+        }
+
+        var parts = new List<string>(path.Count);
+        var folder = comp.files.root;
+
+        foreach (var index in path)
+        {
+            if (index < 0 || index >= folder.folders.Count)
+            {
+                parts.Add("?");
+                continue;
+            }
+
+            folder = folder.folders[index];
+            parts.Add(folder.name);
+        }
+
+        return "/" + string.Join("/", parts);
+    }
 
     /// <summary>
-    /// 落点路由，逐条照抄 <c>Programs.scp</c>（Programs.cs:632-655）：
-    /// .exe → /bin（落下即可 exe 运行）、.sys → /sys、'@' 开头（日志）→ /home/dl_logs、
-    /// 其余 → /home。这是游戏自己的规则，改掉会让「下载的破解程序不能直接跑」。
+    /// 落点：只在**已存在**的目录里挑，绝不新建。
+    ///
+    /// 分流规则取自 <c>Programs.scp</c>（Programs.cs:632-655），但去掉了它的建夹行为：
+    /// .exe → /bin、.sys → /sys（仅当该夹已存在 —— 落下去就能直接跑），
+    /// 其余（含 '@' 开头的日志）→ /home。
+    ///
+    /// 为什么不去建 <c>/home/dl_logs</c>：**游戏没有任何删除文件夹的入口**
+    /// （<c>Programs</c> 里没有 rmdir，官方 Action 也只有 <c>&lt;DeleteFile&gt;</c>），
+    /// mod 建出来的夹玩家永远清不掉，只能进到里面把文件删空、夹子留着。
+    /// 下载这种一次性动作不该留下永久痕迹，故宁可落平也不造夹。
+    /// home 缺失时退到当前根 —— 依然不造夹。
     /// </summary>
-    private static string Destination(string name)
+    private static Folder Destination(Computer local, string name)
     {
+        var root = local.files.root;
         var lower = name.ToLowerInvariant();
-        if (lower.EndsWith(".exe"))
+
+        var preferred = lower.EndsWith(".exe") ? "bin"
+            : lower.EndsWith(".sys") ? "sys"
+            : null;
+
+        if (preferred != null)
         {
-            return "bin";
+            var existing = root.searchForFolder(preferred);
+            if (existing != null)
+            {
+                return existing;
+            }
         }
 
-        if (lower.EndsWith(".sys"))
-        {
-            return "sys";
-        }
-
-        return name.StartsWith("@") ? "home/dl_logs" : "home";
+        return root.searchForFolder("home") ?? root;
     }
 
     /// <summary>
@@ -70,8 +111,8 @@ internal static class RemoteTools
             return;
         }
 
-        var (comp, dir, _) = Current(os);
-        var where = Where(comp, dir);
+        var (comp, dir, path) = Current(os);
+        var where = Where(comp, path);
 
         if (dir.files.Count == 0)
         {
@@ -85,6 +126,7 @@ internal static class RemoteTools
 
         var copied = 0;
         var denied = 0;
+        var landed = new List<string>();
 
         foreach (var file in sources)
         {
@@ -101,15 +143,21 @@ internal static class RemoteTools
                 continue;
             }
 
-            // 走游戏自身的路径解析（Computer.cs:1628），不手写建夹；
+            // 落点只挑已存在的夹（Destination 从不新建）；
             // 重名规则复用 ToolFiles.Write（stem 即完整文件名、扩展名留空）。
-            var dest = os.thisComputer.getFolderFromPath(Destination(file.name), createFoldersThatDontExist: true);
+            var dest = Destination(os.thisComputer, file.name);
             ToolFiles.Write(dest, file.name, string.Empty, file.data);
             copied++;
+
+            if (!landed.Contains(dest.name))
+            {
+                landed.Add(dest.name);
+            }
         }
 
         var tail = denied > 0 ? ", " + denied + " denied (needs admin access)" : string.Empty;
-        os.write("[autohack] pull: " + copied + " file(s) from " + comp.name + " :: " + where + " -> local home" + tail + ".");
+        os.write("[autohack] pull: " + copied + " file(s) from " + comp.name + " :: " + where
+                 + " -> local " + string.Join(", ", landed) + tail + ".");
     }
 
     /// <summary>
@@ -124,17 +172,29 @@ internal static class RemoteTools
     internal static void Purge(OS os)
     {
         var (comp, dir, path) = Current(os);
-        var where = Where(comp, dir);
+        var where = Where(comp, path);
+
+        // 子夹数一并报出：本工具按约定**不删文件夹**，所以「夹子还在」是正常结果，
+        // 不是没生效。把它说在前面，免得玩家对着一个空夹反复试。
+        var folders = dir.folders.Count;
 
         if (dir.files.Count == 0)
         {
-            os.write("[autohack] purge: " + comp.name + " :: " + where + " is already empty.");
+            os.write("[autohack] purge: " + comp.name + " :: " + where
+                     + " has no file (" + folders + " folder(s) left - folders are never removed).");
             return;
         }
 
+        var before = dir.files.Count;
         var removed = HackEngine.RemoveFiles(comp, os.thisComputer.ip, dir, path);
+        var left = dir.files.Count;
 
-        os.write("[autohack] purge: " + removed.Count + " file(s) removed from " + comp.name + " :: " + where + ".");
+        // 如实复核，不看返回值：RemoveFiles 的兜底保证「文件必被清空」，
+        // 真剩下了就是它没做到 —— 不该被一行乐观的回显盖过去。
+        var tail = left > 0 ? " - " + left + " still there (unexpected)" : string.Empty;
+        os.write("[autohack] purge: " + removed.Count + " of " + before + " file(s) removed from "
+                 + comp.name + " :: " + where + tail
+                 + (folders > 0 ? " (" + folders + " folder(s) left)" : string.Empty) + ".");
     }
 
     /// <summary>

@@ -685,10 +685,11 @@ internal static class HackEngine
     /// （<c>FileDeleted: ...</c>，目标名以 '@' 开头时游戏自己会跳过，Computer.cs:543）。
     /// 这就是 <c>Programs.rm</c> 真正的动作（Programs.cs:1024 只调这一句）。
     /// 该方法的 <c>"*"</c> 分支先快照文件名再逐个递归，故遍历中删除不会漏项。</item>
-    /// <item>无条件清空 —— 不看返回值。<c>"*"</c> 分支是 <c>flag2 &amp;= deleteFile(...)</c>
-    /// 逐个递归后返回 <c>flag2</c>：若 <c>folderPath</c> 解析偏了，它会去删别的文件夹
-    /// 并照样返回 true；权限门禁拒绝时只是静默 false。删除是硬承诺，不能建立在
-    /// 「返回值可信」之上。</item>
+    /// <item>无条件清空 —— 不看返回值、也不怕它抛。<c>"*"</c> 分支是
+    /// <c>flag2 &amp;= deleteFile(...)</c> 逐个递归后返回 <c>flag2</c>：若 <c>folderPath</c>
+    /// 解析偏了，它会去删别的文件夹并照样返回 true；权限门禁拒绝时只是静默 false；
+    /// 目标机没有 <c>log</c> 夹时它还会在 <c>log()</c> 里直接 NRE。删除是硬承诺，
+    /// 不能建立在「返回值可信」之上，也不能建立在「它不会抛」之上。</item>
     /// </list>
     /// </summary>
     /// <returns>被删除的文件名快照（与 <c>"*"</c> 分支同一过滤条件），供回显与计数。</returns>
@@ -709,7 +710,21 @@ internal static class HackEngine
             }
         }
 
-        comp.deleteFile(ipFrom, "*", folderPath);
+        // 游戏原语不只「返回 false」，它还会**抛异常**：deleteFile 对每个非 '@' 开头的
+        // 文件调 log()，而 log() 直接 files.root.searchForFolder("log").files.Insert(...)
+        // （Computer.cs:338-354）—— 目标机没有 log 夹时 searchForFolder 返回 null，
+        // 下一行就是 NRE。异常若外溢，「无条件清空」永不执行，表现仍是「按了没反应」。
+        // 故兜住它：原语是「尽量走」，下沉才是硬承诺。
+        try
+        {
+            comp.deleteFile(ipFrom, "*", folderPath);
+        }
+        catch (Exception ex) when (ex is NullReferenceException or ArgumentOutOfRangeException
+                                       or IndexOutOfRangeException or ArgumentException)
+        {
+            // 原语中途失败不影响下沉：已删的已删，剩下的由下面清空，终态一致。
+            // 代价是多人同步消息可能少发一次 —— 比「什么都不删」可接受。
+        }
 
         if (folder.files.Count > 0)
         {

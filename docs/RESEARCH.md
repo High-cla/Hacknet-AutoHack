@@ -624,6 +624,9 @@ public void start(float t) { ...; target = os.connectedComp == null ? os.thisCom
 
 ## 10. v1.7：目标集合改「可达遍历」，跳板去掉干等
 
+> **注：本节的目标集合方案（多源 BFS over `links`）已在 v1.9 被推翻并删除** ——
+> 它画错了图，「可连接」的判据应是 `netMap.nodes` 全表。见 §12.2。
+
 用户要求：**优先游戏 API，其次框架 API，最后 mod 实现**；并解决两件事 —— 跳板要干等 30 秒、"扫描所有可连接的服务器" 要覆盖原版 scan 看不到的节点。
 
 ### 10.1 跳板：从逐帧过载到一次性收敛
@@ -715,7 +718,7 @@ comp.proxyActive = false;
 |---|---|
 | `OverloadProxy` | 0（已删） |
 | `hostileActionTaken` | 0（从不调用） |
-| `ReachableComputers` | 2（定义 + 调用） |
+| `ReachableComputers` | 2（定义 + 调用）—— **v1.9 已删除，见 §12.2** |
 | `discoverNode` | 1 |
 | `BypassProxy` | 7 |
 | `SuppressCounterattack` | 2 |
@@ -901,3 +904,175 @@ API 时直接用 grep 搜 `decompiled/` 与 `upstream/`。已在 `.cbmignore` �
 未变的是内核语义：目标集合、跳板绕过、反追踪、管理员解除四条链路本轮**零改动** ——
 它们已在 v1.7 验证过，本次只动了外围。
 
+
+---
+
+## §12 v1.9：原生命令与机制补齐，目标集合改为「全部可连接」
+
+用户报四条：①「还有原生命令和机制没有完整利用」②「可以直接敲 IP 的服务器可以连接没有找到」
+③「已连接的服务器依旧会删 log」④「还有一些服务器压根没做入侵成功后的处理，每一次判断都是要入侵」。
+四条根因全部来自源码与真实存档，互不重叠。
+
+### 12.1 根因一：porthack 门禁被整体绕过（原生命令未利用）
+
+游戏自己的 porthack 有硬门禁 —— `OS.cs:1908-1930`：
+
+```
+num2 = Σ connectedComp.portsOpen[i]          // 已攻破端口数
+if (num2 > portsNeededForCrack) flag = true
+if (connectedComp.firewall != null && !firewall.solved) {
+    if (flag) flag2 = true;                   // → "Target Machine Rejecting Syndicated UDP Traffic"
+    flag = false;                             // → 拒绝启动 PortHackExe
+}
+```
+
+即「端口数过关」**且**「防火墙已解」才放行 `new PortHackExe(...)`。
+Pathfinder 用 ILManipulator（`ComputerExtensions.cs:481-500`）只把前半段换成
+`connectedComp.CountOpenPorts()`，**防火墙条件原样保留**。
+
+而 v1.8 及之前，mod 在 `HackRun.Apply` 里直接调 `target.giveAdmin(ip)` —— 整条门禁跳过，
+原生的 `PortHackExe`、`analyze`、`solve` 三条机制一次都没走到。存档实证：
+147 个节点里 **39 个带 `<firewall>`**，这些机器等于从未被正确处理。
+
+处置（v1.9）：
+
+| 环节 | 实现 | 依据 |
+|---|---|---|
+| 提权门槛 | `CanEscalate` = 端口数 > 门槛 **且**（无防火墙 或 已解） | `OS.cs:1908-1930` 逐条对齐 |
+| 解防火墙 | `Firewall.attemptSolve(firewall.solution, os)` | `Firewall.cs:101-116`，同玩家敲 `solve` |
+| 解序列来源 | `Firewall.solution`（游戏自己生成，public 字段） | `Firewall.cs:20`；不必等 `analyze` 逐趟收敛 |
+| 新步骤 | `HackStepKind.SolveFirewall`，排在 `Escalate` 之前 | 门禁要求 |
+
+**为什么不用 `Programs.solve`**（那才是玩家敲 `solve` 的入口）：
+它内层先跑 `doDots(30, 60)`，每次 `Thread.Sleep(Utils.DebugGoFast() ? 1 : 60)`
+（`Programs.cs:18-25`），30 点合计约 1.8 秒**阻塞游戏线程**。
+`attemptSolve` 本身是纯判断（`attempt.ToLower() == solution.ToLower()`），无阻塞。
+故取同一个判断入口，绕开阻塞的装饰层 —— 与 probe 的处理同构
+（v1.0 起就是「自实现报告、不调 `Programs.probe`」，理由同样是 `Thread.Sleep`）。
+
+**`analyze` 刻意不回显**：它只产生给人看的逐趟提示（`generateOutputPass` 是个
+协程，`analysisPasses` 每跑一次才多揭示 3 个字符），对 `solved` 没有任何影响 ——
+唯一置 `solved = true` 的地方是 `attemptSolve`。回显一条不执行的命令是欺骗，
+故只回显真跑的 `solve <解>`。
+
+### 12.2 根因二：可连接集合画错了图
+
+`Programs.connect`（`Programs.cs:231-322`）的实际逻辑：
+
+```
+for (int i = 0; i < os.netMap.nodes.Count; i++) {
+    if (nodes[i].ip != args[1] && nodes[i].name != args[1]) continue;
+    if (nodes[i].connect(os.thisComputer.ip)) { ...成功... }
+}
+```
+
+**全程不检查 `visibleNodes`** —— 地图上任何节点都是「敲 IP 就能连」。
+`visibleNodes` 只是原版 `scan` 维护的「已发现」展示标记（`Programs.cs:1282-1292`，
+且每次发现都 `Thread.Sleep(400)`），不是连接许可。`Computer.connect`
+（`Computer.cs:377-397`）只拒两类：`disabled`，以及 WhitelistConnectDaemon 不放行。
+
+v1.7/v1.8 的 `ReachableComputers` 按 `visibleNodes` + `Computer.links` 做多源 BFS，
+方向错了。实测存档 save_1.xml（147 节点）：
+
+| 口径 | 结果 |
+|---|---|
+| 玩家机 `<links>` | 仅 `0 1` |
+| 其后节点 `<links>` | 103 个为空、31 个只有 1 条 |
+| BFS 多源结果 | 7 个目标 |
+| 游戏实际情况 | 随手敲任意 IP 都能连上 |
+
+处置：删掉整个 BFS（含 `Seed` 辅助与 `DiscoveredComputers` 兜底），
+换成 `ConnectableComputers` —— 遍历 `netMap.nodes` 全表，只排除玩家机
+（`disabled`、已控、不可提权交由 `ResolveTargets` 统一过滤）。
+实测同一存档得 **110 个可提权目标**（见 12.4）。
+
+顺带消除一个隐患：旧 BFS 会调 `NetworkMap.discoverNode` 改写 `visibleNodes`，
+而游戏线程每帧都在遍历那个 `List<int>`（`HubServerAlertsIcon.cs:123` 等）——
+v1.8 为此专门把 `HackRun` 构造推迟到游戏线程。新实现是纯读，不再触碰该表。
+
+### 12.3 根因三：清痕排在断开之前，等于白清
+
+`Computer.disconnecting`（`Computer.cs:722-727`）：
+
+```csharp
+public void disconnecting(string ipFrom, bool externalDisconnectToo = true) {
+    if (!silent) log(ipFrom + " Disconnected");     // ← 又写一条 /log
+    ...
+}
+```
+
+而 `Programs.disconnect`（`Programs.cs:326-360`）第一件事就是调它。
+v1.8 的步骤顺序是 `CleanLogs → Disconnect` —— 清完立刻又追加一条
+`"124.205.173.252 Disconnected"`，痕迹原样留存。这就是「已连接的服务器依旧会删 log」
+（看起来删了，其实目标上还有记录）。
+
+处置：把 `CleanLogs` 挪到 `Disconnect` 之后，成为本目标的**最后一步**。
+新顺序：`Connect → Neutralize → Probe → BypassProxy → OpenPort×N → SolveFirewall → Escalate → UploadMarker → Disconnect → CleanLogs`。
+
+连带修正回显的真实性：清痕时已不在目标上，再回显 `rm /log/xxx` 就是假命令。
+故按 `os.connectedComp == null` 分支 —— 连着才回显真 `rm`（`here`／已连接路径），
+否则写一行状态 `[autohack] <名> :: wiped N log file(s)`。
+
+### 12.4 根因四：无提权可能的机器每次都被打
+
+门槛由游戏自身定义 —— `openPortsForSecurityLevel`（`Computer.cs:200-204`）：
+
+```csharp
+portsNeededForCrack = security - 1;
+if (security >= 5) portsNeededForCrack--;      // 安全级 ≥5 再减 1
+```
+
+提权需 `已攻破端口数 > portsNeededForCrack`，**而端口数是这张表的容量上限**。
+故「端口表容量 ≤ 门槛」= 永远开不满 = 永远提不了权。
+`CanEverEscalate` 即该判据，全网扫描一律剔除。
+
+存档实证（save_1.xml，147 节点）：
+
+| 剔除理由 | 数量 | 判据 |
+|---|---|---|
+| 玩家机 | 1 | 自身 |
+| `disabled` | 0 | `Computer.disabled` |
+| Whitelist 认证器 | 4 | `WhitelistConnectionDaemon` 不放行则连不上 |
+| 已控（肉鸡） | 5 | `adminIP == 玩家IP` |
+| **永远提不了权** | **27** | 端口表容量 ≤ `portsToCrack` |
+| **可打** | **110** | — |
+
+被剔除的 27 个里，`portsToCrack` 取值为 `8, 6, 4, 3, 2, 9999998`。
+其中 **`9999998` 出现 9 次**（EnTech 剧情保护机：`EnTechOutsiderRepo` / `EnTechMainframe` /
+`EnTechPrometheus` 等，全部 `security=5` / `traceTime=500` / 带 firewall）——
+这类机器此前每次全网扫描都被连上、逐个破端口、再提权失败，
+正是用户说的「每一次判断都是要入侵」。
+
+注：`portsToCrack="9999998"` 不是游戏源码里的常量，内容 XML 里也搜不到 ——
+是任务脚本通过 `HACKNET` 类动作在运行时写入的哨兵值。判据不必特判它，
+`端口容量 ≤ 门槛` 天然覆盖。
+
+### 12.5 取舍记录
+
+| 决策 | 选择 | 理由 |
+|---|---|---|
+| 提权 | 对齐原生门禁（含防火墙） | 用户明确「原生命令和机制没有完整利用」；直调 `giveAdmin` 等于架空 `PortHackExe` |
+| 仍不调 `os.takeAdmin` | 保持 `giveAdmin` | `takeAdmin` 内部 `runCommand("connect " + ip)`，而 `connect` 第一件事是无条件断开（`Programs.cs:235-236`）→ 立刻触发 `handleDisconnection` 与管理员反扑 |
+| 解防火墙 | `attemptSolve` 而非 `Programs.solve` | 后者 `doDots(30,60)` 阻塞 1.8 秒；前者是同一判断入口且无阻塞 |
+| 回显 | 只回显真执行的命令 | 回显 `analyze` 却跑 `attemptSolve` 属欺骗；`dc` 后的 `rm` 同理 |
+| 目标集合 | `netMap.nodes` 全表 | 对齐 `Programs.connect` 的实际判据（不查 visibleNodes） |
+| 不可提权机 | 只从全网扫描剔除 | 与 `SkipOwned` 同口径 —— `here`／显式点名是玩家的刻意选择，一律尊重 |
+| CLR 层 | 不新增依赖、不挂新补丁 | 全部走游戏已有的 public 成员 |
+
+### 12.6 验证（v1.9）
+
+反编译核对（配方同前，产物 `decompiled/autohack-v9/AutoHack.decompiled.cs`，1859 行）：
+
+| 项 | 关键词 | 计数 |
+|---|---|---|
+| 应存在 | `ConnectableComputers` / `CanEverEscalate` / `SolveFirewall` / `SkippedHopeless` | 2 / 2 / 7 / 6 |
+| 应存在 | `attemptSolve` / `HackStepKind.SolveFirewall` | 1 / 2 |
+| 应消失 | `ReachableComputers` / `DiscoveredComputers` / `private static void Seed` | 0 / 0 / 0 |
+| 顺序 | `HackStepKind.Disconnect`（:1693）先于 `HackStepKind.CleanLogs`（:1697） | ✓ |
+| 必须为 0 | 原生控件 / `UISmallfont` / `hostileActionTaken` | 0 / 0 / 0 |
+
+- 构建：`dotnet build src/AutoHack/AutoHack.csproj -c Release` → 0 警告 0 错误；
+  产物 `AutoHack.dll` 45056 B。
+- 版本：`AutoHack", "1.9.0"`。
+
+待真人验证：面板在真实存档上的观感；`solve` 步骤在有防火墙的机器上的实际表现。

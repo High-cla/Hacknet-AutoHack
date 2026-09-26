@@ -21,7 +21,10 @@ internal sealed record TargetOutcome(string Name, int Opened, int Total, bool Es
 /// 2. 追踪：TraceTracker 只在「连着被追踪目标」时推进（Update 见 connectedComp 为空
 ///    即刻置 active = false），故跑完一个目标就断开连接即等于反追踪；
 ///    否则计时归零会走 OS.timerExpired() 端掉玩家。
-/// 3. 跳板：proxyActive 的机器上，需要跳板访问权的破解程序被 OS.addExe 门禁拦下
+/// 3. 清痕必须在断开**之后**：Computer.disconnecting 会往目标 /log 写
+///    "&lt;玩家IP&gt; Disconnected"（Computer.cs:722-727），先清后断会留下这条痕迹。
+///    断开后的清痕不再回显 rm（那时不在目标上），改为一行状态。
+/// 4. 跳板：proxyActive 的机器上，需要跳板访问权的破解程序被 OS.addExe 门禁拦下
 ///    （OS.cs:2165）。解除即把 proxyOverloadTicks 收敛到 0、proxyActive 置 false ——
 ///    与 ShellExe 过载跑完的终态逐字节相同，只是不等那 30 秒。
 ///    刻意不照抄 ShellExe.cs:105 的 hostileActionTaken() —— 那只会点燃追踪。
@@ -39,8 +42,10 @@ internal sealed class HackRun
     internal HackRun(OS os, HackOptions options)
     {
         Options = options;
-        _targets = new List<Computer>(HackEngine.ResolveTargets(os, options, out var skippedOwned));
+        _targets = new List<Computer>(
+            HackEngine.ResolveTargets(os, options, out var skippedOwned, out var skippedHopeless));
         SkippedOwned = skippedOwned;
+        SkippedHopeless = skippedHopeless;
         _steps = BuildSteps(_targets, options, os);
         Current = _targets.Count > 0 ? _targets[0].name : "-";
         Phase = "ENGAGING";
@@ -64,6 +69,9 @@ internal sealed class HackRun
 
     /// <summary>因已控（肉鸡）而跳过的机器数。</summary>
     internal int SkippedOwned { get; }
+
+    /// <summary>因提权门槛高于端口表容量（永远打不通）而跳过的机器数。</summary>
+    internal int SkippedHopeless { get; }
 
     /// <summary>
     /// 面板标题一律大写。在每个 Phase 赋值处转换一次，
@@ -139,6 +147,12 @@ internal sealed class HackRun
                 HackEngine.OpenPort(target, step.Port, os.thisComputer.ip);
                 break;
 
+            case HackStepKind.SolveFirewall:
+                Phase = "BYPASSING FIREWALL ON " + Upper(target.name);
+                Echo(os, "solve " + (target.firewall?.solution ?? string.Empty));
+                SolveFirewall(os, target);
+                break;
+
             case HackStepKind.Escalate:
                 Phase = "ESCALATING";
                 Echo(os, "porthack");
@@ -161,7 +175,22 @@ internal sealed class HackRun
 
             case HackStepKind.CleanLogs:
                 Phase = "WIPING LOGS";
-                foreach (var name in HackEngine.ClearLogs(target))
+                var wiped = HackEngine.ClearLogs(target);
+
+                // 回显的 rm 只有在「还连着目标」时才是真命令；清痕现在排在 dc 之后
+                // （断开本身会往目标 /log 写一条 "<ip> Disconnected"，先清后断等于白清），
+                // 此时已不在目标上，再回显 rm 就是假的 —— 改为一行状态。
+                if (os.connectedComp == null)
+                {
+                    if (wiped.Count > 0)
+                    {
+                        os.write("[autohack] " + target.name + " :: wiped " + wiped.Count + " log file(s)");
+                    }
+
+                    break;
+                }
+
+                foreach (var name in wiped)
                 {
                     Echo(os, "rm /log/" + name);
                 }
@@ -203,6 +232,15 @@ internal sealed class HackRun
         if (HackEngine.SuppressCounterattack(target))
         {
             os.write("[autohack] " + target.name + " :: admin counterattack disabled");
+        }
+    }
+
+    /// <summary>解目标防火墙，仅在实际解开时回显一行（非终端指令）。</summary>
+    private static void SolveFirewall(OS os, Computer target)
+    {
+        if (HackEngine.SolveFirewall(target, os))
+        {
+            os.write("[autohack] " + target.name + " :: firewall solved");
         }
     }
 
@@ -263,6 +301,12 @@ internal sealed class HackRun
             os.write("[autohack] skipped " + SkippedOwned + " node(s) already owned - 'redo' to include them.");
         }
 
+        if (SkippedHopeless > 0)
+        {
+            os.write("[autohack] skipped " + SkippedHopeless
+                + " node(s) whose port table cannot reach the escalation threshold.");
+        }
+
         Current = "done - " + _targets.Count + " target(s)";
     }
 
@@ -289,7 +333,7 @@ internal sealed class HackRun
     /// </summary>
     private static List<HackStep> BuildSteps(List<Computer> targets, HackOptions options, OS os)
     {
-        var steps = new List<HackStep>(targets.Count * 9);
+        var steps = new List<HackStep>(targets.Count * 10);
 
         foreach (var target in targets)
         {
@@ -315,6 +359,13 @@ internal sealed class HackRun
                 steps.Add(new HackStep(HackStepKind.OpenPort, target, port, HackEngine.CrackCommand(port)));
             }
 
+            // 防火墙必须在 porthack 之前解 —— 游戏自己的门禁要求
+            // firewall.solved（OS.cs:1918-1930），未解则 porthack 直接被拒。
+            if (target.firewall is { solved: false })
+            {
+                steps.Add(new HackStep(HackStepKind.SolveFirewall, target, default, null));
+            }
+
             steps.Add(new HackStep(HackStepKind.Escalate, target, default, "porthack"));
 
             if (options.UploadMarker)
@@ -322,14 +373,17 @@ internal sealed class HackRun
                 steps.Add(new HackStep(HackStepKind.UploadMarker, target, default, null));
             }
 
-            if (options.ClearLogs)
-            {
-                steps.Add(new HackStep(HackStepKind.CleanLogs, target, default, null));
-            }
-
             if (options.Disconnect)
             {
                 steps.Add(new HackStep(HackStepKind.Disconnect, target, default, "dc"));
+            }
+
+            // 清痕必须是本目标的最后一步：提权、投放、**以及断开**都会向目标 /log
+            // 追加记录（Computer.disconnecting 写 "&lt;ip&gt; Disconnected"，
+            // Computer.cs:722-727），先清后断等于白清。
+            if (options.ClearLogs)
+            {
+                steps.Add(new HackStep(HackStepKind.CleanLogs, target, default, null));
             }
         }
 

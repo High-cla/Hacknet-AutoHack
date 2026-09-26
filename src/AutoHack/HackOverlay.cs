@@ -164,7 +164,8 @@ internal static class HackOverlay
             return;
         }
 
-        var skipped = _run.SkippedOwned > 0 ? $" ({_run.SkippedOwned} owned skipped)" : string.Empty;
+        var skippedCount = _run.SkippedOwned + _run.SkippedHopeless;
+        var skipped = skippedCount > 0 ? $" ({skippedCount} skipped)" : string.Empty;
         _os.write($"[autohack] Engaging {_run.Targets.Count} target(s) - {_run.Total} action(s){skipped}.");
     }
 

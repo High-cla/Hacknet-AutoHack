@@ -115,9 +115,49 @@ internal static class HackEngine
     internal static int OpenPortCount(Computer comp)
         => comp == null ? 0 : comp.CountOpenPorts();
 
-    /// <summary>原生提权门槛：已开放端口数超过 portsNeededForCrack。</summary>
+    /// <summary>
+    /// 原生提权门槛 —— 与游戏 porthack 的门禁逐条对齐（OS.cs:1908-1930）：
+    /// 已攻破端口数必须**超过** <c>portsNeededForCrack</c>，且防火墙已解；
+    /// 缺其一会写 "Target Machine Rejecting Syndicated UDP Traffic" 并拒绝启动 PortHackExe。
+    /// 此前 mod 直接调 <c>giveAdmin</c> 跳过整条门禁，等于从未用过原生的提权与防火墙机制。
+    /// </summary>
     internal static bool CanEscalate(Computer comp)
-        => comp != null && OpenPortCount(comp) > comp.portsNeededForCrack;
+        => comp != null
+           && OpenPortCount(comp) > comp.portsNeededForCrack
+           && (comp.firewall == null || comp.firewall.solved);
+
+    /// <summary>
+    /// 该机器理论上能否提权：端口表容量（全开后的攻破数）能否越过门槛。
+    /// 门槛由游戏自身定义：<c>openPortsForSecurityLevel</c> 令
+    /// <c>portsNeededForCrack = security - 1</c>（Computer.cs:200-204）。
+    /// 容量 ≤ 门槛 = 永远开不满 = 永远提不了权 —— 实测存档里既有
+    /// <c>portsToCrack="9999998"</c> 的剧情保护机（EnTech 系列），也有门槛 8/6
+    /// 而端口表只有 4~5 个的机器。这类机器此前每次全网扫描都被连上、逐个破端口、
+    /// 再提权失败，即「每一次判断都是要入侵」。
+    /// </summary>
+    internal static bool CanEverEscalate(Computer comp)
+        => comp != null && Ports(comp).Count > comp.portsNeededForCrack;
+
+    /// <summary>
+    /// 解目标的防火墙，走游戏自身的 <c>Firewall.attemptSolve</c>（Firewall.cs:101-116）：
+    /// 传入正确解即置 <c>solved = true</c> —— 与玩家敲 <c>solve &lt;序列&gt;</c> 是同一入口。
+    ///
+    /// 为什么不用 <c>Programs.solve</c>：它内层先跑 <c>doDots(30, 60)</c>，每点
+    /// Thread.Sleep(60)（Programs.cs:18-25），合计约 1.8 秒阻塞 —— 不能在游戏线程调。
+    /// <c>attemptSolve</c> 本身是纯判断，无阻塞。
+    /// 解序列由游戏自己生成并公开在 <c>Firewall.solution</c>（Firewall.cs:20）；
+    /// 原版 <c>analyze</c> 的逐趟收敛只是给真人看的提示，不必等它跑完。
+    /// </summary>
+    internal static bool SolveFirewall(Computer comp, OS os)
+    {
+        var firewall = comp?.firewall;
+        if (firewall == null || firewall.solved || string.IsNullOrEmpty(firewall.solution))
+        {
+            return false;
+        }
+
+        return firewall.attemptSolve(firewall.solution, os);
+    }
 
     /// <summary>真人会敲的破解指令，如 <c>sshcrack 22</c>。程序名取自游戏数据，端口号取显示端口。</summary>
     internal static string CrackCommand(PortInfo port)
@@ -254,13 +294,16 @@ internal static class HackEngine
     }
 
     /// <summary>
-    /// 解析目标集合，按原生可见性（netMap.visibleNodes）与可行性过滤。目标串走框架查找表。
-    /// 已控节点（肉鸡）只从「全网扫描」里剔除；<c>here</c> 与显式点名是刻意选择，一律尊重。
-    /// <paramref name="skippedOwned"/> 回传被跳过的机器数，供终端报数。
+    /// 解析目标集合，按可行性与「是否已拿下」过滤。目标串走框架查找表。
+    /// 两类剔除只作用于「全网扫描」；<c>here</c> 与显式点名是刻意选择，一律尊重。
+    /// <paramref name="skippedOwned"/> 与 <paramref name="skippedHopeless"/>
+    /// 分别回传「已控」与「永远提不了权」的机器数，供终端报数。
     /// </summary>
-    internal static IReadOnlyList<Computer> ResolveTargets(OS os, HackOptions options, out int skippedOwned)
+    internal static IReadOnlyList<Computer> ResolveTargets(
+        OS os, HackOptions options, out int skippedOwned, out int skippedHopeless)
     {
         skippedOwned = 0;
+        skippedHopeless = 0;
         if (os == null)
         {
             return Array.Empty<Computer>();
@@ -269,7 +312,7 @@ internal static class HackEngine
         var pool = options.Scope switch
         {
             HackScope.Connected => os.connectedComp is { } connected ? [connected] : [],
-            HackScope.Network => ReachableComputers(os),
+            HackScope.Network => ConnectableComputers(os),
             _ => options.Targets
                     .Select(id => ComputerLookup.Find(id))
                     .Where(comp => comp != null)
@@ -290,10 +333,21 @@ internal static class HackEngine
                 continue;
             }
 
-            if (sweep && options.SkipOwned && IsOwned(comp, os))
+            if (sweep)
             {
-                skippedOwned++;
-                continue;
+                if (options.SkipOwned && IsOwned(comp, os))
+                {
+                    skippedOwned++;
+                    continue;
+                }
+
+                // 提权门槛高于端口表容量的机器永远打不通，全网扫描一律剔除
+                // （显式点名时仍尊重玩家选择）。
+                if (!CanEverEscalate(comp))
+                {
+                    skippedHopeless++;
+                    continue;
+                }
             }
 
             if (seen.Add(comp))
@@ -306,19 +360,21 @@ internal static class HackEngine
     }
 
     /// <summary>
-    /// 从玩家机出发、沿网络连线可达的全部服务器 —— 「扫描所有可连接的服务器」的目标集合。
+    /// 全部可连接的服务器 —— 「扫描所有可连接的服务器」的目标集合。
     ///
-    /// 为什么不只读 <c>visibleNodes</c>：那只是玩家**已经发现**的节点。原版 scan
-    /// （Programs.cs:1282-1292）一次只发现当前节点的一跳 <c>links</c> 邻接，
-    /// 图上更远的机器扫不到 —— 这就是「全网扫描」失之片面的原因。这里按
-    /// <c>Computer.links</c>（Computer.cs:51，邻接下标表）做广度优先遍历，
-    /// 「可连接」的语义即「存在一条从玩家机出发的连线通路」。
+    /// 判据直接对齐游戏自身的连接逻辑：<c>Programs.connect</c>（Programs.cs:231-322）
+    /// 在 <c>os.netMap.nodes</c> 里按 ip/name 线性查找，**全程不检查 visibleNodes** ——
+    /// 地图上任何节点都是「敲 IP 就能连」的。原版 <c>scan</c> 维护的 visibleNodes
+    /// 只是「已发现」的展示标记，不是连接许可。
     ///
-    /// 发现动作全部委托游戏自身的 <c>NetworkMap.discoverNode</c>（NetworkMap.cs:415），
-    /// 与真人敲 scan 的后效逐字一致（进 visibleNodes + highlightFlashTime + lastAddedNode），
-    /// 不做任何自绘的「伪发现」。
+    /// 故此前按 visibleNodes + <c>links</c> 做广度优先遍历是画错了图：实测存档里
+    /// 玩家机的 <c>&lt;links&gt;</c> 仅 "0 1"、其后节点多半为空，全网 147 个节点只够到 7 个，
+    /// 而游戏里随手敲一个 IP 就能连上任意一台 —— 这就是「可以直接敲 IP 的服务器没有找到」。
+    ///
+    /// 此处只排除玩家机；disabled、已控、永远提不了权的机器交由
+    /// <see cref="ResolveTargets"/> 统一过滤。
     /// </summary>
-    internal static Computer[] ReachableComputers(OS os)
+    internal static Computer[] ConnectableComputers(OS os)
     {
         var map = os?.netMap;
         if (map?.nodes == null || map.nodes.Count == 0)
@@ -326,102 +382,12 @@ internal static class HackEngine
             return Array.Empty<Computer>();
         }
 
-        // 多源种子：玩家机 + 玩家已发现的机器。
-        // 只从玩家机出发是不够的 —— 实测存档里 <links> 图极稀疏（玩家机 links 仅 "0 1"、
-        // 其后节点多半为空），那样反而比 visibleNodes 看到的更少。以「已知」为起点向外
-        // 展开，既保证结果永不退化，又能越过原版 scan 的一跳极限。
-        var seen = new HashSet<int>();
-        var frontier = new Queue<int>();
-
-        // visibleNodes 是 List<int>，逐次 Contains 会退化成 O(V·E)；
-        // 先摊平成哈希集，供展开循环做 O(1) 判「已发现」。
-        var discovered = map.visibleNodes == null
-            ? new HashSet<int>()
-            : new HashSet<int>(map.visibleNodes);
-        Seed(map, seen, frontier, os.thisComputer == null ? -1 : map.nodes.IndexOf(os.thisComputer));
-        if (map.visibleNodes != null)
+        var found = new List<Computer>(map.nodes.Count);
+        foreach (var comp in map.nodes)
         {
-            foreach (var index in map.visibleNodes)
-            {
-                Seed(map, seen, frontier, index);
-            }
-        }
-
-        // 连一个种子都找不到时退回「已发现节点」，绝不空手而归。
-        if (seen.Count == 0)
-        {
-            return DiscoveredComputers(os);
-        }
-
-        var found = new List<Computer>();
-        while (frontier.Count > 0)
-        {
-            var comp = map.nodes[frontier.Dequeue()];
-            if (comp == null || comp.disabled)
-            {
-                continue;
-            }
-
-            if (!ReferenceEquals(comp, os.thisComputer))
+            if (comp != null && !ReferenceEquals(comp, os.thisComputer))
             {
                 found.Add(comp);
-            }
-
-            if (comp.links == null)
-            {
-                continue;
-            }
-
-            foreach (var next in comp.links)
-            {
-                if (next < 0 || next >= map.nodes.Count || !seen.Add(next))
-                {
-                    continue;
-                }
-
-                var neighbor = map.nodes[next];
-                if (neighbor == null || neighbor.disabled)
-                {
-                    continue;
-                }
-
-                // 新展开出来的机器按原生 scan 的后效标为已发现（NetworkMap.discoverNode）。
-                if (discovered.Add(next))
-                {
-                    map.discoverNode(neighbor);
-                }
-
-                frontier.Enqueue(next);
-            }
-        }
-
-        return found.ToArray();
-    }
-
-    /// <summary>可达遍历的种子入队：忽略越界下标并去重。</summary>
-    private static void Seed(NetworkMap map, HashSet<int> seen, Queue<int> frontier, int index)
-    {
-        if (index >= 0 && index < map.nodes.Count && seen.Add(index))
-        {
-            frontier.Enqueue(index);
-        }
-    }
-
-    /// <summary>网络地图上玩家已发现的机器（visibleNodes 存的是 nodes 下标）。可达遍历的兜底路径。</summary>
-    private static Computer[] DiscoveredComputers(OS os)
-    {
-        var map = os.netMap;
-        if (map?.visibleNodes == null || map.visibleNodes.Count == 0 || map.nodes == null)
-        {
-            return Array.Empty<Computer>();
-        }
-
-        var found = new List<Computer>(map.visibleNodes.Count);
-        foreach (var index in map.visibleNodes)
-        {
-            if (index >= 0 && index < map.nodes.Count && map.nodes[index] != null)
-            {
-                found.Add(map.nodes[index]);
             }
         }
 

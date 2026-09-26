@@ -105,6 +105,9 @@ internal enum HackStepKind
     /// <summary>&lt;破解程序&gt; &lt;端口&gt;：攻破一个端口。</summary>
     OpenPort,
 
+    /// <summary>analyze + solve &lt;解&gt;：解目标防火墙。porthack 门禁要求防火墙已解（OS.cs:1918-1930）。</summary>
+    SolveFirewall,
+
     /// <summary>porthack：提权。</summary>
     Escalate,
 

@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <LangVersion>13</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <AssemblyName>AutoHack</AssemblyName>
+    <RootNamespace>AutoHack</RootNamespace>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <Version>1.0.0</Version>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <!-- 输出直接落到游戏目录的 BepInEx/plugins -->
+    <HacknetDir Condition="'$(HacknetDir)' == ''">D:\steam\steamapps\common\Hacknet\</HacknetDir>
+    <OutputPath>$(HacknetDir)BepInEx\plugins\</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <DebugType>none</DebugType>
+    <NoWarn>$(NoWarn);CS0618;CS1701;CS1702</NoWarn>
+    <!-- 本机缺 .NET Framework 4.7.2 目标包，指向仓库内引用程序集 -->
+    <TargetFrameworkRootPath Condition="Exists('$(MSBuildThisFileDirectory)refs\assemblies\netfx-all\')">$(MSBuildThisFileDirectory)refs\assemblies\netfx-all\</TargetFrameworkRootPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="0Harmony">
+      <HintPath>$(HacknetDir)BepInEx\core\0Harmony.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="BepInEx.Core">
+      <HintPath>$(HacknetDir)BepInEx\core\BepInEx.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="BepInEx.Hacknet">
+      <HintPath>$(HacknetDir)BepInEx\core\BepInEx.Hacknet.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="PathfinderAPI">
+      <HintPath>$(HacknetDir)BepInEx\plugins\PathfinderAPI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Hacknet">
+      <HintPath>$(HacknetDir)Hacknet.exe</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="FNA">
+      <HintPath>$(HacknetDir)FNA.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>

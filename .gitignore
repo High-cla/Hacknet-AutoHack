@@ -1,0 +1,23 @@
+# ── 构建产物 ──────────────────────────────────────────────
+obj/
+bin/
+*.user
+
+# ── 本地研究树（体积大 / 第三方版权，不入库）────────────────
+# decompiled/  hacknet 游戏与 workshop 的反编译源码（版权物），且可由 README 的
+#              ilspycmd 配方随时重建 —— 保留在本地，不发布。
+# refs/        951 个参考 DLL + 526 个 XML（488MB）与 PR diff 归档。
+# upstream/    High-cla/Hacknet-Pathfinder 的 clone（自带 .git，独立仓库）。
+# release/     打包产物。
+# buildlogs/   构建日志。
+# tools/       本次反编译探索的临时脚本与 .rsp（路径指向已失效的临时目录）。
+decompiled/
+refs/
+upstream/
+release/
+buildlogs/
+tools/
+
+# ── 产物 ─────────────────────────────────────────────────
+*.zip
+*.nupkg

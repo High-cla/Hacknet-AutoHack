@@ -1,0 +1,8 @@
+# 代码图排除项（仓库确实存在这些子树，逐条给理由）
+# refs/        -> 951 个参考 DLL + 526 个 XML（488MB），二进制无符号价值，曾致 over_memory_budget
+# buildlogs/   -> 构建日志
+# release/     -> 打包产物
+# 注意：decompiled/ 与 upstream/ 必须保留 —— 游戏与框架源码就在那里，符号/调用链查询全靠它。
+refs/
+buildlogs/
+release/

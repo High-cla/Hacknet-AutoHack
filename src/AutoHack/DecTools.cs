@@ -128,7 +128,7 @@ internal static class DecTools
         return new Result(false, current, codes);
     }
 
-    /// <summary>批量：扫目标节点上的 DEC 文件，逐层解开后写进玩家 /home。</summary>
+    /// <summary>批量：扫目标节点上的 DEC 文件，逐层解开后写进玩家 /home/MemDumps。</summary>
     internal static void Run(OS os, bool allNodes)
     {
         var targets = allNodes
@@ -147,7 +147,7 @@ internal static class DecTools
             return;
         }
 
-        var home = ToolFiles.Home(os);
+        var dumps = ToolFiles.MemDumps(os);
         var written = 0;
         var failed = 0;
 
@@ -161,9 +161,9 @@ internal static class DecTools
                 continue;
             }
 
-            var name = ToolFiles.Write(home, ToolFiles.Stem(file.name, ".dec"), ".txt", result.Content);
+            var name = ToolFiles.Write(dumps, ToolFiles.Stem(file.name, ".dec"), ".txt", result.Content);
             written++;
-            os.write("[autohack] dec: " + file.name + " -> home/" + name
+            os.write("[autohack] dec: " + file.name + " -> home/MemDumps/" + name
                      + " (" + result.Passcodes.Count + " layer(s), " + result.Content.Length + " chars).");
         }
 

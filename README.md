@@ -99,18 +99,18 @@ autohack -h                                     # 帮助
 > 差额是「可以直接敲 IP 连上、但不在连线上」的机器 —— `Programs.connect` 遍历的是
 > `netMap.nodes` 全表，本来就不检查 `links`（见「关键设计决策」#4c）。
 
-### 工具（v1.14.0 起；v1.14.1 / v1.14.2 修缺陷；v1.16.0 加三个远程动作）
+### 工具（v1.14.0 起；v1.14.1 / v1.14.2 修缺陷；v1.16.0 加三个远程动作；v1.18.0 删除通道归一）
 
 工具与入侵流程**完全独立** —— 不进 `autohack run` 的自动流程，命令与面板 TOOLS 区按钮走**同一份实现**。面板按钮**单击立即执行**，不弹二次确认（`UNBREAKABLE` / `PURGE FILES` / `DROP NODE` 用告警色 + 回显里的 `irreversible` 代替）。
 
 | 命令 | 作用 |
 |---|---|
-| `autohack dec [allnodes]` | 解开目标上的 `#DEC_ENC` 加密文件，逐层解到明文，写入玩家 `/home` |
+| `autohack dec [allnodes]` | 解开目标上的 `#DEC_ENC` 加密文件，逐层解到明文，写入玩家 `/home/MemDumps` |
 | `autohack mem [allnodes]` | 查看本机内存转储（紧凑格式，截断显示）、导出到 `/home/MemDumps`、扫描节点上的 `.mem` 并解其内嵌 DEC |
 | `autohack exes` | 把游戏能生成的破解程序全部补进玩家 `/bin`（幂等） |
 | `autohack unbreakable` | 加固玩家自己这台机器（**不可逆**） |
 | `autohack pull` | 把**当前目录**下全部文件下载到本机 `/home`（按扩展名分流，同游戏 `scp`） |
-| `autohack purge` | 删除**当前目录**下全部文件（同游戏 `rm`，权限门禁照旧） |
+| `autohack purge` | 删除**当前目录**下全部文件（同游戏 `rm`；与清痕**同一实现**，见下） |
 | `autohack drop` | 断开并把当前连接的节点从网络图上摘掉 |
 
 `allnodes` 只对 `dec` / `mem` 有意义（缺省只作用于当前连接节点，与 `run` 口径一致）；`exes` 与 `unbreakable` 天然只针对玩家自己。
@@ -136,6 +136,8 @@ passcode = 头部第 4 段首个密文数字 - 158485
 
 > 实测：玩家存档 `save_1.xml` 中 **39 个**唯一 DEC 文件（含 4 个两层嵌套，共 43 层），
 > 全部反推 + 反验通过。
+
+产物落点与内存转储一致，都在 `/home/MemDumps` —— 工具产出都是「可读文件」，分开落点只会让玩家两处找东西。
 
 #### 内存转储
 
@@ -225,7 +227,7 @@ src/AutoHack/
 | 项 | 值 |
 |---|---|
 | 产物路径 | `D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll` |
-| 当前版本 | v1.17.0 |
+| 当前版本 | v1.18.0 |
 | 字节数 | 85504 |
 | MD5 | `b062b6428d8c7d0c743639a20c87d654` |
 
@@ -237,6 +239,7 @@ MD5 只用于确认部署确实是新的那个产物。
 
 | 版本 | 字节数 | MD5 | 要点 |
 |---|---|---|---|
+| v1.18.0 | 87552 | `42b2604b866531ff6a0afc35191fa9d8` | 删除通道归一（清痕与 `purge` 共用 `RemoveFiles`）；DEC 落点并入 `/home/MemDumps`（§26） |
 | v1.17.0 | 87552 | `6b54d30232caf8f5817cc2c99ffb60b1` | 面板文案中英双语，跟随游戏 locale 自动切换（#4l、§25） |
 | v1.16.0 | 85504 | `b062b6428d8c7d0c743639a20c87d654` | 清痕与断连两条缺省翻转为**关**（新增 `logs`/`dc` 反向别名）；三个远程工具 `pull`/`purge`/`drop`（#4k、§24） |
 | v1.15.0 | 81920 | `6823f1de25a98881dd6577cc944fd9df` | 凭据登入缺省翻转为**关**；玩家自机清痕独立成开关（缺省关）；删除全部 `decompiled/autohack-vNN`（#4i2、§23） |

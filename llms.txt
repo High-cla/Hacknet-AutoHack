@@ -3,7 +3,7 @@
 > Hacknet 的 BepInEx / Pathfinder 插件：用游戏自身的原生机制一键入侵全网，带控制面板与脚本驱动。
 > 本文件面向要理解或修改本仓库的编码 agent。规范见 https://llmstxt.org
 
-当前 v1.17.0。构建产物直投游戏插件目录，无需手动拷贝：
+当前 v1.18.0。构建产物直投游戏插件目录，无需手动拷贝：
 
 ```
 D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
@@ -20,13 +20,16 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    MD5 只回答「部署是否新鲜」。副产品判据：改源码 MD5 必变，只改注释/文档 MD5 不变（注释不进 IL）。
 3. **`gh release create` 绝不自动执行** —— 等用户显式发令。`git push` 可以直接做。
 
-**十三个最容易踩的坑**（都带行号，可直接 grep）
+**十四个最容易踩的坑**（都带行号，可直接 grep）
 
 1. `Computer.portsOpen` 恒为 0 —— Pathfinder 用 Harmony Prefix 接管 `openPort`/`openPorts`
    并 `return false`，状态改存 `PortState.Cracked`。任何读 `portsOpen` 的判断都是错的，
    一律走 `GetAllPortStates()`。
 2. `Programs.probe` / `Programs.login` / `Programs.rm` 内部都有 `Thread.Sleep`
    （`rm` 每文件最多 5.2 秒动画）—— 绝不可在游戏线程调用。清痕故直接调 `Computer.deleteFile`。
+   **但 `deleteFile` 有权限门禁**（`Computer.cs:511-517`）：`currentUser.type >= 2` 时
+   **静默返回 false** —— 不删、不报错、不写日志。删除一律走 `HackEngine.RemoveFiles`
+   （两段式：游戏原语 + 无条件清 List），别自己调 `deleteFile`。
 3. `rm` 的目标机取自 `os.connectedComp`（`Programs.cs:956`）—— 断开之后再清痕，
    删的是**玩家自己**的文件系统。故清痕必须排在 `dc` 之前。
 4. `Computer.deleteFile` 会自己写一条 log（`Computer.cs:543`）—— 但仅当 `name[0] != '@'`，
@@ -69,6 +72,12 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    `NetworkMap.Update` 每帧对 disabled 节点调 `bootupTick`，`bootTimer` 缺省 0 → 下一帧就恢复 false。
 13. **面板文案不能硬编码中文** —— 面板走 `GuiData.smallfont`，非 CJK locale 下它是内置 `Font16.xnb`（6 KB，无汉字字形），画中文只有方块。汉字只在 `Content/Locales/zh-cn/Fonts/zh-cn_Font16.xnb`（701 KB），且仅当 locale 为 CJK 时才被 `LocaleFontLoader` 装进 `GuiData`。故文案走 `Loc.T()` 查表（游戏 `LocaleTerms.Loc` → 本表 → 英文原文）。判定用 `StartsWith("zh")` 而**不是** `LocaleActivator.ActiveLocaleIsCJK()` —— 后者含 ja/ko，日文玩家拿到中文比拿到英文更糟。
 
+14. **同一个动作只该有一份实现** —— 清痕与面板 `purge` 都是「删光一个目录」，各写一份就会漂移：
+   带兜底的那份对、不带的那份永远错，且**不报错**。两者现在共用
+   `HackEngine.RemoveFiles(comp, ipFrom, folder, folderPath)`（两段式：游戏原语 + 无条件清 List）。
+    落点同理：全部工具产物只有 `/home/MemDumps` 一处（`ToolFiles.MemDumps`）。
+    `ClearLogs` 与 `Purge` 的差别只有「删哪个目录」，不该有两份删除代码。
+
 另附一条反直觉事实：**Hacknet 没有绝对路径**。`getFolderAtPath`（`Programs.cs:1582-1593`）
 按 `/` 切分后把空段整个跳过，`/log` 与 `log` 都按「当前目录下的 log 子文件夹」解析。
 故清痕回显用的字面量是 `rm log/*`（不带前导斜杠）。
@@ -76,7 +85,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
 ## 仓库文档
 
 - [README.md](README.md): 面向使用者的说明 —— 安装、面板与命令行用法（含七个独立工具）、脚本模式、架构、验证方式。**刻意保持精简**，设计决策与取证细节一律在 docs/RESEARCH.md
-- [docs/RESEARCH.md](docs/RESEARCH.md): 源码级取证与设计决策，§1–§24，每条结论都带 `文件:行号`。**细节的唯一归属地**（README 只留给人看的结论）
+- [docs/RESEARCH.md](docs/RESEARCH.md): 源码级取证与设计决策，§1–§26，每条结论都带 `文件:行号`。**细节的唯一归属地**（README 只留给人看的结论）
 - [docs/EXTENSIONS.md](docs/EXTENSIONS.md): 游戏自带 `Extensions/` 官方样本的格式参考 —— 节点 XML、占位符、行为系统、任务、阵营、主题
 - [docs/HACKERSCRIPTS.md](docs/HACKERSCRIPTS.md): 自替换占位符全表 + HackerScript 动词表（以游戏实现与官方样本为准，已标出 wiki 错漏处）
 - [llms.txt](llms.txt): 本文件

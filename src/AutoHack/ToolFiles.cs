@@ -4,16 +4,18 @@ using Hacknet;
 
 /// <summary>
 /// 工具的落盘公共部分：统一落点与重名处理。
-/// 抽出来是因为 DEC 批量落盘与内存转储导出走的是同一套规则，
+/// 抽出来是因为 DEC 批量落盘与内存转储走的是同一套规则，
 /// 分散在两处迟早会漂移。
+///
+/// 落点只有一处：玩家 /home/MemDumps —— 全部工具的产物都是「可读文件」，
+/// 分开落点会让玩家在两处找东西。
 /// </summary>
 internal static class ToolFiles
 {
-    /// <summary>玩家机 /home，缺失则建（走游戏自身的路径解析，Computer.cs:1628）。</summary>
-    internal static Folder Home(OS os)
-        => os.thisComputer.getFolderFromPath("home", createFoldersThatDontExist: true);
-
-    /// <summary>玩家机 /home/MemDumps，缺失则建（与 MemoryDumpDownloader.cs:92-98 同一落点）。</summary>
+    /// <summary>
+    /// 玩家机 /home/MemDumps，缺失则建（与 MemoryDumpDownloader.cs:92-98 同一落点）。
+    /// 内存转储导出与 DEC 解密产物共用此落点 —— 两者都是「工具产出的可读文件」。
+    /// </summary>
     internal static Folder MemDumps(OS os)
         => os.thisComputer.getFolderFromPath("home/MemDumps", createFoldersThatDontExist: true);
 

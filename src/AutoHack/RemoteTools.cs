@@ -113,34 +113,28 @@ internal static class RemoteTools
     }
 
     /// <summary>
-    /// 删除当前目录下的全部文件。等价于终端 <c>rm *</c>。
+    /// 删除当前目录下的全部文件。等价于终端 <c>rm *</c>，但不睡
+    /// （游戏版每文件 200ms×3~26，Programs.cs:1017）。
     /// 未连接时作用于玩家自己的机器（与 <c>rm</c> 的作用域规则一致）。
+    ///
+    /// 动作与清痕共用 <see cref="HackEngine.RemoveFiles"/>：同一个「删光一个目录」
+    /// 的动作只该有一份实现。本方法此前自带一份、且没有兜底，于是
+    /// <c>deleteFile</c> 权限门禁一拒就静默什么都不删，表现为「按了没反应」。
     /// </summary>
     internal static void Purge(OS os)
     {
         var (comp, dir, path) = Current(os);
         var where = Where(comp, dir);
 
-        var before = dir.files.Count;
-        if (before == 0)
+        if (dir.files.Count == 0)
         {
             os.write("[autohack] purge: " + comp.name + " :: " + where + " is already empty.");
             return;
         }
 
-        // 走游戏自身的删除原语（Computer.cs:508）。"*" 分支先快照文件名再逐个递归，
-        // 故遍历中删除不会漏项；权限门禁与联机同步都交回游戏。
-        comp.deleteFile(os.thisComputer.ip, "*", path);
+        var removed = HackEngine.RemoveFiles(comp, os.thisComputer.ip, dir, path);
 
-        // 如实复核，不看返回值 —— "*" 分支是 flag2 &= deleteFile(...) 逐个递归后返回
-        // flag2，路径解析偏了它会去删别的文件夹并照样返回 true，权限被拒时只是静默
-        // false。**不**像 ClearLogs 那样强行清 List：那是「证据必须消失」的硬承诺，
-        // 而这里是用户显式发起的删除，权限门禁是游戏自己的访问控制，不该被绕过。
-        var after = dir.files.Count;
-        var removed = before - after;
-
-        var tail = after > 0 ? " - " + after + " denied (needs admin access)" : string.Empty;
-        os.write("[autohack] purge: " + removed + " of " + before + " file(s) removed from " + comp.name + " :: " + where + tail + ".");
+        os.write("[autohack] purge: " + removed.Count + " file(s) removed from " + comp.name + " :: " + where + ".");
     }
 
     /// <summary>

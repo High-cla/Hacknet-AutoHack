@@ -21,12 +21,12 @@ internal static class ToolDispatch
     /// <summary>help 文本来源：子命令与其说明只写一次，命令入口与文档都读这里。</summary>
     internal static readonly (string Verb, string Help)[] Help =
     {
-        (Dec, "dec [allnodes]        decrypt every #DEC_ENC file into /home"),
+        (Dec, "dec [allnodes]        decrypt every #DEC_ENC file into /home/MemDumps"),
         (Mem, "mem [allnodes]        show + export this machine's memory, scan for dumps"),
         (Exes, "exes                  fill /bin with every crack program the game can produce"),
         (Unbreakable, "unbreakable           harden THIS machine (irreversible)"),
         (Pull, "pull                  download every file in the current directory to local home"),
-        (Purge, "purge                 delete every file in the current directory"),
+        (Purge, "purge                 delete every file in the current directory (shared with log wipe)"),
         (Drop, "drop                  disconnect and remove the connected node from the map"),
     };
 

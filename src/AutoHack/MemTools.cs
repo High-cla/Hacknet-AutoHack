@@ -135,7 +135,7 @@ internal static class MemTools
             return;
         }
 
-        var home = ToolFiles.Home(os);
+        var dumps = ToolFiles.MemDumps(os);
         var decoded = 0;
         var withDec = 0;
 
@@ -165,8 +165,8 @@ internal static class MemTools
 
             decoded++;
             var stem = ToolFiles.SafeStem(file.name);
-            var written = ToolFiles.Write(home, stem, ".txt", compact);
-            os.write("[autohack] mem: " + file.name + " -> home/" + written + " (" + compact.Length + " chars).");
+            var written = ToolFiles.Write(dumps, stem, ".txt", compact);
+            os.write("[autohack] mem: " + file.name + " -> home/MemDumps/" + written + " (" + compact.Length + " chars).");
 
             // 转储正文里若嵌着 DEC 层，复用 DEC 的多层递归，不另写一套。
             // net472 的 string.Contains 没有 StringComparison 重载，用 IndexOf。
@@ -183,8 +183,8 @@ internal static class MemTools
             }
 
             withDec++;
-            var inner = ToolFiles.Write(home, stem + "_dec", ".txt", result.Content);
-            os.write("[autohack] mem: " + file.name + " -> home/" + inner
+            var inner = ToolFiles.Write(dumps, stem + "_dec", ".txt", result.Content);
+            os.write("[autohack] mem: " + file.name + " -> home/MemDumps/" + inner
                      + " (inner DEC, " + result.Passcodes.Count + " layer(s)).");
         }
 

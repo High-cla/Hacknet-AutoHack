@@ -630,9 +630,8 @@ internal static class HackEngine
     /// <summary>
     /// 抹除目标的 /log 目录，等价于原版终端 <c>rm log/*</c>；返回被删除的文件名，供回显与计数。
     ///
-    /// 走游戏自己的删除原语 <c>Computer.deleteFile(ipFrom, "*", folderPath)</c>
-    /// （Computer.cs:508），而不是就地清 <c>List</c>：权限门禁与多人同步都交回游戏。
-    /// 该方法的 <c>"*"</c> 分支先快照文件名再逐个递归，故遍历中删除不会漏项。
+    /// 动作全部交给 <see cref="RemoveFiles"/> —— 清痕与面板 <c>purge</c> 是同一个
+    /// 「删光一个目录」的动作，只该有一份实现。
     ///
     /// 「删除动作本身不留新痕迹」的来源：/log 里的文件名形如
     /// <c>@&lt;时间&gt;_&lt;消息&gt;</c>（<c>Computer.log</c> 用
@@ -644,19 +643,9 @@ internal static class HackEngine
     {
         var root = comp?.files?.root;
         var logFolder = root?.searchForFolder(LogFolderName);
-        if (root == null || logFolder == null || logFolder.files.Count == 0)
+        if (root == null || logFolder == null)
         {
             return Array.Empty<string>();
-        }
-
-        // 快照待删文件名（与 deleteFile 的 "*" 分支同一过滤条件），供回显与计数。
-        var removed = new List<string>(logFolder.files.Count);
-        foreach (var file in logFolder.files)
-        {
-            if (!string.IsNullOrWhiteSpace(file?.name))
-            {
-                removed.Add(file.name);
-            }
         }
 
         // 相对 files.root 的索引路径 —— 用 IndexOf 实求，不硬编码 log 的位置。
@@ -664,17 +653,54 @@ internal static class HackEngine
         // 正是从 root.folders 里取出来的，故必然命中其真实下标。
         var folderPath = new List<int> { root.folders.IndexOf(logFolder) };
 
-        // 走游戏的删除原语 —— 这就是 Programs.rm 真正的动作
-        // （Programs.cs:1024 只调这一句），与回显的 rm 语义一致。
+        return RemoveFiles(comp, ipFrom, logFolder, folderPath);
+    }
+
+    /// <summary>
+    /// 删光一个目录下的全部文件 —— 清痕（<see cref="ClearLogs"/>）与显式删除
+    /// （面板 <c>purge</c>）共用的唯一通道。
+    ///
+    /// 为什么要共用：两者原本各写一份，一份带兜底、一份不带，于是同一个动作在两条
+    /// 入口下行为不一致。根因是 <c>Computer.deleteFile</c> 的权限门禁
+    /// （Computer.cs:511-517）在拒绝时**静默返回 false** —— 不删、不报错、不写日志，
+    /// 调用方只能靠复核结果发现，表现为「按了没反应」。
+    ///
+    /// 两段式：先走游戏原语，再无条件复核。
+    /// <list type="number">
+    /// <item><c>comp.deleteFile(ipFrom, "*", folderPath)</c> —— 保留游戏的权限语义、
+    /// 联机同步（<c>cDelete</c> 消息，Computer.cs:563-570）与审计日志
+    /// （<c>FileDeleted: ...</c>，目标名以 '@' 开头时游戏自己会跳过，Computer.cs:543）。
+    /// 这就是 <c>Programs.rm</c> 真正的动作（Programs.cs:1024 只调这一句）。
+    /// 该方法的 <c>"*"</c> 分支先快照文件名再逐个递归，故遍历中删除不会漏项。</item>
+    /// <item>无条件清空 —— 不看返回值。<c>"*"</c> 分支是 <c>flag2 &amp;= deleteFile(...)</c>
+    /// 逐个递归后返回 <c>flag2</c>：若 <c>folderPath</c> 解析偏了，它会去删别的文件夹
+    /// 并照样返回 true；权限门禁拒绝时只是静默 false。删除是硬承诺，不能建立在
+    /// 「返回值可信」之上。</item>
+    /// </list>
+    /// </summary>
+    /// <returns>被删除的文件名快照（与 <c>"*"</c> 分支同一过滤条件），供回显与计数。</returns>
+    internal static IReadOnlyList<string> RemoveFiles(Computer comp, string ipFrom, Folder folder, List<int> folderPath)
+    {
+        if (comp == null || folder == null || folder.files.Count == 0)
+        {
+            return Array.Empty<string>();
+        }
+
+        // 快照待删文件名（与 deleteFile 的 "*" 分支同一过滤条件），供回显与计数。
+        var removed = new List<string>(folder.files.Count);
+        foreach (var file in folder.files)
+        {
+            if (!string.IsNullOrWhiteSpace(file?.name))
+            {
+                removed.Add(file.name);
+            }
+        }
+
         comp.deleteFile(ipFrom, "*", folderPath);
 
-        // 无条件校验，不看返回值。"*" 分支是 flag2 &= deleteFile(...) 逐个递归后
-        // 返回 flag2 —— 若 folderPath 解析偏了，它会去删别的文件夹并照样返回 true；
-        // 权限门禁（Computer.cs:511-517）拒绝时也只是静默 false。
-        // 清痕是「证据必须消失」的硬承诺，不能建立在「返回值可信」之上。
-        if (logFolder.files.Count > 0)
+        if (folder.files.Count > 0)
         {
-            logFolder.files.Clear();
+            folder.files.Clear();
         }
 
         return removed;

@@ -2749,3 +2749,86 @@ while (oS.netMap.visibleNodes.Contains(oS.netMap.nodes.IndexOf(computer)));
 ### 25.6 交付
 
 87552 B / `6b54d30232caf8f5817cc2c99ffb60b1`。构建 0 警告 0 错误。产物内 29 条中文串全部命中（UTF-16LE），英文原文同时保留 —— 双语共存，非硬替换。
+
+---
+
+## §26 v1.18.0：删除通道归一 + DEC 落点并入 MemDumps
+
+### 26.1 症状：`purge` 按了没反应
+
+面板 `PURGE FILES` 与 `autohack purge` 执行后回显正常（"N of M file(s) removed"），但目标目录**文件一个没少**。
+
+根因不在 mod 的路径解析，而在 `Computer.deleteFile` 的**权限门禁**（`Computer.cs:511-517`）：
+
+```csharp
+bool flag = false;
+if (currentUser.type == 1 || currentUser.type == 0) { flag = true; }
+if (!flag && !silent && !ipFrom.Equals(adminIP) && !ipFrom.Equals(ip)) { return false; }
+```
+
+`currentUser` 只在 `login()` 命中非 admin 账号时被赋值（`Computer.cs:860`），缺省是 `default(UserDetail)`，`type == 0`。于是：
+
+| 情形 | `flag` | 门禁 | 结果 |
+|---|---|---|---|
+| 从未 login（刚 connect） | true（type 缺省 0） | 放行 | 删除成功 |
+| login 过普通账号（type 1） | true | 放行 | 删除成功 |
+| login 过受限账号（type 2+） | false | **拒绝** | **静默返回 false，什么都不删** |
+
+拒绝时不写日志、不报错、不发联机消息 —— 调用方**只能靠复核结果发现**。这正是「按了没反应」的来源：回显用的是 `before - after` 如实复核，本来会报 "0 of N"，但当时把复核写成了「如实但不兜底」，于是玩家看到的就是没变化。
+
+### 26.2 为什么清痕没这个问题
+
+`HackEngine.ClearLogs` 早就绕过了它 —— 末尾无条件 `logFolder.files.Clear()`：
+
+```csharp
+comp.deleteFile(ipFrom, "*", folderPath);   // 游戏原语：权限语义 + 联机同步 + 审计日志
+if (logFolder.files.Count > 0) { logFolder.files.Clear(); }   // 无条件兜底，不看返回值
+```
+
+理由写在原注释里：「`"*"` 分支是 `flag2 &= deleteFile(...)` 逐个递归后返回 `flag2` —— 若 `folderPath` 解析偏了，它会去删别的文件夹并照样返回 true；权限门禁拒绝时也只是静默 false。清痕是『证据必须消失』的硬承诺，不能建立在『返回值可信』之上。」
+
+而 `purge` 当时**自带一份实现且没有兜底**，还在注释里明确论证「不该绕过权限门禁」。论证本身没错，但它把「游戏原语被静默拒绝」误当成「游戏访问控制在正常工作」—— 区别在于：**门禁拒绝是静默的，mod 却把这当成正常返回**。
+
+### 26.3 归一：`HackEngine.RemoveFiles`
+
+同一个「删光一个目录」的动作，两条入口各写一份、一份带兜底一份不带，于是行为不一致。抽成唯一通道：
+
+```csharp
+internal static IReadOnlyList<string> RemoveFiles(Computer comp, string ipFrom, Folder folder, List<int> folderPath)
+```
+
+两段式，与 `ClearLogs` 原来的行为逐字一致：
+
+1. `comp.deleteFile(ipFrom, "*", folderPath)` —— 保留游戏的权限语义、联机同步（`cDelete` 消息，`Computer.cs:563-570`）与审计日志（`FileDeleted: ...`；目标名以 `'@'` 开头时游戏自己跳过，`Computer.cs:543`）。这就是 `Programs.rm` 真正的动作（`Programs.cs:1024` 只调这一句）。
+2. 无条件 `folder.files.Clear()` —— 不看返回值，理由同上。
+
+调用点收敛为两处：
+
+| 调用方 | 目录 | 路径来源 |
+|---|---|---|
+| `HackEngine.ClearLogs` | `root.searchForFolder("log")` | `new List<int> { root.folders.IndexOf(logFolder) }` |
+| `RemoteTools.Purge` | `Programs.getFolderFromNavigationPath(navPath, comp.files.root, os)` | `os.navigationPath` 快照 |
+
+`ClearLogs` 从 39 行缩到 15 行（快照/删除/复核全部下沉）。`RemoteTools.Purge` 从 22 行缩到 10 行，回显改为 `removed.Count`（`RemoveFiles` 的返回值即文件名快照，与 `deleteFile` 的 `"*"` 分支同一过滤条件）。
+
+### 26.4 DEC 落点并入 `/home/MemDumps`
+
+原来 DEC 写 `/home`、内存转储写 `/home/MemDumps`，同一类产物（工具产出的可读文件）分两处落。
+
+改后**全部工具产物只有一处落点**：`ToolFiles.MemDumps(os)`。
+
+顺带发现并修掉同源的不一致：`MemTools.Scan`（扫描节点上的 `.mem`）原本写 `/home`，而**同一个类的 `Export`** 写 `/home/MemDumps` —— 同一个工具的两种产出分两处。一并并入。
+
+`ToolFiles.Home(os)` 至此零调用点，删除（死代码）。`ToolFiles` 类文档补上落点约定。
+
+### 26.5 教训
+
+**同一个动作只该有一份实现。** 本次两处症状（`purge` 无效、落点分裂）根因都是同一件事被写了两次：`ClearLogs` 与 `Purge` 各一份删除、`Export` 与 `Scan` 各一份落点。重复的实现会**漂移**，而漂移的方向由「哪一份被后来修改过」决定 —— 没有兜底的那份会一直是错的，且不会报错。
+
+**「如实复核」与「兜底」不是二选一。** `purge` 原注释把二者对立起来论证，但正确的做法是两段式：先走游戏原语（保住权限语义与联机同步），再无条件下沉。这与 `ClearLogs` 从 v1.13.0 起就在用的模式完全一致。
+
+**静默失败最难查。** `deleteFile` 的权限门禁不写日志、不报错，回显又恰好「如实」，于是一个完全不工作的功能看起来完全正常。
+
+### 26.6 交付
+
+87552 B / `42b2604b866531ff6a0afc35191fa9d8`。构建 0 警告 0 错误，产物直投 `BepInEx/plugins/`。字节数与 v1.17.0 相同属巧合（同版本 .NET 程序集的对齐效应），MD5 已变，产物内 `1.18.0` 命中、`1.17.0` 未命中，`RemoveFiles` 方法名在元数据堆命中。

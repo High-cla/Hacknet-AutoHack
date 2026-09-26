@@ -1,5 +1,7 @@
 # AutoHack — Hacknet 全自动入侵 Mod
 
+仓库：<https://github.com/High-cla/Hacknet-AutoHack> · 许可：[MIT](LICENSE)
+
 基于 Hacknet + Pathfinder 的自动入侵插件，带**交互式控制面板**。**优先使用游戏原生机制**：每个动作都先把对应指令回显进终端，再走原生 API（`Programs.connect` / `Computer.openPort` / `Computer.giveAdmin` / `makeFile`）执行，行为与真人敲 `connect` / `probe` / `sshcrack 22` / `porthack` 一致。四个游戏机制被显式处理：**管理员反扑**（断开时 `disconnectionDetected` 会关端口并把 `adminIP` 还原成机器自己，故离开前先解除反扑）、**跳板**（`proxyActive` 会拦下破解程序，先过载绕过）、**追踪**（`TraceTracker` 只在连着被追踪目标时推进，跑完即 `dc` 中止）、以及**肉鸡复用**（全网扫描默认跳过 `adminIP` 已是玩家的节点）。
 
 ## 安装
@@ -227,16 +229,27 @@ proxyOverloadTicks = 0f @317 / proxyActive = false @318   同 ShellExe 终态
 | LangVersion | 13 |
 | dotnet SDK | 10.0.301 |
 
-本机缺 .NET Framework 4.7.2 目标包（`MSB3644`），csproj 已指向仓库内参考程序集：
+本机缺 .NET Framework 4.7.2 目标包（`MSB3644`），csproj 已指向本地参考程序集：
 
 ```xml
 <TargetFrameworkRootPath>$(MSBuildThisFileDirectory)refs\assemblies\netfx-all\</TargetFrameworkRootPath>
 ```
 
+> `refs/` 未入库。新克隆若同样缺目标包，安装 .NET Framework 4.7.2 Developer Pack 后删掉该属性即可；或自行准备同结构的 `refs/assemblies/netfx-all/`。
+
 ## 调研资料
 
 - `docs/RESEARCH.md` — 完整调研：原生机制、API 精确签名、陷阱
-- `upstream/Hacknet-Pathfinder/` — Pathfinder 源码
+
+以下为**本地研究树**，未入库（体积大，且含第三方版权物与 binary；`.gitignore` 已排除，可按下列配方随时重建）：
+
+- `upstream/Hacknet-Pathfinder/` — Pathfinder 源码（[Arkhist/Hacknet-Pathfinder](https://github.com/Arkhist/Hacknet-Pathfinder) 的 clone）
 - `decompiled/game-proj/` — 游戏反编译（358 文件，ilspycmd `-p`）
 - `decompiled/pathfinder/` — PathfinderAPI 反编译（134 文件）
 - `refs/prs/` — 上游 10 个 PR 的 diff
+
+## 许可证
+
+[MIT](LICENSE) © 2026 High-cla
+
+本仓库只包含插件源码。Hacknet 及其反编译产物、PathfinderAPI 二进制均为各自权利人的版权物，不在本仓库内。

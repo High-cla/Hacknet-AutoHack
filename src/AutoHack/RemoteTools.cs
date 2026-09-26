@@ -18,19 +18,52 @@ internal static class RemoteTools
     /// <summary>
     /// 当前目录的三元组：宿主机器、目录本身、相对 <c>files.root</c> 的索引路径。
     ///
-    /// 目录由 <c>Programs.getFolderFromNavigationPath</c>（Programs.cs:1749）解出，
-    /// 与 <c>Computer.deleteFile</c> 内部用的是同一个函数（Computer.cs:523/549）
-    /// —— 两者按构造一致，不会出现「报告的是 A 目录、删的是 B 目录」。
+    /// 「当前目录」以游戏自己的 <see cref="Programs.getCurrentFolder"/> 为**唯一权威**
+    /// （Programs.cs:1531-1534）—— <c>ls</c>、终端提示符、<c>rm</c> 的默认作用域都用它。
     ///
-    /// 路径必须先**快照**：<c>Programs.disconnect</c> 会清空 <c>os.navigationPath</c>
-    /// （Programs.cs:328），断开后再读就是空路径（= 根目录）。
+    /// 早先这里自己用 <c>getFolderFromNavigationPath(os.navigationPath, ...)</c> 又走了
+    /// 一遍路径，于是游戏里存在**两套下钻逻辑**（<c>getFolderAtDepth</c> 与
+    /// <c>getFolderFromNavigationPath</c>）。两者对正常路径等价，但对越界路径的处理不同：
+    /// 前者静默跳过该层，后者写 "Invalid Path" 并停在上一层。于是可能出现
+    /// 「<c>ls</c> 显示 A 目录、本工具清 B 目录」，且**两边都不报错** —— 玩家无从察觉。
+    ///
+    /// 现在路径改为**从目录对象反推**（<see cref="PathTo"/>），不再二次解析。
+    /// 这样 <c>Computer.deleteFile</c> 内部拿这个路径再解一次，必然回到同一个对象
+    /// —— 「报告的是 A、删的是 B」在构造上不可能发生，也不需要再依赖
+    /// <c>navigationPath</c> 的快照语义（<c>Programs.disconnect</c> 会清空它，
+    /// Programs.cs:328）。
     /// </summary>
     private static (Computer Comp, Folder Dir, List<int> Path) Current(OS os)
     {
         var comp = os.connectedComp ?? os.thisComputer;
-        var path = new List<int>(os.navigationPath);
-        var dir = Programs.getFolderFromNavigationPath(path, comp.files.root, os);
-        return (comp, dir, path);
+        var dir = Programs.getCurrentFolder(os);
+        return (comp, dir, PathTo(comp.files.root, dir));
+    }
+
+    /// <summary>从根出发的索引链；<paramref name="target"/> 不在该树下时返回空（= 根）。</summary>
+    private static List<int> PathTo(Folder root, Folder target)
+    {
+        var path = new List<int>();
+        return ReferenceEquals(root, target) || Walk(root, target, path) ? path : new List<int>();
+    }
+
+    /// <summary>深度优先找 <paramref name="target"/>，边走边记下标链。文件夹树很浅，无需迭代化。</summary>
+    private static bool Walk(Folder folder, Folder target, List<int> path)
+    {
+        for (var i = 0; i < folder.folders.Count; i++)
+        {
+            var child = folder.folders[i];
+            path.Add(i);
+
+            if (ReferenceEquals(child, target) || Walk(child, target, path))
+            {
+                return true;
+            }
+
+            path.RemoveAt(path.Count - 1);
+        }
+
+        return false;
     }
 
     /// <summary>

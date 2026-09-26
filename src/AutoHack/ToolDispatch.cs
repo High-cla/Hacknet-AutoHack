@@ -46,9 +46,12 @@ internal static class ToolDispatch
         }
         catch (Exception ex) when (ex is FormatException or NullReferenceException
                                        or ArgumentException or IndexOutOfRangeException
-                                       or IOException)
+                                       or InvalidOperationException or IOException)
         {
             // 工具读的是存档里的第三方数据，坏数据不该把游戏线程带崩。
+            // InvalidOperationException 在列上是因为「Collection was modified」：
+            // 命令走 OS.execute 的独立线程（OS.cs:1754-1767），cd 会改 os.navigationPath，
+            // 而本方法在游戏线程读它 —— 工具与终端并发时这是唯一的真实竞态面。
             os.write("[autohack] " + verb + " failed: " + ex.GetType().Name + " - " + ex.Message);
         }
     }

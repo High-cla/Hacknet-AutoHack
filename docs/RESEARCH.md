@@ -2958,3 +2958,165 @@ var opened = ports.Count(p => p.Cracked);
 ### 27.7 交付
 
 88064 B / `291e23446587d0e4682266f5db5e565e`。构建 0 警告 0 错误。产物内 `1.19.0` 命中、`1.18.0` 未命中；`ToolTargets` / `Dispatch` / `failed: ` 均命中。
+
+---
+
+## §28 v1.20.0：pull 绝不新建文件夹 + purge 只删文件并如实报数
+
+### 28.1 症状一：pull 建出玩家永远清不掉的文件夹
+
+`Pull` 的落点原本逐条照抄 `Programs.scp`（`Programs.cs:632-655`），**包括它的建夹行为**：以 `'@'` 开头的日志文件落到 `home/dl_logs`，该夹不存在时 `getFolderFromPath(..., createFoldersThatDontExist: true)` 直接建出来。
+
+问题在于 **Hacknet 没有任何删除文件夹的入口**：
+
+| 位置 | 有无删夹 |
+|---|---|
+| `Programs`（rm / scp / cd / ls / mv…） | 无 rmdir |
+| 官方 Action（EXTENSIONS.md §5.2） | 只有 `<DeleteFile TargetComp FilePath FileName>`，无 `<DeleteFolder>` |
+| `SADeleteFile.Trigger` | `folderAtPath.files.Remove(fileEntry)` —— 只动 `files`，不碰 `folders` |
+
+所以 mod 建出来的夹**玩家永远清不掉**，只能进去把文件删空、夹子留着。下载这种一次性动作不该留下永久痕迹。
+
+**修法**：`Destination` 从「返回路径字符串」改为「返回 Folder」，只在**已存在**的夹里挑：
+
+```csharp
+private static Folder Destination(Computer local, string name)
+{
+    var root = local.files.root;
+    var lower = name.ToLowerInvariant();
+
+    var preferred = lower.EndsWith(".exe") ? "bin"
+        : lower.EndsWith(".sys") ? "sys"
+        : null;
+
+    if (preferred != null)
+    {
+        var existing = root.searchForFolder(preferred);
+        if (existing != null) { return existing; }
+    }
+
+    return root.searchForFolder("home") ?? root;
+}
+```
+
+全程不调 `getFolderFromPath`，故绝不建夹。`.exe`/`.sys` 仍优先落 `bin`/`sys`（落下去才能直接跑），但**仅当该夹已存在**；其余（含 `'@'` 日志）一律 `/home`；`home` 也缺失时退到当前根 —— 依然不造夹。
+
+### 28.2 症状二：purge「没有效果」
+
+两个独立原因叠加，都会让玩家觉得「按了没反应」：
+
+**原因 A：回显说不清。** 本工具按约定不删文件夹，所以「夹子还在」是**正常结果**。但原来的回显只有 `"N file(s) removed"`，空目录时报 `"is already empty"` —— 分不清「刚删完了」还是「本来就没有」，也看不出子夹还在。玩家的存档实测：**root 下零个直属文件**，只有 4~5 个文件夹（`home/log/bin/sys` + 随机夹），在 root 或 `home` 按 purge 必然什么都不删。
+
+改为：
+
+- 回显 `"N of M file(s) removed from <comp> :: <path> (K folder(s) left)"`
+- 空目录报 `"has no file (K folder(s) left - folders are never removed)"`，而不是 `"already empty"`
+- 复核后仍有文件则报 `" - N still there (unexpected)"` —— 兜底若失效，不许被一行乐观回显盖过去
+
+**原因 B：`RemoveFiles` 的「无条件清空」并不无条件。** `deleteFile` 不只「返回 false」，它还会**抛**：
+
+```csharp
+// Computer.deleteFile 的非 "*" 分支
+if (name[0] != '@') { log("FileDeleted: by " + ipFrom + " - file:" + name); }
+```
+
+而 `Computer.log`（`Computer.cs:338-354`）是：
+
+```csharp
+Folder folder = files.root.searchForFolder("log");
+do { ... folder.files.Count ... } while (flag);
+files.root.searchForFolder("log").files.Insert(0, new FileEntry(message, text));
+```
+
+目标机**没有 `log` 夹**时 `searchForFolder` 返回 null → 下一行 `folder.files.Count` 直接 **NullReferenceException**。异常从 `comp.deleteFile(...)` 外溢，紧跟其后的 `folder.files.Clear()` **永不执行** —— 终态与「什么都没做」完全一样。
+
+**这不是臆测的防御**（实测过）：
+
+| 来源 | 有无 `log` 夹 |
+|---|---|
+| 官方 Extension 的 11 个 computer 块（`BlankExtension/Nodes/TestNode.xml`、`IntroExtension/Nodes/ExampleComputer.xml` 等） | **全部没有** |
+| 玩家存档 `save_1.xml` 的 148 台机器 | 全部有 |
+| 玩家存档 `save_a.xml` 的 131 台 | 全部有 |
+
+玩家机与存档机都由 `FileSystem()` 构造（`FileSystem.cs:14-22`）或 `generateRandomFileSystem()`（`Computer.cs:143-145`，第一行就是 `new FileSystem()`）产出，二者**总是**建 `home/log/bin/sys` 四夹。但 Extension / Workshop 节点走 `Folder.load` 按 XML 重建，**XML 里没写就没有** —— 而 Pathfinder 的 `SaveLoader` 完全替换了加载器（`Pathfinder.Replacements/SaveLoader.cs:558-561`）。
+
+故 `RemoveFiles` 改为先 try 原语、再无条件下沉：
+
+```csharp
+try { comp.deleteFile(ipFrom, "*", folderPath); }
+catch (Exception ex) when (ex is NullReferenceException or ArgumentOutOfRangeException
+                               or IndexOutOfRangeException or ArgumentException)
+{
+    // 原语中途失败不影响下沉：已删的已删，剩下的由下面清空，终态一致。
+    // 代价是多人同步消息可能少发一次 —— 比「什么都不删」可接受。
+}
+
+if (folder.files.Count > 0) { folder.files.Clear(); }
+```
+
+### 28.3 目录回显改为全路径
+
+原为 `"/" + dir.name`，只显示末层名 —— 分不清 `/home/dl_logs` 与 `/stash/dl_logs`。一旦解析偏了，回显看着正常而删的是别处，**玩家没有任何办法察觉**（这是我无法自证的盲点）。
+
+改为按 `navigationPath` 逐层拼出全路径（越界段显示 `?`）：
+
+```csharp
+private static string Where(Computer comp, List<int> path)
+{
+    if (path.Count == 0) { return "/"; }
+
+    var parts = new List<string>(path.Count);
+    var folder = comp.files.root;
+
+    foreach (var index in path)
+    {
+        if (index < 0 || index >= folder.folders.Count) { parts.Add("?"); continue; }
+        folder = folder.folders[index];
+        parts.Add(folder.name);
+    }
+
+    return "/" + string.Join("/", parts);
+}
+```
+
+### 28.4 教训
+
+**「做不到」要写在回显里，不要留给玩家猜。** purge 不删夹是设计决定，但玩家看到夹子还在，只会认为是失效。把「还剩 K 个文件夹」直接写出来，一个可能被误读为 bug 的正常结果就变成了明确结论。
+
+**防御性 catch 要有真实触发面才加。** 本轮先按 YAGNI 怀疑「NRE 是不是臆测」，实测官方 Extension 11/11 节点都没有 `log` 夹 —— 有真实触发面，故保留。反之若只有玩家存档场景，就该撤掉。
+
+**「无条件」必须连异常一起兜。** §26 把兜底写成 `if (folder.files.Count > 0) { Clear(); }`，却默认前一行不会抛。真正的无条件是 `try { 原语 } catch { } 然后 Clear`。
+
+### 28.5 交付
+
+89088 B / `3a5f848d9b108d743d199112ef644fa0`。构建 0 警告 0 错误。产物内 `1.20.0` 命中、`1.19.0` 未命中，`PathTo` / `Walk` / `InvalidOperationException` 均命中。
+
+### 28.6 当前目录改为单一权威（`getCurrentFolder`）
+
+早先 `Current(os)` 自己用 `getFolderFromNavigationPath(os.navigationPath, comp.files.root, os)` 又走了一遍路径，于是游戏里存在**两套下钻逻辑**：
+
+| 函数 | 越界路径的处理 |
+|---|---|
+| `Programs.getFolderAtDepth`（Programs.cs:1536-1560，`getCurrentFolder` 用的） | 静默跳过该层，继续往下 |
+| `Programs.getFolderFromNavigationPath`（Programs.cs:1749-1770） | 写 `"Invalid Path"` 并停在上一层 |
+
+对正常路径两者等价；对越界路径**会分叉**。于是可能出现「`ls` 显示 A 目录、本工具清 B 目录」，且**两边都不报错** —— 玩家无从察觉，这是本轮「purge 没效果」最可能的形态之一。
+
+改为以游戏自己的 `Programs.getCurrentFolder(os)` 为**唯一权威**（`ls`、终端提示符、`rm` 的默认作用域都用它），路径则**从目录对象反推**（`PathTo` + `Walk` 深度优先找下标链）：
+
+```csharp
+private static (Computer Comp, Folder Dir, List<int> Path) Current(OS os)
+{
+    var comp = os.connectedComp ?? os.thisComputer;
+    var dir = Programs.getCurrentFolder(os);
+    return (comp, dir, PathTo(comp.files.root, dir));
+}
+```
+
+这样 `Computer.deleteFile` 内部拿这个路径再解一次，**必然回到同一个对象** —— 「报告的是 A、删的是 B」在构造上不可能发生。顺带去掉了对 `os.navigationPath` 快照语义的依赖（`Programs.disconnect` 会清空它）。
+
+代价是一次 O(文件夹数) 的深度优先搜索。文件夹树很浅（实测 root 直属 4~5 个夹），且这两个工具都是显式点击触发，不在每帧路径上。
+
+### 28.7 工具护栏补 `InvalidOperationException`
+
+`ToolDispatch.Run` 的 catch 列表补上 `InvalidOperationException`。理由是真实的竞态面：命令走 `OS.execute` 的独立线程（`OS.cs:1754-1767`），`cd` 会改 `os.navigationPath`，而工具在游戏线程读它 —— 并发时抛的正是「Collection was modified」。

@@ -500,119 +500,19 @@ Pathfinder 用 `[HarmonyPrefix]` 接管了 `Computer.openPort(int, string)` 并 
 登录失败仍保留一行终端可见的 `login unavailable - cracking ports` —— 那是 Fail Fast，
 不是探针；`No targets: all N ... (X already owned, Y cannot escalate)` 同理保留。
 
+**4j. 两条「用错了判据」的教训（v1.14.1）。**
+
+清痕与程序补全的缺陷都源于**判据选错**，而非逻辑写错 —— 具体缺陷、证据与修法见「工具」节的
+「v1.14.1 修的两个缺陷」。这里只留可复用的判断规则：
+
+- **判据要覆盖语义的外延，不能只覆盖手边的枚举。** 清痕的语义是「有痕迹的机器」，
+  按定义包含玩家自己；而手边的枚举来自 `ResolveTargets`，它按设计排除 `os.thisComputer`。
+  拿后者的枚举去实现前者的语义，玩家机必然漏。改枚举（把玩家机塞进 `Targets`）会连带
+  产生入侵动作，所以正确修法是补一条独立步骤，而不是改枚举。
+- **拿常量当数据校验前，先确认那个常量有真实读者。** `EXE_FILE_LENGTH = 500` 看着像契约，
+  实则零引用，且与产物长度无固定关系（RNG 决定）。自造契约会把「全部跳过」伪装成正常结果。
+
 ## 验证
-
-**4j. 清痕覆盖玩家自己；程序补全不设长度门槛（v1.14.1 修正）。**
-
-两条都源于**用错了判据**，而非逻辑写错：
-
-- **清痕的判据是「有痕迹的机器」，不是「被我打过或跳过的机器」。** 前者按定义包含玩家
-  自己（玩家的 `/log` 记的是别人连他的记录），后者的枚举来源是 `ResolveTargets`，
-  而它按设计排除 `os.thisComputer`。用后者的枚举去覆盖前者的语义，玩家机就漏了。
-  修法不是把玩家机塞进 `Targets`（那会连带产生入侵动作），而是在清痕段末尾单独追加一条。
-- **程序补全的判据是「数据非空」，不是「数据等于某个长度」。** `EXE_FILE_LENGTH = 500`
-  看着像契约，实则是 `generateBinaryString` 的入参 —— 该函数先 `byte[length / 8]`，
-  再 `Convert.ToString(b, 2)` 不补零，产出长度由 RNG 决定，与 500 无固定关系。
-  且这个常量在游戏里**零引用**（全仓只有声明一处），拿它当门槛等于自造契约。
-  凡「拿某个常量当数据校验」的地方，先确认那个常量有真实读者。
-
-### v1.14.2 验证（只看产物 MD5）
-
-| 项 | 值 |
-|---|---|
-| 产物 | `<Hacknet>/BepInEx/plugins/AutoHack.dll` |
-| 字节数 | 81408 |
-| MD5 | `7ee5d4bb15490985599557e1cc06a904` |
-| 构建 | `rm -rf src/AutoHack/obj src/AutoHack/bin && dotnet build ... -c Release` → 0 警告 0 错误 |
-
-一次全仓审计（734 nodes / 1767 edges）后的六项修复：三处手写目录解析改走游戏自身的
-`Computer.getFolderFromPath(path, createFoldersThatDontExist: true)`；proxy 四字段改走
-`Computer.addProxy`；内存查看由 60 次 `os.write` 合并为 1 次多行写；摘除 v1.13.0 漏掉的
-绘制探针及其已成死代码的 `Log` 字段；DEC 与内存两处同构的递归收集抽成带谓词的
-`ToolFiles.Collect`；`HackEngine.Ports` 的不可达兜底分支补上「为何不可达」的注释并保留。
-
-**已评估并否决**（记录以免重开）：`Span<T>`/`ArrayPool` 不可用（net472 且无任何
-`PackageReference`）；async/await 与多线程禁用（全状态主线程独占，逐帧步进机即协程等价物，
-v1.8.0 已证）。
-
-### v1.14.2 验证（只看产物 MD5）
-
-| 项 | 值 |
-|---|---|
-| 产物 | `<Hacknet>/BepInEx/plugins/AutoHack.dll` |
-| 字节数 | 81408 |
-| MD5 | `7ee5d4bb15490985599557e1cc06a904` |
-| 构建 | `rm -rf src/AutoHack/obj src/AutoHack/bin && dotnet build ... -c Release` → 0 警告 0 错误 |
-
-一次全仓审计（734 nodes / 1767 edges）后的六项修复：三处手写目录解析改走游戏自身的
-`Computer.getFolderFromPath(path, createFoldersThatDontExist: true)`；proxy 四字段改走
-`Computer.addProxy`；内存查看由 60 次 `os.write` 合并为 1 次多行写；摘除 v1.13.0 漏掉的
-绘制探针及其已成死代码的 `Log` 字段；DEC 与内存两处同构的递归收集抽成带谓词的
-`ToolFiles.Collect`；`HackEngine.Ports` 的不可达兜底分支补上「为何不可达」的注释并保留。
-
-**已评估并否决**（记录以免重开）：`Span<T>`/`ArrayPool` 不可用（net472 且无任何
-`PackageReference`）；async/await 与多线程禁用（全状态主线程独占，逐帧步进机即协程等价物，
-v1.8.0 已证）。
-
-### v1.14.1 验证（只看产物 MD5）
-
-| 项 | 值 |
-|---|---|
-| 产物 | `<Hacknet>/BepInEx/plugins/AutoHack.dll` |
-| 字节数 | 81408 |
-| MD5 | `2c9ab2c456ce36a4e038803415e371ad` |
-| 构建 | `rm -rf src/AutoHack/obj src/AutoHack/bin && dotnet build ... -c Release` → 0 警告 0 错误 |
-
-新增四个独立工具（DEC 解密 / 内存转储 / 程序补全 / 自身加固），源码为
-`DecTools.cs`、`MemTools.cs`、`ExeTools.cs`、`HardenTools.cs`、`ToolFiles.cs`、
-`ToolDispatch.cs`；入口改动 `AutoHackPlugin.cs`（子命令分派 + help）、
-`HackPanel.cs`（TOOLS 区 + `PanelAction` 改为 `(Kind, Verb)` 记录结构）、
-`HackOverlay.cs`（工具执行路径）。
-
-**验收读数**：
-
-| 断言 | 读数 |
-|---|---|
-| 反推内核：存档内任一 `.dec` 反推出的 passcode 可用游戏自身实现验通 | 39/39 唯一文件通过（43 层，含 4 个两层嵌套） |
-| 反推公式常量 `MAGIC` | `'E' * 1822 + 32767 = 158485` |
-| 内存转储切分算术 `FileHeader.Length + 400 + 2` | 39 + 400 + 2 = **441**，反推 passcode 与预期一致，正文往返逐字节相同 |
-| 构建 | 0 警告 0 错误 |
-
-### v1.13.0 验证（只看产物 MD5）
-
-| 项 | 值 |
-|---|---|
-| 产物 | `<Hacknet>/BepInEx/plugins/AutoHack.dll` |
-| 字节数 | 66048 |
-| MD5 | `1f1630b978614e8020f72089fe7b115b` |
-| 构建 | `rm -rf src/AutoHack/obj src/AutoHack/bin && dotnet build ... -c Release` → 0 警告 0 错误 |
-
-改动两处，均为「节流与可观测性」：`DelayFor` 中 `CleanLogs` 返回 `0f`；
-`Finish` 在 `_targets.Count == 0` 时写明原因与出路；`TryLogin` 失败不再静默。
-
-**实测日志（`BepInEx/LogOutput.log`）确证 login 正常工作：**
-
-```
-plan: targets=1 skipped=10 steps=21 creds=True loginSteps=1 speed=Normal
-网络教育档案馆 :: admin via login (admin) - skipping port cracks | users=1 known=1 adminPass=set seclevel=6 ports=1
-```
-
-（该处的 `plan:` 行为 v1.12.3 的临时探针，已于 v1.13.0 摘除。）
-
-随后 10 次运行全部 `targets=0 skipped=11` —— 可达节点已全数归玩家，
-被 `skip owned` 过滤。`loginSteps=0` 是**因为没有目标**，不是登录失效。
-
-### 加载顺序与注册（实测日志）
-
-```
-[Info : BepInEx] Loading [AutoUpdater 5.3.4]
-[Info : BepInEx] Loading [PathfinderAPI 5.3.4]   ← Pathfinder 先，安装属性扫描 hook
-[Info : BepInEx] Loading [AutoHack 1.13.0]        ← 本插件后，能被扫描到
-[Info : AutoHack] AutoHack loaded (GUI).
-[Info : AutoHack] self-check OK: 'autohack' is registered and autocompletes.
-```
-
-自检读的是游戏**自己的** `ProgramList.programs`（自动补全注册表，由 `CommandManager` 在注册自定义命令时填充）——命中即证明扫描链路完整，而非仅凭本插件自述。
 
 ### 验证方式
 
@@ -623,187 +523,62 @@ plan: targets=1 skipped=10 steps=21 creds=True loginSteps=1 speed=Normal
 | 产物路径 | `D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll` |
 | 当前版本 | v1.14.2 |
 | 字节数 | 81408 |
-| MD5 | `2c9ab2c456ce36a4e038803415e371ad` |
+| MD5 | `7ee5d4bb15490985599557e1cc06a904` |
 
 核对流程：清理 `obj`/`bin` → 构建（须 0 警告 0 错误）→ 记 `md5sum` 与字节数，
 与上一版比对。构建成功即证明源码已编入（增量缓存已清，漏编会报错）；
 MD5 只用于确认部署确实是新的那个产物。
 
-> 以下 v1.7–v1.12.0 的**反编译核对记录全部是历史存档**，反映当时的核对方式，
-> 不再作为流程要求。保留它们的价值在于：那些行数与计数是当时产物的指纹，
-> 若日后需要回溯「某版本究竟编进去了什么」仍可查。
+### 四工具验收读数（v1.14.0，v1.14.1 修正判据）
+
+| 断言 | 读数 |
+|---|---|
+| 反推内核：存档内任一 `.dec` 反推出的 passcode 可用游戏自身实现验通 | **39/39** 唯一文件通过（43 层，含 4 个两层嵌套） |
+| 反推公式常量 `MAGIC` | `'E' * 1822 + 32767 = 158485` |
+| 内存转储切分算术 `FileHeader.Length + 400 + 2` | 39 + 400 + 2 = **441**，反推 passcode 与预期一致，正文往返逐字节相同 |
+| 程序补全 | 修正判据前 `added 0 / skipped 37`，修正后 `added 28 / skipped 9` |
+| 构建 | 0 警告 0 错误 |
+
+### v1.14.2：全仓审计后的六项修复
+
+一次全仓审计（734 nodes / 1767 edges）后落地六项：三处手写目录解析改走游戏自身的 `Computer.getFolderFromPath(path, createFoldersThatDontExist: true)`；proxy 四字段改走 `Computer.addProxy`；内存查看由 60 次 `os.write` 合并为 1 次多行写；摘除 v1.13.0 漏掉的绘制探针及其已成死代码的 `Log` 字段；DEC 与内存两处同构的递归收集抽成带谓词的 `ToolFiles.Collect`；`HackEngine.Ports` 的不可达兜底分支补上「为何不可达」的注释并保留。详见 `docs/RESEARCH.md` §22。
+
+**已评估并否决**（记录以免重开）：`Span<T>`/`ArrayPool` 不可用（net472 且无任何 `PackageReference`）；async/await 与多线程禁用（理由见 #4i / #5b）。
+
+### 加载顺序与注册（实测日志）
 
 ```
-[BepInPlugin("com.highcla.autohack", "AutoHack", "1.13.0")]
-[Command("autohack", true, false)]
-
-Echo:   os.write("\n" + os.terminal.prompt + command);
-Connect: Programs.connect(new[] { "connect", target.ip }, os);
-Ports:   comp.GetAllPortStates() -> PortState.Cracked / PortNumber / Record.OriginalPortNumber
-Open:    comp.CountOpenPorts()
-Targets: ComputerLookup.Find(id)            // 取代 Programs.getComputer
-Probe:   "Port#: " + PortNumber + "  -  " + DisplayName + " : OPEN"
-Crack:   PortExploits.cracks[code] -> "sshcrack" + " " + PortInfo.DisplayPort
-OpenP:   target.openPort(port.CodePort, os.thisComputer.ip)  // 游戏自身签名（框架 Prefix 接端口表）
-Firewall: target.firewall.attemptSolve(target.firewall.solution, os)                // 同玩家敲 solve，无阻塞
-Login:   HackEngine.TryLogin(target) -> comp.login("admin", adminPass)  // 成功即 giveAdmin，跳过破端口
-Escalate: HackEngine.CanEscalate(target) && target.giveAdmin(os.thisComputer.ip)   // 对齐 porthack 门禁
-Speed:   DelayFor(kind) -> Normal 0.35s / Fast 0.05s / Instant 0；端口步恒为 PortDelay
-Owned:   comp.adminIP == os.thisComputer.ip                                  // 肉鸡判定
-Hopeless: Ports(comp).Count <= comp.portsNeededForCrack                      // 永远开不满 -> 跳过
-Clean:   comp.deleteFile(ipFrom, "*", [IndexOf(log)])  -> "rm log/*"（目标上）/ 状态行（无连接）
-Skipped: TargetPlan.Skipped -> 被剔除的机器在全部正常步骤之后补 CleanLogs（清痕不受跳过影响）
-Proxy:   HackEngine.BypassProxy(target) -> proxyOverloadTicks = 0f; proxyActive = false  // 同 ShellExe 过载终态
-Neutral: HackEngine.SuppressCounterattack(target) -> comp.admin = null             // 断开前解除反扑
-Trace:   os.traceTracker.stop() -> active = false; trackSpeedFactor = 1f           // 直接毙掉，零每帧开销
-Targets: ReachableComputers(os) -> BFS over links (缺省) / ConnectableComputers -> 全表 (allnodes)
+[Info : BepInEx] Loading [AutoUpdater 5.3.4]
+[Info : BepInEx] Loading [PathfinderAPI 5.3.4]   ← Pathfinder 先，安装属性扫描 hook
+[Info : BepInEx] Loading [AutoHack 1.13.0]        ← 本插件后，能被扫描到（版本号随发布递增，顺序不变）
+[Info : AutoHack] AutoHack loaded (GUI).
+[Info : AutoHack] self-check OK: 'autohack' is registered and autocompletes.
 ```
 
-面板侧（v1.5.0 自绘 UI）：
+自检读的是游戏**自己的** `ProgramList.programs`（自动补全注册表，由 `CommandManager` 在注册自定义命令时填充）——命中即证明扫描链路完整，而非仅凭本插件自述。
 
-```
-Chrome:  Fill(frame, Panel) + doRectangleOutline(Edge,1) + 3px 高亮色左条
-Palette: os.highlightColor / os.terminalTextColor 取值 -> 主题跟随
-Fonts:   GuiData.smallfont 统一 + 0.9/1.0/1.1/1.3 四级缩放
-Widgets: Segment / Glyph / Check / Slider / PrimaryButton / Progress 全部自绘
-Track:   GuiData.hot / active / mouseWasPressed / mouseLeftUp 自维护
-Modal:   HackPanel.LastFrame.Contains(getMousePoint()) -> blockingInput = true  // OS.Draw Prefix
-原生控件调用数：0（Button.doButton / CheckBox.doCheckBox / SliderBar.doSliderBar / TextItem.do* 反编译后零命中）
-```
+### 版本沿革
 
-> 注意：.NET 字符串在 PE 里是 **UTF-16LE** 存储，`grep` 明文查 DLL 恒返回 0；校验二进制必须反编译（`ilspycmd`）。
+| 版本 | 字节数 | MD5 | 要点 |
+|---|---|---|---|
+| v1.14.2 | 81408 | `7ee5d4bb15490985599557e1cc06a904` | 审计后六项修复（#4j、`docs/RESEARCH.md` §22） |
+| v1.14.1 | 81408 | `2c9ab2c456ce36a4e038803415e371ad` | 清痕补上玩家机；程序补全判据改为「非空」 |
+| v1.14.0 | — | — | 四个独立工具（DEC / 内存 / 程序 / 加固），未单独发版 |
+| v1.13.0 | 66048 | `1f1630b978614e8020f72089fe7b115b` | 摘除全部日志探针；`CleanLogs` 不吃节流；`targets=0` 说明原因 |
+| v1.12.3 | 67072 | `51cfa993824f6d5978ddcb6886a06d90` | 同上两条的引入版（#4i） |
+| v1.12.1 | — | — | 验证流程改为只看 MD5（放弃反编译核对） |
+| v1.12.0 | — | — | 脚本模式（#4h） |
+| v1.11.x | — | — | 凭据登入（#4d）、节奏档位（#4e）、剔除机补清痕（#4f）、清痕改走 `deleteFile` 并前移（#4g） |
+| v1.10 | — | — | `allnodes` 口径（#4c）、追踪终止 |
+| v1.9 | — | — | 提权走原生门禁（#4b） |
+| v1.8 | — | — | 命令线程 / 游戏线程分工（#5b） |
+| v1.7 | — | — | 自绘面板；跳板收敛、追踪直毙（#5） |
 
-v1.7 反编译产物逐项核对（`decompiled/autohack-v7/AutoHack.decompiled.cs`，1792 行）：
-
-```
-OverloadProxy        0    已删（逐帧过载循环）
-hostileActionTaken   0    从不调用（不点燃追踪）
-ReachableComputers   2    可达遍历 + 调用点
-discoverNode         1    委托游戏原生发现
-BypassProxy          7    跳板一次收敛
-Seed                 3    BFS 种子（含边界判断去重）
-proxyOverloadTicks = 0f @317 / proxyActive = false @318   同 ShellExe 终态
-```
-
-v1.8 反编译产物逐项核对（`decompiled/autohack-v8/AutoHack.decompiled.cs`，1807 行）：
-
-```
-Elapsed              2    仅剩 gameTime.ElapsedGameTime（死属性已删）
-AtMost               0    已删（LINQ Take 换成 for 索引循环）
-ConcurrentQueue      1    跨线程队列换并发集合
-TryPeek/TryDequeue   2    游戏线程出队，命令线程入队
-internal void Tick   1    Tick 不再返回无用的动作计数
-MaxOutcomeRows       1    取代裸魔法值 5
-MaxY(Rectangle,int)  1    纵向上限按当前高度，不再用收起高度
-Upper(string)        1    Phase 在赋值处大写，绘制期零转换
-原生控件 / UISmallfont / UITinyfont   0
-```
-
-该轮只动外围（死代码、并发、每帧开销、注释），四条内核链路当时零改动。
-**其中「目标集合」「提权门槛」已在 v1.9 被替换**，见下。
-
-
-v1.9 反编译产物逐项核对（`decompiled/autohack-v9/AutoHack.decompiled.cs`，1859 行）：
-
-```
-ConnectableComputers   2    netMap.nodes 全表 —— 取代 BFS（对齐 Programs.connect 判据）
-ReachableComputers     0    已删
-DiscoveredComputers    0    已删（BFS 兜底）
-private static void Seed 0  已删（BFS 种子）
-CanEverEscalate        2    端口表容量 > portsNeededForCrack，否则永远开不满
-SolveFirewall          7    步类型 + 决策 + 执行 + 回显
-attemptSolve           1    走游戏自身入口（不用 Programs.solve 的 doDots 阻塞）
-SkippedHopeless        6    跳过计数（决策/属性/报告/面板/终端）
-HackStepKind.SolveFirewall 2  新步骤
-CleanLogs @1937 -> Disconnect @1941 -> KillTrace @1943   清痕排在 dc 之前（rm 的目标机取自连接）
-原生控件 / UISmallfont / hostileActionTaken   0 / 0 / 0
-```
-
-v1.10 反编译产物逐项核对（`decompiled/autohack-v10/AutoHack.decompiled.cs`，1963 行）：
-
-```
-KillTrace               8    新步骤：决策 + 枚举 + 执行 + 回显 + 收尾兜底
-traceTracker.stop       1    走游戏自身的 stop()，不照抄 TraceKill 的每帧续期
-ReachableComputers      2    缺省口径（沿 links 广度优先）恢复
-ConnectableComputers    2    allnodes 口径（netMap.nodes 全表）
-AllNodes                7    开关（选项/面板/解析/决策 + allnodes 别名）
-ShellTrap / forkBombClients  0 / 0   已撤（ActiveHackers 仅剧情脚本填充，反制不了普通追踪）
-hostileActionTaken / UISmallfont / doButton   0 / 0 / 0
-```
-
-v1.11 反编译产物逐项核对（`decompiled/autohack-v11/AutoHack.decompiled.cs`，2156 行）：
-
-```
-TryLogin / HasAnyCredential   2 / 2   凭据登入（两级候选：known 账号 → adminPass）
-HackStepKind.Login            2       新步骤，排在 Probe 之后、破端口之前
-IsRedundantAfterLogin         2       已 login 提权的目标，端口类步骤整体跳过
-_loggedIn                     3       只登记本次运行中靠 login 拿下的机器
-HackSpeed                    17       三档枚举（Normal/Fast/Instant）
-MaxStepsPerFrame              1       同帧步数上限 512，防一帧卡死
-NormalStepDelay 0.35f / FastStepDelay 0.05f / MinPortDelay 0.02f
-_skipPortsFor                 0       被 _loggedIn 取代（按运行内实际命中登记，更精确）
-UISmallfont / doButton / hostileActionTaken / Thread.Sleep   0 / 0 / 0 / 0
-```
-
-v1.11.1 反编译产物逐项核对（`decompiled/autohack-v111/AutoHack.decompiled.cs`，2169 行）：
-
-```
-TargetPlan                   5    目标解析结果（Targets/Skipped/SkippedOwned/SkippedHopeless）
-ResolveTargets(OS, HackOptions)  1   签名收敛为单参返回，取代 IReadOnlyList + 两个 out
-list2.Add                    2    两处剔除各登记一次（:452 已控 / :458 无望）
-in skipped                   1    BuildSteps 末尾为被剔除机器补步
-HackStepKind.CleanLogs, item2  1  补的正是清痕步，排在全部正常步骤之后
-out int skippedOwned         0    已随签名收敛删除
-UISmallfont / doCheckBox / hostileActionTaken / Thread.Sleep   0 / 0 / 0 / 0
-```
-
-v1.11.2 反编译产物逐项核对（`decompiled/autohack-v112/AutoHack.decompiled.cs`，2156 行）：
-
-```
-"1.11.2"                       1    BepInPlugin 版本
-"1.11.1"                       0    无残留
-ClearLogs(Computer, string)    1    新签名：带上 ipFrom 供 deleteFile 用
-deleteFile                     1    改走游戏删除原语（原为 files.Clear()）
-rm log/*                      2    一条回显（连着时）+ 一条状态行（已断开）
-FileDeleted                    0    本插件不产生该记录（@ 前缀豁免，非本插件所致）
-TargetPlan                     5    目标解析结构仍在
-in skipped                     1    被剔除机器的补步仍在
-UISmallfont / doCheckBox / hostileActionTaken / Thread.Sleep   0 / 0 / 0 / 0
-```
-
-v1.11.3 反编译产物逐项核对（`decompiled/autohack-v113/AutoHack.decompiled.cs`，2166 行）：
-
-```
-"1.11.3"                       1    BepInPlugin 版本（"1.11.2" / "1.11.1" 均 0 残留）
-CleanLogs @1937 -> Disconnect @1941 -> KillTrace @1943
-                                    清痕排在 dc 之前（rm 的目标机取自连接）
-"rm log/*"                    2    一条回显（在目标上）+ 一条状态行（无连接）
-deleteFile(ipFrom              1    走游戏删除原语
-.files.Clear()                 1    无条件兜底（不看返回值）
-connectedComp.silent = true    1    断开静默，避免 Disconnected 写回刚清的 /log
-Deleting                       1    战果摘要行（沿用 Programs.rm 的措辞）
-UISmallfont / doCheckBox / hostileActionTaken / Thread.Sleep   0 / 0 / 0 / 0
-```
-
-v1.12.0 反编译产物逐项核对（`decompiled/autohack-v120/AutoHack.decompiled.cs`，2501 行）：
-
-```
-"1.12.0"                       1    BepInPlugin 版本（"1.11." 残留 0）
-class HackScript               1    脚本类；Parse(string / .Load( 各 1
-Vocabulary                     3    12 条动作词表（含别名）
-UnsupportedVerbs               2    游戏 NPC 动作单列，错误信息区分「NPC 动作」与「拼错」
-own file system                1    rm 早于 dc 的不变量校验
-AppendScripted / ExpandPorts   2/2  脚本驱动的步骤展开
-CommandFor                     2    脚本动作 → 终端回显原文
-_script / StepDelay            4/5  运行期字段与脚本自带间隔
-tokens[3] (反编译为 array2[3])  1    config 行取第 4 个参数作为间隔
-UISmallfont / doCheckBox / hostileActionTaken / Thread.Sleep   0 / 0 / 0 / 0
-HostileHackerBreakin           0    绝未引用剧情破坏序列（"systakeover" 仅在词表字符串中）
-```
+> v1.7–v1.12.0 的**逐版反编译核对记录**（每版的符号计数与行号指纹）已从本文件移出，需要回溯时查 git 历史（`git log --follow README.md`）。本表保留各版的 MD5 指纹与改动要点，足以回答「某版本究竟编进去了什么」。
 
 ### 未验证
 
-**面板的实际渲染、鼠标交互与终端回显的肉眼观感需要真人进游戏确认**（无法自动化）。已加一次性诊断日志：渲染路径首次执行时会记录 `Overlay drawing at <宽>x<高>`。
+**面板的实际渲染、鼠标交互与终端回显的肉眼观感需要真人进游戏确认**（无法自动化）。四工具同理 —— 反推内核、内存往返、程序补全判据均已用存档数据离线验通，但按钮点击与终端回显观感需进游戏确认。
 
 ## 环境
 

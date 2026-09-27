@@ -3726,3 +3726,76 @@ mod 不该改写游戏数据。只在**读取侧**让 BFS 按连通分量展开�
 只改 `HackEngine.cs`（`ReachableComputers` 双向展开 + 新增
 `BuildIncoming` / `Expand` 两个私有辅助），无接口与开关变化。
 
+## §35 扫描按钮与速度档位
+
+### 35.1 需求
+
+用户提出两条：**「把三个速度档位删除，再写单独的扫描按钮」**。
+档位删到什么程度由用户拍板：「只删面板 UI，命令行 `instant`/`fast` 保留」。
+扫描语义同样由用户拍板：「无向闭包（出边+入边），从当前节点/本机出发」——
+即与 §34 刚确立的口径完全一致。
+
+### 35.2 扫描语义：复用 `ReachableComputers`，不另立遍历
+
+新增 `src/AutoHack/ScanTools.cs`，动作本身只有一步：
+调 `HackEngine.ReachableComputers(os)`。该方法的副作用就是它要的全部效果 ——
+展开出的每个新节点都会走原生 `NetworkMap.discoverNode`（`NetworkMap.cs:415-423`）
+写进 `visibleNodes`，与游戏自身的「已发现」同源，不做自绘的伪发现。
+
+**为什么必须复用而不是新写一个 scan**：`ReachableComputers` 已经承载了
+多源种子（玩家机 + 全部 `visibleNodes`）、无向展开（§34）、EOS 设备的
+`attatchedDeviceIDs` 反向补边（§30.7）三件事。另写一份「扫描专用遍历」
+必然漏掉其中至少一件，而漏掉的那件会以「扫不全」的形式在很久以后才被发现 ——
+正是 §34 那个 bug 的形状。**遍历口径只能有一份。**
+
+### 35.3 与原生 `scan` 的三处刻意偏离
+
+原生 `Programs.scan`（`Programs.cs:1258-1299`）不是能照抄的模板：
+
+| 原生行为 | 出处 | 为什么不抄 |
+|---|---|---|
+| 只遍历 `computer2.links`（出边） | `Programs.cs:1282` | 入边整片漏（§34） |
+| 逐条 `Thread.Sleep(400)` | `Programs.cs:1291` | 在游戏线程上睡，30 台就卡 12 秒。发现动作只是内存写，不需要节流 |
+| `hasConnectionPermission(admin: true)` 门禁 | `Programs.cs:1279` | 原意是「没拿下目标机就别看它的邻居」；本工具只读玩家自己存档里的图、不改任何第三方状态（标「已发现」不算入侵） |
+
+回显里如实报出增量：`[autohack] scan: <name> :: N node(s) in this component, M newly revealed.`
+其中 M 用 `visibleNodes.Count` 的前后差算 —— 这是玩家唯一能验证「扫到了没有」的数字。
+
+### 35.4 为什么并入 `Tools` 表，而不是做成独立控件
+
+扫描不做「拿下一台机器」这件事，与 `dec`/`pull` 等动词不完全同质。但仍并入
+`HackPanel.Tools`（放首位）并且只走 `ToolDispatch`：
+
+- 形态同构：单击立即执行、无二次确认、失败走同一层异常护栏；
+- 入口唯一：命令行 `autohack scan` 与面板按钮落到同一个 `Dispatch` 分支，
+  不必维护第二条「单实现双入口」；
+- **零高度常量改动的关键**：`ToolRows => (Tools.Length + ToolColumns - 1) / ToolColumns`
+  与 `ToolsBlockHeight` 都是按 `Tools.Length` 算的，故加第 8 个动词时
+  7 个变 8 个仍未跨行；即便跨行，高度也自动跟随，不需要动任何常量。
+
+代价是按钮数从 7 变 8，`IdBase + 30 + i` 的占用从 `+30..+36` 扩到 `+30..+37`，
+仍在 `DragId = IdBase - 1`（§29）与下一个面板实例（`IdBase + 64`）之间的安全区。
+
+### 35.5 速度档位：只删 UI
+
+`HackOptions.Speed` 字段、`HackTypes` 的三个别名数组与解析分支、
+`HackRun.DelayFor` 全部保留 —— 命令行 `instant`/`fast` 照旧可用
+（`AutoHackPlugin` 的帮助文本本就写着这两行）。
+
+删掉的是：`HackPanelState.Speed` 属性、`DrawOptions` 里的 SPEED 区
+（一个 Section 标题 + 三个 `Segment`，占用 `IdBase + 13..15`）、
+`OptionsBlockHeight` 里对应的一组 `SectionHeight + SegmentHeight + Gap`、
+`Loc` 里的 7 条 SPEED 文案。
+
+`ToOptions()` 改为直接传 `HackSpeed.Normal` —— 面板不再表达档位，
+一律走原生节奏；要快档从命令行进。`IdBase + 13..15` 就此留空：
+**留空的 id 位无害，绝不复用给另一个控件**（一个 id 两个控件正是 §29 的 bug）。
+
+### 35.6 交付
+
+92672 B / `88b0b63c6891198161aefc127fa8dc67`。构建 0 警告 0 错误。
+新增 `ScanTools.cs`；`ToolDispatch` 加 `Scan` 动词（常量 + `Verbs` + `Help` + `Dispatch` 分支）；
+`HackPanel` 删 SPEED 区、`Tools` 表加首项、`Loc` 换两条文案。
+**字节数不变**（与 v1.26.0 同为 92672）—— 删掉的 UI 代码与新增的扫描代码恰好同量级；
+MD5 已变，缓存已清后重新构建，不存在漏编（§llms.txt 硬约束 1）。
+

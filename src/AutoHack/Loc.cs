@@ -44,15 +44,6 @@ internal static class Loc
             // PORT INTERVAL
             ["PORT INTERVAL"] = "端口间隔",
 
-            // SPEED（大写字样用于分档按钮，小写用于右上角提示）
-            ["SPEED"] = "速度",
-            ["NORMAL"] = "正常",
-            ["FAST"] = "快速",
-            ["INSTANT"] = "瞬时",
-            ["normal"] = "正常",
-            ["fast"] = "快速",
-            ["same frame"] = "同帧",
-
             // 勾选框
             ["use known creds"] = "用已知账密",
             ["whole map"] = "整张地图",
@@ -66,6 +57,7 @@ internal static class Loc
 
             // TOOLS
             ["TOOLS"] = "工具",
+            ["SCAN NETWORK"] = "扫描网络",
             ["DEC DECRYPT"] = "解密 DEC",
             ["MEMORY DUMP"] = "内存转储",
             ["ALL PROGRAMS"] = "全部程序",

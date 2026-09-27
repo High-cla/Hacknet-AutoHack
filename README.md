@@ -34,7 +34,7 @@ dotnet build src/AutoHack/AutoHack.csproj -c Release
 autohack                                        # 开关控制面板
 autohack run [here] [delay=秒] [stay] [redo] [nologs] [nomark] [direct]   # 不开面板，直接执行
 autohack run script=stealth                     # 用脚本决定入侵次序（见下）
-autohack dec|mem|exes|unbreakable [allnodes]    # 独立工具（见「工具」）
+autohack scan|dec|mem|exes|unbreakable [allnodes]  # 独立工具（见「工具」）
 autohack pull|purge|drop                        # 对当前连接节点动手
 autohack -h                                     # 帮助
 ```
@@ -58,7 +58,7 @@ autohack -h                                     # 帮助
 | `skip owned nodes` | 全网扫描时跳过已拿下的肉鸡，不重复入侵（缺省开） |
 | — | 永远提不了权的机器（端口表容量 ≤ `portsToCrack`）在全网扫描时一律跳过，见下 |
 | `RUN` | 按当前设置执行 |
-| TOOLS 区 `DEC DECRYPT` / `MEMORY DUMP` / `ALL PROGRAMS` | 见「工具」，单击**立即执行**，无二次确认 |
+| TOOLS 区 `SCAN NETWORK` / `DEC DECRYPT` / `MEMORY DUMP` / `ALL PROGRAMS` | 见「工具」，单击**立即执行**，无二次确认 |
 | TOOLS 区 `PULL FILES` / `PURGE FILES` / `DROP NODE` | 对**当前连接的节点**动手：下载 / 删除当前目录下全部文件、把节点从网络图摘掉（后两个用告警色） |
 | TOOLS 区 `UNBREAKABLE` | 加固本机，**不可逆**，用告警色标注 |
 
@@ -88,7 +88,7 @@ autohack -h                                     # 帮助
 | `mark` | 上传标记文件 |
 | `allnodes` | 全网扫描改扫地图全表，不再只沿连线展开 |
 | `creds` / `nocreds` | 用 / 不用已知账密登入（**缺省不用**，v1.15.0 起；`creds` 显式开启，`nocreds` 已是缺省） |
-| `instant` / `fast` / `slow` | 节奏档位：非端口步同帧连跑 / 0.05s / 0.35s（**缺省 slow**） |
+| `instant` / `fast` / `slow` | 节奏档位：非端口步同帧连跑 / 0.05s / 0.35s（**缺省 slow**）。v1.27.0 删掉了面板上的三档 UI，**档位只从这里进** |
 | `direct` | 跳过 connect / probe，直接就地破解（不再回显这两条指令） |
 | `stay` | 跑完**不**断开连接（**已是缺省**，v1.16.0 起） |
 | `dc` | 每个目标跑完断开（反追踪：追踪只在连着目标时推进） |
@@ -99,12 +99,13 @@ autohack -h                                     # 帮助
 > 差额是「可以直接敲 IP 连上、但不在连线上」的机器 —— `Programs.connect` 遍历的是
 > `netMap.nodes` 全表，本来就不检查 `links`（见「关键设计决策」#4c）。
 
-### 工具（v1.14.0 起；v1.14.1 / v1.14.2 修缺陷；v1.16.0 加三个远程动作；v1.18.0 删除通道归一）
+### 工具（v1.14.0 起；v1.14.1 / v1.14.2 修缺陷；v1.16.0 加三个远程动作；v1.18.0 删除通道归一；v1.27.0 加扫描）
 
 工具与入侵流程**完全独立** —— 不进 `autohack run` 的自动流程，命令与面板 TOOLS 区按钮走**同一份实现**。面板按钮**单击立即执行**，不弹二次确认（`UNBREAKABLE` / `PURGE FILES` / `DROP NODE` 用告警色 + 回显里的 `irreversible` 代替）。
 
 | 命令 | 作用 |
 |---|---|
+| `autohack scan` | 把**当前节点所在的整张连通分量**标到地图上（无向闭包，含 EOS 设备）。不睡、不设 admin 门禁，与面板 SCAN 按钮同一实现（§35） |
 | `autohack dec [allnodes]` | 解开目标上的 `#DEC_ENC` 加密文件，逐层解到明文，写入玩家 `/home/MemDumps` |
 | `autohack mem [allnodes]` | 查看本机内存转储（紧凑格式，截断显示）、导出到 `/home/MemDumps`、扫描节点上的 `.mem` 并解其内嵌 DEC |
 | `autohack exes` | 把游戏能生成的破解程序全部补进玩家 `/bin`（幂等） |
@@ -113,7 +114,7 @@ autohack -h                                     # 帮助
 | `autohack purge` | 删除**当前目录**下全部文件（同游戏 `rm`；与清痕**同一实现**；**只删文件，不删文件夹**） |
 | `autohack drop` | 断开并把当前连接的节点从网络图上摘掉 |
 
-`allnodes` 只对 `dec` / `mem` 有意义（缺省只作用于当前连接节点，与 `run` 口径一致）；`exes` 与 `unbreakable` 天然只针对玩家自己。
+`allnodes` 只对 `dec` / `mem` 有意义（缺省只作用于当前连接节点，与 `run` 口径一致）；`exes` 与 `unbreakable` 天然只针对玩家自己；`scan` 不看这个开关（它本就只扫当前节点那片连通分量，`allnodes` 的语义是「跳过连线直接连全表」，属 `run` 的目标口径）。
 
 **两个远程动作都不碰文件夹**：`pull` 全部落到 `/home/misc` —— 这个夹**游戏自己就建**（`OS.cs:386-388` 给玩家机建 home 时一并加了 `stash` 与 `misc`，存档里也持久化），mod 只兜底；`purge` 只清文件，**不删文件夹**。原因是游戏自身**没有任何删除文件夹的入口**（`Programs` 里没有 rmdir，官方 Action 也只有 `<DeleteFile>`），mod 一旦建出文件夹，玩家就永远清不掉。`purge` 的回显会把「还剩几个子文件夹」一并报出，免得对着一个空夹反复试。
 
@@ -231,9 +232,9 @@ src/AutoHack/
 | 项 | 值 |
 |---|---|
 | 产物路径 | `D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll` |
-| 当前版本 | v1.26.0 |
+| 当前版本 | v1.27.0 |
 | 字节数 | 92672 |
-| MD5 | `28f21c9125ac177ad04c3abea7e37ee1` |
+| MD5 | `88b0b63c6891198161aefc127fa8dc67` |
 
 核对流程：清理 `obj`/`bin` → 构建（须 0 警告 0 错误）→ 记 `md5sum` 与字节数，
 与上一版比对。构建成功即证明源码已编入（增量缓存已清，漏编会报错）；
@@ -244,6 +245,7 @@ MD5 只用于确认部署确实是新的那个产物。
 
 | 版本 | 字节数 | MD5 | 要点 |
 |---|---|---|---|
+| v1.27.0 | 92672 | `88b0b63c6891198161aefc127fa8dc67` | 面板删掉三档速度 UI（命令行 `instant`/`fast` 保留），新增独立的**扫描**按钮：走无向闭包把当前节点所在的整张连通分量标到地图上 —— 不睡、不设 admin 门禁、复用 `ReachableComputers` 而不另立遍历（§35） |
 | v1.26.0 | 92672 | `28f21c9125ac177ad04c3abea7e37ee1` | 扫描漏掉「指向目标机的机器」：`links` 是**有向图**（`link` 与 `dlink` 都只写自己的出边，dlink 只是延迟解析），原生 `scan` 也只走出边，故入边整片不可达 —— 真实存档里「有入边无出边」的机器占两成以上。改为读取侧无向化：预建入边邻接表、双向展开，不污染存档的 `<links>`（§34） |
 | v1.25.0 | 92160 | `0fdbbe8c59b6755101528a0edb44e038` | 原生破解程序演出：`show` 开关（缺省关）把游戏自己的 `SSHCrackExe` 等挂进 RAM 面板放原版动画；端口状态仍由 `HackEngine.OpenPort` 同步保证，exe 的 `Completed()` 再开一次是幂等的。9 个程序入白名单（其余 3 个无 case、1 个要参数、1 个开错端口）。与 `docs/EXTENSIONS.md` §4.2 官方占位符表交叉验证一致（§33） |
 | v1.24.0 | 90112 | `88bebb87e43d8ce49125c87e5101006c` | `pull` 落点统一到 `/home/misc`（游戏自建的夹，不再按扩展名分流到 `/bin`/`/sys`/`/home`）；删除 `RemoteTools.Destination`，新增 `ToolFiles.Misc`（§32） |
@@ -343,7 +345,7 @@ dotnet build src/SaveFix/SaveFix.csproj -c Release
 
 ## 调研资料
 
-- `docs/RESEARCH.md` — 完整调研：原生机制、API 精确签名、陷阱（§1–§34，每条结论带 `文件:行号`）
+- `docs/RESEARCH.md` — 完整调研：原生机制、API 精确签名、陷阱（§1–§35，每条结论带 `文件:行号`）
 - `docs/EXTENSIONS.md` — 游戏自带 `Extensions/` 官方样本的格式参考：节点 XML、占位符、行为系统、任务、阵营、主题
 - `docs/HACKERSCRIPTS.md` — 自替换占位符全表 + HackerScript 动词表，以游戏实现与官方样本为准，已标出 wiki 的错漏处
 

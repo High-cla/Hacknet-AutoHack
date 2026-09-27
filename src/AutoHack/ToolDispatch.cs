@@ -13,6 +13,7 @@ using Hacknet;
 /// </summary>
 internal static class ToolDispatch
 {
+    internal const string Scan = "scan";
     internal const string Dec = "dec";
     internal const string Mem = "mem";
     internal const string Exes = "exes";
@@ -21,11 +22,12 @@ internal static class ToolDispatch
     internal const string Purge = "purge";
     internal const string Drop = "drop";
 
-    private static readonly string[] Verbs = { Dec, Mem, Exes, Unbreakable, Pull, Purge, Drop };
+    private static readonly string[] Verbs = { Scan, Dec, Mem, Exes, Unbreakable, Pull, Purge, Drop };
 
     /// <summary>help 文本来源：子命令与其说明只写一次，命令入口与文档都读这里。</summary>
     internal static readonly (string Verb, string Help)[] Help =
     {
+        (Scan, "scan                  reveal the whole network component around the current node"),
         (Dec, "dec [allnodes]        decrypt every #DEC_ENC file into /home/MemDumps"),
         (Mem, "mem [allnodes]        show + export this machine's memory, scan for dumps"),
         (Exes, "exes                  fill /bin with every crack program the game can produce"),
@@ -60,6 +62,10 @@ internal static class ToolDispatch
     {
         switch (verb)
         {
+            case Scan:
+                ScanTools.Run(os);
+                break;
+
             case Dec:
                 DecTools.Run(os, allNodes);
                 break;

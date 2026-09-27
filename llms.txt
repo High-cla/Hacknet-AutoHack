@@ -3,7 +3,7 @@
 > Hacknet 的 BepInEx / Pathfinder 插件：用游戏自身的原生机制一键入侵全网，带控制面板与脚本驱动。
 > 本文件面向要理解或修改本仓库的编码 agent。规范见 https://llmstxt.org
 
-当前 v1.26.0。构建产物直投游戏插件目录，无需手动拷贝：
+当前 v1.27.0。构建产物直投游戏插件目录，无需手动拷贝：
 
 ```
 D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
@@ -21,7 +21,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    **绝不下载 Release 附件回来比对** —— 只读构建输出目录（即游戏插件目录）那份产物的 MD5。
 3. **`gh release create` 绝不自动执行** —— 等用户显式发令。`git push` 可以直接做。
 
-**二十二个最容易踩的坑**（都带行号，可直接 grep）
+**二十三个最容易踩的坑**（都带行号，可直接 grep）
 
 1. `Computer.portsOpen` 恒为 0 —— Pathfinder 用 Harmony Prefix 接管 `openPort`/`openPorts`
    并 `return false`，状态改存 `PortState.Cracked`。任何读 `portsOpen` 的判断都是错的，
@@ -156,17 +156,27 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     独立印证：`docs/EXTENSIONS.md` §4.2 的官方占位符表与 `PortExploits.cracks` 差集恰好是
     `1, 8, 3659, 3724, 9418` —— 后三个正是无 case 的那三个，官方自己也没给它们占位符。
 
+23. **扫描 ≠ 入侵，别把原生 `scan` 的门禁与节流一起抄进来** —— 原生
+    `Programs.scan`（`Programs.cs:1258-1299`）有三处是它作为**终端命令**的职责，
+    不是扫描这件事本身：只走 `computer2.links` 出边（`:1282`，入边整片漏，见坑 22）、
+    逐条 `Thread.Sleep(400)`（`:1291`，够 30 台就卡游戏线程 12 秒）、
+    `hasConnectionPermission(admin: true)` 门禁（`:1279`）。本 mod 的扫描
+    （`ScanTools.Run`）三处全不抄：**直接复用 `HackEngine.ReachableComputers`** ——
+    它已含无向展开与 EOS 设备补边两件事，另写一份遍历必然漏掉其中一件，
+    而漏掉的那件会以「扫不全」的形式很久以后才被发现（正是 §34 的形状）。
+    **遍历口径只能有一份。**
+
 ## 仓库文档
 
-- [README.md](README.md): 面向使用者的说明 —— 安装、面板与命令行用法（含七个独立工具）、脚本模式、架构、验证方式。**刻意保持精简**，设计决策与取证细节一律在 docs/RESEARCH.md
-- [docs/RESEARCH.md](docs/RESEARCH.md): 源码级取证与设计决策，§1–§34，每条结论都带 `文件:行号`。**细节的唯一归属地**（README 只留给人看的结论）
+- [README.md](README.md): 面向使用者的说明 —— 安装、面板与命令行用法（含八个独立工具）、脚本模式、架构、验证方式。**刻意保持精简**，设计决策与取证细节一律在 docs/RESEARCH.md
+- [docs/RESEARCH.md](docs/RESEARCH.md): 源码级取证与设计决策，§1–§35，每条结论都带 `文件:行号`。**细节的唯一归属地**（README 只留给人看的结论）
 - [docs/EXTENSIONS.md](docs/EXTENSIONS.md): 游戏自带 `Extensions/` 官方样本的格式参考 —— 节点 XML、占位符、行为系统、任务、阵营、主题
 - [docs/HACKERSCRIPTS.md](docs/HACKERSCRIPTS.md): 自替换占位符全表 + HackerScript 动词表（以游戏实现与官方样本为准，已标出 wiki 错漏处）
 - [llms.txt](llms.txt): 本文件
 
 ## 源码
 
-- [src/AutoHack/ToolDispatch.cs](src/AutoHack/ToolDispatch.cs): 七个工具的唯一入口（命令与面板共用）；`RemoteTools.cs` 是其中三个远程动作的实现
+- [src/AutoHack/ToolDispatch.cs](src/AutoHack/ToolDispatch.cs): 八个工具的唯一入口（命令与面板共用）；`RemoteTools.cs` 是其中三个远程动作的实现，`ScanTools.cs` 是 `scan`
 - [src/AutoHack/DecTools.cs](src/AutoHack/DecTools.cs): DEC 解密 —— 反推 passcode + 多层递归 + 批量落盘
 - [src/AutoHack/MemTools.cs](src/AutoHack/MemTools.cs): 内存转储 —— 查看 / 导出 / 扫描内嵌 DEC
 - [src/AutoHack/ExeTools.cs](src/AutoHack/ExeTools.cs): 程序补全 —— 幂等填充 `/bin`

@@ -94,9 +94,6 @@ internal sealed class HackPanelState
     /// </summary>
     internal bool ShowExes { get; set; } = false;
 
-    /// <summary>推进节奏档位。缺省 Normal = 与旧版行为一致，快档需显式选。</summary>
-    internal HackSpeed Speed { get; set; } = HackSpeed.Normal;
-
     /// <summary>
     /// 入侵脚本文件名；null = 内置次序。
     ///
@@ -119,7 +116,11 @@ internal sealed class HackPanelState
         AllNodes,
         UseCredentials,
         ShowExes,
-        Speed,
+
+        // 面板不再提供节奏档位（三档 UI 已删）：面板一律走原生节奏，
+        // 命令行仍可用 slow / fast / instant 显式选档（见 HackTypes.Parse）。
+        HackSpeed.Normal,
+
         Script);
 }
 
@@ -169,6 +170,9 @@ internal static class HackPanel
     /// <summary>TOOLS 区：动词 + 按钮文案 + 是否危险（危险按钮用告警色）。</summary>
     private static readonly (string Verb, string Label, bool Danger)[] Tools =
     {
+        // 扫描不是「拿下一台机器」，但它是面板上最高频的动作，与工具按钮同构：
+        // 单击立即执行、无二次确认。故并入同一张表并放首位，行数由 ToolRows 自算。
+        (ToolDispatch.Scan, "SCAN NETWORK", false),
         (ToolDispatch.Dec, "DEC DECRYPT", false),
         (ToolDispatch.Mem, "MEMORY DUMP", false),
         (ToolDispatch.Exes, "ALL PROGRAMS", false),
@@ -199,7 +203,6 @@ internal static class HackPanel
     private const int OptionsBlockHeight =
         SectionHeight + SegmentHeight + Gap
         + SectionHeight + SliderHeight + Gap
-        + SectionHeight + SegmentHeight + Gap
         + CheckRowHeight * 5 + Gap;
 
     /// <summary>本帧面板占据的矩形。供 Update 阶段提前阻断下层控件点击。</summary>
@@ -340,38 +343,6 @@ internal static class HackPanel
 
         y += SliderHeight + Gap;
 
-        Section(Loc.T("SPEED"), left, y, c);
-        var speedHint = state.Speed switch
-        {
-            HackSpeed.Instant => Loc.T("same frame"),
-            HackSpeed.Fast => Loc.T("fast"),
-            _ => Loc.T("normal"),
-        };
-        DrawText(speedHint, left + ContentWidth - Measure(speedHint, 0.9f).X, y, c.Dim, 0.9f);
-        y += SectionHeight;
-
-        // 三档：Normal 保留真人节奏，Fast 压缩非端口步，Instant 把非端口步合并到同帧。
-        var third = ContentWidth / 3;
-        if (Segment(state.IdBase + 13, new Rectangle(left, y, third - 2, SegmentHeight),
-                state.Speed == HackSpeed.Normal, Loc.T("NORMAL"), c))
-        {
-            state.Speed = HackSpeed.Normal;
-        }
-
-        if (Segment(state.IdBase + 14, new Rectangle(left + third, y, third - 2, SegmentHeight),
-                state.Speed == HackSpeed.Fast, Loc.T("FAST"), c))
-        {
-            state.Speed = HackSpeed.Fast;
-        }
-
-        if (Segment(state.IdBase + 15, new Rectangle(left + third * 2, y, ContentWidth - third * 2, SegmentHeight),
-                state.Speed == HackSpeed.Instant, Loc.T("INSTANT"), c))
-        {
-            state.Speed = HackSpeed.Instant;
-        }
-
-        y += SegmentHeight + Gap;
-
         state.UseCredentials = Check(state.IdBase + 16, left, y, ColumnWidth, state.UseCredentials, Loc.T("use known creds"), c);
         state.AllNodes = Check(state.IdBase + 17, left + ColumnWidth + 8, y, ColumnWidth, state.AllNodes, Loc.T("whole map"), c);
         y += CheckRowHeight;
@@ -395,8 +366,9 @@ internal static class HackPanel
     }
 
     /// <summary>
-    /// TOOLS 区：四个工具各一个按钮，单击立即执行 —— 不弹二次确认（UNBREAKABLE
-    /// 用告警色 + 命令回显里的 irreversible 提示代替）。
+    /// TOOLS 区：每个动词一个按钮，单击立即执行 —— 不弹二次确认（危险动作用告警色
+    /// + 命令回显里的 irreversible 提示代替）。按钮数由 <see cref="Tools"/> 决定，
+    /// 行数由 <see cref="ToolRows"/> 自算，故增删一个动词不必改任何高度常量。
     /// </summary>
     private static PanelAction DrawTools(HackPanelState state, int left, ref int y, Palette c)
     {

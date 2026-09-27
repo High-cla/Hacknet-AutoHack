@@ -485,22 +485,24 @@ internal sealed class HackRun
         Finished = true;
         Phase = "COMPLETE";
 
-        // 收尾反追踪。默认只掐看得见的那个倒计时，保住 v1.31.0 之前的行为。
+        // 收尾反追踪 —— 无条件执行，不是选项：两套追踪一起止、并擦掉追踪者的 /log。
         //
-        // 勾了「disconnect & clear traces」（WantsAntiTrace）则走完整版：两套追踪
-        // 一起止、并擦掉追踪者的 /log。为什么必须擦日志才叫「清干净」——
-        // 追踪的复发源就是日志：OS.handleDisconnection（OS.cs:944-960）在每次断开时
-        // 检查刚断开那台的 /log，只要有一行同时含玩家 IP 与 FileCopied/FileDeleted/
-        // FileMoved，就自动排入一条新的 TrackerDetail（判据见
-        // TrackerCompleteSequence.CompShouldStartTrackerFromLogs，:30-47），
-        // 10~20 秒后计时归零端掉玩家。只清计时不清日志，下次从那台断开原地复活。
-        if (Options.WantsAntiTrace)
+        // 为什么必须擦日志才叫「清干净」—— 追踪的复发源就是日志：
+        // OS.handleDisconnection（OS.cs:944-960）在每次断开时检查刚断开那台的 /log，
+        // 只要有一行同时含玩家 IP 与 FileCopied/FileDeleted/FileMoved，就自动排入一条
+        // 新的 TrackerDetail（判据见 TrackerCompleteSequence.CompShouldStartTrackerFromLogs，
+        // :30-47），10~20 秒后计时归零端掉玩家。只清计时不清日志，下次从那台断开原地复活。
+        //
+        // 排在换 IP 之前：TraceTools 擦 /log 的判据是「旧 IP 是否在日志里」
+        // （HackEngine.ClearLogs 按 os.thisComputer.ip 匹配），必须在 IP 变更前完成。
+        TraceTools.Run(os);
+
+        // 换 IP：游戏原生的「保命」动作（ISPDaemon 的 "Assign New IP"），
+        // 顺带把本轮已控目标的归属迁移到新 IP。理由与代价见 IpTools 的文档注释。
+        var ipNote = IpTools.Reset(os);
+        if (ipNote != null)
         {
-            TraceTools.Run(os);
-        }
-        else
-        {
-            AbortTrace(os);
+            os.write("[autohack] new local IP: " + ipNote + ".");
         }
 
         foreach (var target in _targets)
@@ -563,14 +565,6 @@ internal sealed class HackRun
 
         Current = "done - " + _targets.Count + " target(s)";
     }
-
-    /// <summary>
-    /// 收尾兜底：跑完仍被追踪时直接毙掉。
-    /// 正常情况下每个目标的 KillTrace 步已停掉它，这里覆盖「最后一步之后才被点燃」
-    /// 的窗口 —— 例如目标机带 tracker、断开时经
-    /// <c>TrackerCompleteSequence</c>（OS.cs:950-958）延迟 10~20 秒启动的那种。
-    /// </summary>
-    private static void AbortTrace(OS os) => KillTrace(os);
 
     /// <summary>
     /// 展开动作序列：连接 → 侦察 → 解跳板 → 逐端口攻破 → 提权 → 投放 → 清痕 → 断开。

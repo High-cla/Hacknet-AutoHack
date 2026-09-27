@@ -46,15 +46,11 @@ internal sealed record HackOptions(
     HackSpeed Speed,
     string Script)
 {
-    /// <summary>
-    /// 本轮收尾时是否清除两套追踪（<see cref="Disconnect"/> 为真即要）。
-    ///
-    /// 特意做成派生属性而不是新加一个 record 参数：它和 <see cref="Disconnect"/>
-    /// 是同一个决定的两面 —— 谁都不该出现「断开但不反追踪」或「反追踪但不断开」的
-    /// 组合，做成两个可独立赋值的字段就等于允许那个组合存在。面板那边同理，
-    /// 见 HackPanelState.Disconnect（面板）与 HackRun.Finish（收尾）。
-    /// </summary>
-    internal bool WantsAntiTrace => Disconnect;
+    // 这里曾有 WantsAntiTrace（从 Disconnect 派生的「收尾是否清追踪」）。
+    // 用户定：清追踪与断开解耦 —— 清追踪是收拾自己制造的烂摊子（倒计时 + 脱机追踪 +
+    // 追踪者的 /log），留着没有好处；断开是玩家的行为选择（终止会话、清空
+    // navigationPath），玩家有理由不要。故清追踪改为 HackRun.Finish 里的恒定动作，
+    // 不再经过开关；那个属性随之失去调用点，已删。
 
     internal const float DefaultPortDelay = 0.6f;
 
@@ -109,9 +105,8 @@ internal sealed record HackOptions(
         var uploadMarker = false;
         var connectFirst = true;
 
-        // 缺省关（v1.16.0 起）：保持连接是更中性的默认 —— 断开是「反追踪」这一
-        // 特定目的的手段，而它同时会终止会话、清空 navigationPath。
-        // 需要反追踪就显式 dc（或面板勾 anti-trace dc）。
+        // 缺省关（v1.16.0 起）：保持连接是更中性的默认 —— 断开会终止会话、
+        // 清空 navigationPath。它只管断开；收尾清追踪已改为恒定动作，不再需要显式开启。
         var disconnect = false;
         var skipOwned = true;
         var allNodes = false;
@@ -120,9 +115,10 @@ internal sealed record HackOptions(
         // 要便利性再显式 creds。
         var useCredentials = false;
 
-        // 缺省关：原生破解程序是纯演出 —— 端口状态由 HackEngine.OpenPort 同步写好，
-        // exe 只是把原版动画挂进 RAM 面板（见 NativeExes）。关掉时行为与本功能存在前相同。
-        var showExes = false;
+        // 缺省开：原生破解程序是纯演出 —— 端口状态由 HackEngine.OpenPort 同步写好，
+        // exe 只是把原版动画挂进 RAM 面板（见 NativeExes），幂等、不影响战果。
+        // 缺省开是为了让脚本跑起来有可看的演出；要安静跑用 noshow。
+        var showExes = true;
         var speed = HackSpeed.Normal;
         string script = null;
 

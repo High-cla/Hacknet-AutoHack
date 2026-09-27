@@ -50,7 +50,7 @@ internal static class Loc
             ["skip owned"] = "跳过已拿下",
             ["wipe target logs"] = "清除目标日志",
             ["connect first"] = "先连接",
-            ["disconnect & clear traces"] = "断开并清除追踪",
+            ["disconnect when done"] = "跑完断开",
             ["upload marker"] = "上传标记",
             ["wipe my logs"] = "清除我的日志",
             ["native exes"] = "原生演出",

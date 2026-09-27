@@ -212,6 +212,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     是 `RemoveAt` **移除**（`OS.cs:825-830`），不是暂停；② 它的复发源是目标 `/log`
     （`CompShouldStartTrackerFromLogs`，`TrackerCompleteSequence.cs:30-47`），
     **只清计时不清日志 = 下次断开原地复活**。
+
 26. **命令动词在 `args[1]`，不在 `args[0]`**（v1.32.0 修，此前从 1.7.0 起全错）。
     Pathfinder 的 `CommandManager.OnCommandExecute`（`:42`）拿**注册名**去比
     `args.Args[0]`，故 `[Command("autohack")]` 的处理函数收到的恒为
@@ -228,6 +229,22 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     `Settings.txt`），只能覆写字段本身。`bootTextDelay` 是实例字段、只在 `LoadContent()`
     （`:78`）算一次，那一刻读到的已是新值，**不要手动重算**：`reset()`（`:319-331`）
     不重算它，手动补的那份重启后失效。
+
+28. **收尾清追踪是恒定动作，不是选项** —— 每轮 `autohack run` 的 `HackRun.Finish`
+    无条件调 `TraceTools.Run`（止两套追踪 + 擦追踪者 /log）。它曾与「跑完断开」合成一个
+    复选框，现拆开：断开是行为选择，清追踪只是收拾烂摊子。
+    另：**清追踪必须排在换 IP 之前** —— `TraceTools.Run` 擦 /log 的判据是
+    「`os.thisComputer.ip` 是否出现在日志里」，先换 IP 就擦不到了（`HackRun.Finish` 已按此排）。
+
+29. **换 IP 会清空全部肉鸡标记，必须同步迁移** —— 提权时游戏把玩家当时的 IP 写进目标机
+    （`Computer.cs:740 adminIP = ipFrom`），判据是 `adminIP == os.thisComputer.ip`
+    （`Computer.PlayerHasAdminPermissions`，`Computer.cs:1670`；mod 侧同一判据见
+    `HackEngine.IsOwned`）。游戏原生的换 IP 入口是 ISP 服务器的 `Assign New IP`
+    （`ISPDaemon.cs:122-142`，三步：去重生成 → `comp.ip = 新IP` → 玩家机走
+    `os.thisComputerIPReset()`），且 `thisComputerIPReset`（`OS.cs:1791-1802`）会把
+    `thisComputer.adminIP` 同步成新 IP —— 不同步玩家机就会「不是自己的管理员」。
+    mod 的 `IpTools.Reset` 照抄这三步，并在改 IP **之前**把全图 `adminIP == 旧玩家IP`
+    的机器改成新 IP（不迁移就每轮清空战绩）。
 
 ## 仓库文档
 

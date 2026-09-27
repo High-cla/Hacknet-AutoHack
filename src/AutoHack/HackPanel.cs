@@ -67,24 +67,19 @@ internal sealed class HackPanelState
     internal bool ConnectFirst { get; set; } = true;
 
     /// <summary>
-    /// 每个目标跑完就 dc，并顺带清除两套追踪。缺省**关**（v1.16.0 起）—— 保持连接是
-    /// 更中性的默认，断开是「反追踪」这一特定目的的手段（追踪只在连着目标时推进，
-    /// 断开即中止），而它同时会终止会话、清空 navigationPath。要反追踪须显式勾选。
+    /// 每个目标跑完是否 dc。<b>只控制断开</b> —— 清追踪已不由它管。
     ///
-    /// 面板上曾有两处与追踪沾边：TOOLS 区的「ANTI-TRACE」按钮（单击立即止住两套
-    /// 追踪）与这个复选框（旧名 "anti-trace dc"，管跑完断不断开）。两个控件回答的是
-    /// 同一个玩家问题 ——「有没有东西在追我、怎么让它停」——却要玩家先分清「我现在
-    /// 是被追着，还是只是想跑完自动断开」才敢点。合并成一个：勾上它，本轮跑完每个目标
-    /// 都断开（断开本身就中止追踪），收尾时再把两套追踪一起掐掉、擦掉追踪者的 /log
-    /// （见 <see cref="HackOptions.WantsAntiTrace"/> 与 HackRun.Finish）。
+    /// 缺省**关**（v1.16.0 起）：保持连接是更中性的默认，断开是改变本轮行为的手段
+    /// （终止会话、清空 navigationPath），玩家有理由不要。
     ///
-    /// 为什么不是「勾了就立刻清」：那会把一次入侵设置变成立即动作，玩家勾一下就得在
-    /// 游戏线程上跑完整套清除；而追踪在<b>跑完之后</b>才是问题（跑的时候本来就连着，
-    /// <c>TraceTracker.Update</c> 在连着目标时压根不递减，TrackersInProgress 同理由
-    /// <c>OS.cs:823-839</c> 挂着不动）。故清除统一排在收尾，与断开同一时刻。
+    /// 它曾同时兼管清追踪（旧名 "anti-trace dc"、"disconnect &amp; clear traces"），
+    /// 用户定拆开：<b>清追踪与断开解耦</b>。理由见
+    /// <see cref="HackOptions.WantsAntiTrace"/> —— 清追踪是收拾自己制造的烂摊子，
+    /// 留着没有好处；而断开是玩家的行为选择。合成一个开关时，二者被迫同进退：
+    /// 想要保留连接就得连追踪一起留着，这是错的权衡。
     ///
-    /// 按钮没了，<c>autohack trace</c> 命令仍在 —— 它是「我现在就要清」的唯一入口，
-    /// 与复选框互不替代（一个立即、一个随本轮收尾）。
+    /// 面板上曾有第三个与追踪有关的控件（TOOLS 区「ANTI-TRACE」按钮），v1.32.0 已删；
+    /// 那个按钮的职能（立即清）现由 <c>autohack trace</c> 命令独家承担。
     /// </summary>
     internal bool Disconnect { get; set; } = false;
 
@@ -102,12 +97,13 @@ internal sealed class HackPanelState
     internal bool UseCredentials { get; set; } = false;
 
     /// <summary>
-    /// 是否把原生破解程序挂进 RAM 面板当演出（缺省关）。
+    /// 是否把原生破解程序挂进 RAM 面板当演出（缺省**开**）。
     ///
     /// 只是演出：端口状态由 <see cref="HackEngine.OpenPort"/> 同步写好，
-    /// exe 到点后自己再调一次是幂等的。关掉时行为与本功能存在前逐字节相同。
+    /// exe 到点后自己再调一次是幂等的，不影响战果。缺省开是为了让入侵过程
+    /// 看得见（原版动画是这游戏的主要反馈）；要安静跑可取消勾选。
     /// </summary>
-    internal bool ShowExes { get; set; } = false;
+    internal bool ShowExes { get; set; } = true;
 
     /// <summary>
     /// 入侵脚本文件名；null = 内置次序。
@@ -372,12 +368,10 @@ internal static class HackPanel
 
         state.ConnectFirst = Check(state.IdBase + 20, left, y, ColumnWidth, state.ConnectFirst, Loc.T("connect first"), c);
 
-        // 这一个控件同时管两件事，名字里就把两件都写出来：
-        //   ① 每个目标跑完发一条 dc；
-        //   ② 顺带把两套追踪止住（TraceTracker 倒计时 + TrackersInProgress
-        //      脱机追踪，并擦其 /log）。文本宽度放不下完整解释，详情见
-        //      HackPanelState.Disconnect 的文档注释。
-        state.Disconnect = Check(state.IdBase + 21, left + ColumnWidth + 8, y, ColumnWidth, state.Disconnect, Loc.T("disconnect & clear traces"), c);
+        // 这个控件只管断开。清追踪（TraceTracker 倒计时 + TrackersInProgress 脱机追踪
+        // 并擦其 /log）已改为每轮收尾无条件执行，不再由这里控制 —— 理由见
+        // HackPanelState.Disconnect 与 HackOptions.WantsAntiTrace 的文档注释。
+        state.Disconnect = Check(state.IdBase + 21, left + ColumnWidth + 8, y, ColumnWidth, state.Disconnect, Loc.T("disconnect when done"), c);
         y += CheckRowHeight;
 
         state.UploadMarker = Check(state.IdBase + 22, left, y, ColumnWidth, state.UploadMarker, Loc.T("upload marker"), c);

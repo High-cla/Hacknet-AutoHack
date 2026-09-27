@@ -55,7 +55,7 @@ D:\steam\steamapps\common\Hacknet\Extensions\IntroExtension\
 `generateBinaryString` 的产物长度**不等于请求长度**：`byte[length/8]` 再逐字节
 `Convert.ToString(b, 2)`，而该方法**不补前导零**（`Computer.cs:1580-1585`），
 故请求 500 实际约 445 字符。**任何拿 `EXE_FILE_LENGTH = 500` 当长度门槛的校验都是错的**
-（本仓库 v1.14.1 修的就是这个缺陷，见 README 坑 10）。
+（本仓库 v1.14.1 修的就是这个缺陷，见 llms.txt 坑 10）。
 
 ### 1.3 程序占位符
 

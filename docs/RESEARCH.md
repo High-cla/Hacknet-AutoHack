@@ -2,7 +2,7 @@
 
 调研日期 2026-09-26 · 目标游戏 `D:\steam\steamapps\common\Hacknet`（Pathfinder 5.3.4 已装）· 工作区 `D:\git\HacknetMod`
 
-本文件**按主题**组织（不是按版本），每条结论都带 `文件:行号`，可直接 grep 复核。版本沿革与产物指纹不在此维护 —— 那在 README 与 git 历史里。
+本文件**按主题**组织（不是按版本），每条结论都带 `文件:行号`，可直接 grep 复核。版本沿革与产物指纹不在此维护 —— 产物指纹在 README「构建 › 产物核对」，历史沿革在 git。
 
 **阅读次序**：改代码前先看 §1（构建与边界）；查 API 与终端契约看 §2–§3；碰端口/提权看 §4；碰目标集合看 §5；碰清痕看 §7；碰面板看 §9。**不要凭记忆改 —— 每条结论都可回溯到源码行。**
 
@@ -103,7 +103,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
 `ilspycmd -o decompiled/autohack-vNNN <dll>` 的逐项字符串计数核对**不再执行**。
 这些存档目录本身也已于 v1.15.0 **全部删除** —— 本文件里出现的 `decompiled/autohack-vNN/…`
 路径是当时核对的历史记录，**文件已不存在**，行数/计数留作文物指纹。
-README 里 v1.7–v1.12.0 的九块反编译核对记录**已删除**（不再保留为历史存档）；各版的字节数与 MD5 指纹留在 README 的「版本沿革」表，逐版核对原文只在 git 历史里（`git log --follow README.md`）。
+README 里 v1.7–v1.12.0 的九块反编译核对记录**已删除**（不再保留为历史存档）；各版的字节数与 MD5 指纹只在 git 历史里（`git log --follow README.md`）；README「构建 › 产物核对」只留**当前**那一版。
 它们的残留价值：那些行数与计数是当时产物的指纹，回溯「某版本编进去了什么」时可查。
 
 **注意**：`decompiled/game-proj/` 与 `decompiled/pathfinder/` 是**另一回事** ——

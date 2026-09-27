@@ -6,7 +6,7 @@
 
 ## 安装
 
-### 方式一：下载现成产物
+### 下载现成产物
 
 从 [Releases](https://github.com/High-cla/Hacknet-AutoHack/releases/latest) 取 `AutoHack.dll`，放进游戏的 `BepInEx/plugins/` 目录：
 
@@ -14,17 +14,9 @@
 <Hacknet>/BepInEx/plugins/AutoHack.dll
 ```
 
-### 方式二：从源码构建
+> 另有独立插件 **HacknetSaveFix**（修游戏本体存档 NRE，见「架构」），随同一个 Release 发布，放进同一个 `plugins/` 目录即可。
 
-本仓库的构建配置会把产物**直接输出到游戏目录**，无需手工拷贝：
-
-```
-D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
-```
-
-```bash
-dotnet build src/AutoHack/AutoHack.csproj -c Release
-```
+要从源码构建，见「构建」。
 
 ## 使用
 
@@ -228,6 +220,45 @@ dc    $#%#$
 > 喂错动作时插件会明确区分「这是游戏 NPC 动作，此处没有对应物」与「拼错了」，
 > 而不是笼统报「未知动作」。
 
+## 构建
+
+构建配置会把产物**直接输出到游戏目录**，无需手工拷贝：
+
+```
+D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
+```
+
+```bash
+rm -rf src/AutoHack/obj src/AutoHack/bin
+dotnet build src/AutoHack/AutoHack.csproj -c Release
+```
+
+第二个插件 `src/SaveFix/` 同法（`SaveFix.csproj`）：
+
+```bash
+rm -rf src/SaveFix/obj src/SaveFix/bin
+dotnet build src/SaveFix/SaveFix.csproj -c Release
+```
+
+两个 csproj 都是 net472 + LangVersion 13，`HacknetDir` 缺省 `D:\steam\steamapps\common\Hacknet\`，可用 `-p:HacknetDir=<路径>` 覆盖；引用程序集从 `$(HacknetDir)` 就地取，`Private=false` 不复制。
+
+### 产物核对
+
+**当前规矩（用户定）：只看产物 MD5，不做反编译核对。**
+
+| 产物 | 版本 | 字节数 | MD5 |
+|---|---|---|---|
+| `AutoHack.dll` | v1.32.1 | 97280 | `bf088dd29374e2eebda15f7768412a49` |
+| `HacknetSaveFix.dll` | 独立插件 | 5120 | `505df298c541768b0cc39a3d4d610806` |
+
+核对流程：清理 `obj`/`bin` → 构建（须 0 警告 0 错误）→ 记 `md5sum` 与字节数，
+与上一版比对。构建成功即证明源码已编入（增量缓存已清，漏编会报错）；
+MD5 只用于确认部署确实是新的那个产物。
+**验证只看构建输出目录里已编译的那份**，不下载 Release 附件回来比对（用户定，v1.22.0 起）。
+
+**版本沿革不在此维护** —— 历史指纹与逐版改动查 git（`git log --oneline` / `git show <sha>`）。
+本文件只描述**当前**行为；要看某个旧版做了什么，`git show vX.Y.Z` 比任何表格都准。
+
 ## 架构
 
 ```
@@ -244,98 +275,11 @@ src/AutoHack/
 └── GlobalUsings.cs     全局 using
 ```
 
-## 验证
+### 第二个插件：HacknetSaveFix
 
-### 验证方式
+`src/SaveFix/` 与 AutoHack **零耦合**，可单独安装/卸载，修的是**游戏本体**的存档缺陷：绕过主菜单进入 OS 的入口（HacknetHotReplace 直连、经扩展直接起 OS 等）会让 `OS.SaveUserAccountName` 停在 null（`OS.cs:148` 缺省即 null，只在 `MainMenu.cs:103/150/235/315` 被赋值），保存时把它当文件名传下去（`OS.cs:1522`），`SaveFileManager.GetSaveFileNameForUsername` 拿到 null（`:238`），`FileSanitiser.purifyStringForDisplay` 对 null 返回 null（`FileSanitiser.cs:9-12`），紧接着的 `.Replace` 打在 null 上 → NRE；而 `WriteSaveData` 把异常吞成一行日志（`SaveFileManager.cs:240-243`），**游戏不崩但存档静默失败**。修法是给崩溃点打一个 Harmony 前缀，用游戏自己在 `OS.cs:372` 用的同一套回落，不另立规则，只在真兜底时打一条 `LogWarning`。完整症状、根因链、逐行取证见 [docs/RESEARCH.md](docs/RESEARCH.md) §11。
 
-**当前规矩（用户定）：只看产物 MD5，不做反编译核对。**
-
-| 项 | 值 |
-|---|---|
-| 产物路径 | `D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll` |
-| 当前版本 | v1.32.1 |
-| 字节数 | 97280 |
-| MD5 | `bf088dd29374e2eebda15f7768412a49` |
-
-核对流程：清理 `obj`/`bin` → 构建（须 0 警告 0 错误）→ 记 `md5sum` 与字节数，
-与上一版比对。构建成功即证明源码已编入（增量缓存已清，漏编会报错）；
-MD5 只用于确认部署确实是新的那个产物。
-**验证只看构建输出目录里已编译的那份**，不下载 Release 附件回来比对（用户定，v1.22.0 起）。
-
-**版本沿革不在此维护** —— 历史指纹与逐版改动查 git（`git log --oneline` / `git show <sha>`）。
-本文件只描述**当前**行为；要看某个旧版做了什么，`git show vX.Y.Z` 比任何表格都准。
-
-## 附：HacknetSaveFix（独立插件）
-
-仓库里还有第二个**独立**插件 `src/SaveFix/`，产物 `HacknetSaveFix.dll`，
-修的是**游戏本体**的一个存档崩溃，与 AutoHack 无耦合，可单独安装/卸载。
-
-### 症状
-
-```
-[Error  :   Hacknet] Error writing save data for user :
-System.NullReferenceException
-   at Hacknet.PlatformAPI.Storage.SaveFileManager.GetSaveFileNameForUsername(String username) IL<0x0001>
-   at Hacknet.PlatformAPI.Storage.SaveFileManager.WriteSaveData(String saveData, String playerID) IL<0x0000>
-```
-
-### 根因（全在游戏本体）
-
-| # | 位置 | 事实 |
-|---|---|---|
-| 1 | `OS.cs:148` | `public string SaveUserAccountName = null;` —— 默认就是 null |
-| 2 | `MainMenu.cs:103/150/235/315` | 该字段**只在 MainMenu 构造 OS 时赋值** |
-| 3 | `OS.cs:1522` | `writeSaveGame(SaveUserAccountName)` 把它当文件名传下去 |
-| 4 | `SaveFileManager.cs:238` | `GetSaveFileNameForUsername(playerID)` |
-| 5 | `SaveFileManager.cs:223` | `purifyStringForDisplay(username).Replace("_","-").Trim()` |
-| 6 | `FileSanitiser.cs:9-12` | 对 null 输入**返回 null** → 紧接着的 `.Replace` 打在 null 上 |
-
-栈里的 `IL<0x0001>` 正是第 5、6 步那一句。错误信息 `for user :`（冒号后为空）
-也印证 `playerID` 是 null。
-
-**任何绕过主菜单进入 OS 的入口都会触发** —— 例如用 HacknetHotReplace 之类的工具
-直接连进设备、或经扩展直接起 OS。此时字段停在 null，保存必炸。
-
-`WriteSaveData` 把异常吞成一行错误日志（`SaveFileManager.cs:240-243`），
-**游戏不崩，但存档静默失败** —— 这是真正危险的地方。
-
-### 修法
-
-给崩溃点打一个 Harmony 前缀，把 null/空白用户名换成**游戏自己在 `OS.cs:372`
-用的同一套回落**，不另立规则：
-
-```csharp
-[HarmonyPatch(typeof(SaveFileManager), nameof(SaveFileManager.GetSaveFileNameForUsername))]
-internal static class SaveFileNamePatch
-{
-    [HarmonyPrefix]
-    private static void Prefix(ref string username)
-    {
-        if (!string.IsNullOrWhiteSpace(username)) { return; }
-        username = Settings.isConventionDemo ? Settings.ConventionLoginName : Environment.UserName;
-    }
-}
-```
-
-因为 `SaveUserAccountName` 为 null 时 `os.username` 正是由同一表达式算出
-（`OS.cs:372-373`，且已 purify），落盘文件名与 `os.username` 保持一致。
-
-只在真的兜底时打一条 `LogWarning` —— 这是异常路径，静默会把
-「有入口没设账号名」这件事藏起来。
-
-### 构建与产物
-
-```bash
-rm -rf src/SaveFix/obj src/SaveFix/bin
-dotnet build src/SaveFix/SaveFix.csproj -c Release
-```
-
-产物落点同 AutoHack：`<Hacknet>/BepInEx/plugins/HacknetSaveFix.dll`。
-5120 字节，MD5 `505df298c541768b0cc39a3d4d610806`。
-
-不依赖 PathfinderAPI，只需 BepInEx + 0Harmony。
-
-## 调研资料
+## 相关开发资料
 
 - `docs/RESEARCH.md` — 完整调研：**按主题**组织（构建边界 / 扩展机制 / 原生 API / 破解端口 / 网络图 / 追踪 / 文件与清痕 / 执行模型 / 面板 / 工具脚本），§1–§11，每条结论带 `文件:行号`
 - `docs/EXTENSIONS.md` — 游戏自带 `Extensions/` 官方样本的格式参考：节点 XML、占位符、行为系统、任务、阵营、主题

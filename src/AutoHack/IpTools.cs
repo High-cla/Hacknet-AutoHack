@@ -1,6 +1,7 @@
 namespace AutoHack;
 
 using Hacknet;
+using Pathfinder.Util;
 
 /// <summary>
 /// 重置玩家机 IP —— 游戏原生的「换 IP 保命」动作，附带肉鸡标记迁移。
@@ -16,6 +17,20 @@ using Hacknet;
 ///   <c>thisComputer.adminIP</c> 同步成新 IP。</item>
 /// </list>
 /// 本类照抄这三步，不另立规则。
+///
+/// <b>为什么要重建查找表（换完 IP 连不上自己的根因）</b>：Pathfinder 用
+/// <c>ComputerLookup</c>（<c>decompiled/pathfinder/Pathfinder.Util/ComputerLookup.cs</c>）
+/// 替掉了游戏本体的节点查找 —— 它以 IL 注入接管 <c>Programs.connect</c>，改为
+/// <c>netMap.nodes.IndexOf(ComputerLookup.Find(args[1], Ip | Name))</c>
+/// （<c>Pathfinder.BaseGameFixes.Performance/NodeLookup.cs:281-343</c>），
+/// 索引为 -1 即视为「找不到这台机器」。而该表的 <c>Add</c> 写作
+/// <c>if (!ipLookup.ContainsKey(node.ip))</c>（<c>:28-42</c>）—— <b>首次写入即固定</b>，
+/// 同一 IP 不再覆盖。故只改 <c>self.ip</c> 而不重建：表里「旧 IP → 玩家机」的旧映射会留下，
+/// 「新 IP → 玩家机」则缺席；<c>connect</c> 自己的新 IP 查表为空 → 索引 -1 → 连不上自己。
+/// Pathfinder 自己就是这么修的：<c>SAChangeIP.Trigger</c> 的 Postfix 在 IP 变化后无条件调
+/// <c>ComputerLookup.RebuildLookups()</c>（<c>NodeLookup.cs:39-48</c>），ISP 界面则在绘制
+/// 方法内注入重建（<c>:144-186</c>）。本类照做 —— <c>RebuildLookups</c> 是 public 静态方法
+/// （<c>:14</c>），无需反射，传 null 即按 <c>OS.currentInstance.netMap.nodes</c> 重建。
 ///
 /// <b>为什么要同步 adminIP</b>：<c>adminIP</c> 是「谁是这台机器的管理员」的标记，
 /// 游戏在 <c>OS.cs:383</c> 初始化时令玩家机 <c>adminIP = ip</c>；<c>ISPDaemon</c> 换 IP
@@ -68,6 +83,17 @@ internal static class IpTools
         // 走游戏自己的收尾：停追踪 + 通知危机序列 + 把 thisComputer.adminIP 同步成新 IP。
         // 不手写这三件事 —— 它们是 OS 的职责，且 TraceDangerSequence 那段有状态机副作用。
         os.thisComputerIPReset();
+
+        // 让 Pathfinder 的查找表跟上新 IP。必须排在 self.ip = next 之后 ——
+        // RebuildLookups 按传进来的节点表的当前 ip 重建。显式传 os 自己的图，
+        // 不依赖无参重载的全局 OS.currentInstance（见类文档）。
+        //
+        // 节点表缺席则跳过：RebuildLookups 对 null 直接抛（ComputerLookup.cs:20），
+        // 而这是收尾路径，抛出去会打断整轮回显。守卫与 UniqueIP / MigrateOwnership 一致。
+        if (os.netMap?.nodes is { } nodes)
+        {
+            ComputerLookup.RebuildLookups(nodes);
+        }
 
         return previous + " -> " + next + " (" + migrated + " owned node(s) re-tagged)";
     }

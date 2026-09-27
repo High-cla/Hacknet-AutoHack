@@ -3,7 +3,7 @@
 > Hacknet 的 BepInEx / Pathfinder 插件：用游戏自身的原生机制一键入侵全网，带控制面板与脚本驱动。
 > 本文件面向要理解或修改本仓库的编码 agent。规范见 https://llmstxt.org
 
-当前 v1.32.2。构建产物直投游戏插件目录，无需手动拷贝：
+当前 v1.32.3。构建产物直投游戏插件目录，无需手动拷贝：
 
 ```
 D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
@@ -252,6 +252,18 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     `thisComputer.adminIP` 同步成新 IP —— 不同步玩家机就会「不是自己的管理员」。
     mod 的 `IpTools.Reset` 照抄这三步，并在改 IP **之前**把全图 `adminIP == 旧玩家IP`
     的机器改成新 IP（不迁移就每轮清空战绩）。
+    **改完 IP 必须重建 Pathfinder 的查找表，否则连不上自己** —— Pathfinder 用
+    `ComputerLookup` 替掉了本体的节点查找：IL 注入把 `Programs.connect` 改成
+    `netMap.nodes.IndexOf(ComputerLookup.Find(args[1], Ip | Name))`
+    （`Pathfinder.BaseGameFixes.Performance/NodeLookup.cs:281-343`，索引 -1 即「找不到」），
+    而该表的 `Add` 是 `if (!ipLookup.ContainsKey(node.ip))`（`Pathfinder.Util/ComputerLookup.cs:28-42`）
+    —— **首次写入即固定**，同 IP 不再覆盖。只改 `self.ip` 不重建的后果：表里留着
+    「旧 IP → 玩家机」，却缺「新 IP → 玩家机」，`connect` 自己的新 IP 查表为空。
+    Pathfinder 自己就是这么兜的（`SAChangeIP.Trigger` 的 Postfix 在 IP 变化后调
+    `RebuildLookups`，`NodeLookup.cs:39-48`），mod 侧照做即可：`RebuildLookups` 是
+    public 静态方法（`ComputerLookup.cs:14`），传 `os.netMap.nodes` 显式重建，无需反射。
+    重建是安全的 —— 它 Clear 后从节点表全量重灌，而 Pathfinder 往表里加过的机器
+    （`ContentLoader` 的 eos 设备，`:968`）同时也入了节点表（`:837`）。
 
 30. **白名单机器能绕过，别整段跳过** —— 白名单只拦 `connect`；破端口 / 提权 / 投放 / 改它的文件
     全部直接操作 `target` 对象，**都不经连接**（实证：`Pathfinder` 的 `openPort` 直接写
@@ -307,6 +319,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
 - [src/AutoHack/RefusedWhitelist.cs](src/AutoHack/RefusedWhitelist.cs): 记下「刚被白名单拒的那台」，供 `here` 在池空时回落（见坑 31）
 - [src/AutoHack/HackRun.cs](src/AutoHack/HackRun.cs): 执行层 —— 动作序列、逐帧推进、指令回显
 - [src/AutoHack/HackScript.cs](src/AutoHack/HackScript.cs): 入侵脚本的解析与校验（`script=` 模式）
+- [src/AutoHack/IpTools.cs](src/AutoHack/IpTools.cs): 收尾换 IP —— 原生三步 + 肉鸡归属迁移 + 重建 Pathfinder 查找表（见坑 29）
 - [src/SaveFix/SaveFixPlugin.cs](src/SaveFix/SaveFixPlugin.cs): 独立插件 HacknetSaveFix，修游戏本体存档 NRE
 - [src/AutoHack/HackPanel.cs](src/AutoHack/HackPanel.cs): 自绘控制面板
 - [src/AutoHack/HackOverlay.cs](src/AutoHack/HackOverlay.cs): 叠加层 —— patch `OS.Draw` / `OS.Update`

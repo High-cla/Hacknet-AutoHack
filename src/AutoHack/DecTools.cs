@@ -136,7 +136,7 @@ internal static class DecTools
         var found = new List<FileEntry>();
         foreach (var target in targets)
         {
-            ToolFiles.Collect(target.files.root, found, IsEncrypted, Skipped);
+            ToolFiles.Collect(target?.files?.root, found, IsEncrypted, Skipped);
         }
 
         if (found.Count == 0)

@@ -8,7 +8,6 @@
     <AssemblyName>AutoHack</AssemblyName>
     <RootNamespace>AutoHack</RootNamespace>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
-    <Version>1.0.0</Version>
     <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
     <!-- 输出直接落到游戏目录的 BepInEx/plugins -->
     <HacknetDir Condition="'$(HacknetDir)' == ''">D:\steam\steamapps\common\Hacknet\</HacknetDir>

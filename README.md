@@ -85,7 +85,7 @@ autohack -h                                     # 帮助
 | `allnodes` | 全网扫描改扫地图全表，不再只沿连线展开 |
 | `creds` / `nocreds` | 用 / 不用已知账密登入（**缺省不用**，v1.15.0 起；`creds` 显式开启，`nocreds` 已是缺省） |
 | `instant` / `fast` / `slow` | 节奏档位：非端口步同帧连跑 / 0.05s / 0.35s（**缺省 slow**）。v1.27.0 删掉了面板上的三档 UI，**档位只从这里进** |
-| `direct` | 跳过 connect / probe，直接就地破解（不再回显这两条指令） |
+| `direct` | 跳过 connect，直接就地破解（probe 照跑并报告端口，只是不再回显 `probe` 这条指令） |
 | `stay` | 跑完**不**断开连接（**已是缺省**，v1.16.0 起） |
 | `dc` | 每个目标跑完断开（反追踪：追踪只在连着目标时推进） |
 | `redo` | 全网扫描时**连已控节点一起重打**（缺省跳过肉鸡及永远提不了权的机器） |
@@ -267,7 +267,7 @@ dotnet build src/SaveFix/SaveFix.csproj -c Release
 
 | 产物 | 版本 | 字节数 | MD5 |
 |---|---|---|---|
-| `AutoHack.dll` | v1.32.3 | 102912 | `6f465e96c07bc443d00d127a3ed6cc36` |
+| `AutoHack.dll` | v1.32.3 | 104448 | `14f88e345bcc8043bffa1a1a59f5f5e7` |
 | `HacknetSaveFix.dll` | 独立插件 | 5120 | `505df298c541768b0cc39a3d4d610806` |
 
 核对流程：清理 `obj`/`bin` → 构建（须 0 警告 0 错误）→ 记 `md5sum` 与字节数，

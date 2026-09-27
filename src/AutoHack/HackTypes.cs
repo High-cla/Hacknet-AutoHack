@@ -83,7 +83,7 @@ internal sealed record HackOptions(
     private static readonly string[] InstantAliases = ["instant", "turbo", "sameframe"];
     private static readonly string[] ShowExesAliases = ["show", "exes", "native", "anim"];
     private static readonly string[] ResetIPAliases = ["newip", "reset-ip", "resetip"];
-    private static readonly string[] NoResetIPAliases = ["noknewip", "keep-ip", "keepip"];
+    private static readonly string[] NoResetIPAliases = ["nonewip", "noknewip", "keep-ip", "keepip"];
     private static readonly string[] NoShowExesAliases = ["noshow", "no-exes", "quiet"];
 
     /// <summary>

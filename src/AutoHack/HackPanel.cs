@@ -21,7 +21,7 @@ internal sealed class HackPanelState
     ///
     /// 这里曾硬编码 7099，而 IdBase 恒为 7064 —— 7099 = IdBase + 30 + 5，正是
     /// <c>Tools[5]</c>（PURGE）的按钮 id。两个控件共用同一 id 后：按下 PURGE 的
-    /// 第二帧，<see cref="Drag"/> 看到 <c>GuiData.active == DragId</c> 便接管为拖动，
+    /// 第二帧，<c>HackPanel.Drag</c> 看到 <c>GuiData.active == DragId</c> 便接管为拖动，
     /// 面板随光标跳走，PURGE 的点击在抬起那一帧被 <c>active = -1</c> 吃掉。
     /// 表现为「按 PURGE 没反应，面板自己还跑掉了」。
     ///
@@ -74,7 +74,7 @@ internal sealed class HackPanelState
     ///
     /// 它曾同时兼管清追踪（旧名 "anti-trace dc"、"disconnect &amp; clear traces"），
     /// 用户定拆开：<b>清追踪与断开解耦</b>。理由见
-    /// <see cref="HackOptions.WantsAntiTrace"/> —— 清追踪是收拾自己制造的烂摊子，
+    /// <c>HackOptions.WantsAntiTrace</c>（该属性已删）—— 清追踪是收拾自己制造的烂摊子，
     /// 留着没有好处；而断开是玩家的行为选择。合成一个开关时，二者被迫同进退：
     /// 想要保留连接就得连追踪一起留着，这是错的权衡。
     ///
@@ -778,7 +778,7 @@ internal static class HackPanel
     /// <summary>
     /// 超宽则截断并加省略号。
     ///
-    /// 首字符宽度的比例估算 + 常数步修正，而非逐字符重测：后者每帧要为每个标签
+    /// 全串平均字宽的比例估算 + 常数步修正，而非逐字符重测：后者每帧要为每个标签
     /// 调用 O(长度) 次 <c>MeasureString</c>，而这是每帧都在跑的绘制路径。
     /// 修正循环保证结果与逐字符法完全一致。
     /// </summary>

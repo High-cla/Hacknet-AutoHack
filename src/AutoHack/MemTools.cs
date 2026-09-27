@@ -124,7 +124,7 @@ internal static class MemTools
         var candidates = new List<FileEntry>();
         foreach (var target in targets)
         {
-            ToolFiles.Collect(target.files.root, candidates, IsDump, null);
+            ToolFiles.Collect(target?.files?.root, candidates, IsDump, null);
         }
 
         if (candidates.Count == 0)

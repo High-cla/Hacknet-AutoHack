@@ -318,7 +318,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
 - [src/AutoHack/HackEngine.cs](src/AutoHack/HackEngine.cs): 决策层 —— 目标解析、端口表、提权门槛、清痕、白名单绕过
 - [src/AutoHack/RefusedWhitelist.cs](src/AutoHack/RefusedWhitelist.cs): 记下「刚被白名单拒的那台」，供 `here` 在池空时回落（见坑 31）
 - [src/AutoHack/HackRun.cs](src/AutoHack/HackRun.cs): 执行层 —— 动作序列、逐帧推进、指令回显
-- [src/AutoHack/HackScript.cs](src/AutoHack/HackScript.cs): 入侵脚本的解析与校验（`script=` 模式）
+- [src/AutoHack/HackScript.cs](src/AutoHack/HackScript.cs): 入侵脚本的解析与校验（`script=` 模式）；路径解析交给框架 `StringExtensions.ContentFilePath`，不自己拼内容目录前缀
 - [src/AutoHack/IpTools.cs](src/AutoHack/IpTools.cs): 收尾换 IP —— 原生三步 + 肉鸡归属迁移 + 重建 Pathfinder 查找表（见坑 29）
 - [src/SaveFix/SaveFixPlugin.cs](src/SaveFix/SaveFixPlugin.cs): 独立插件 HacknetSaveFix，修游戏本体存档 NRE
 - [src/AutoHack/HackPanel.cs](src/AutoHack/HackPanel.cs): 自绘控制面板

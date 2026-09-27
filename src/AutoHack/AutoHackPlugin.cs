@@ -87,8 +87,11 @@ public sealed class AutoHackPlugin : BepInEx.Hacknet.HacknetPlugin
             os.write("  mark      drop the marker file (default: no marker)");
             os.write("  creds     use known credentials to log in (default: off)");
             os.write("  nocreds   never log in - always crack ports");
-            os.write("  show      play the native cracker animations (default: off)");
-            os.write("  noshow    no animations (this is the default)");
+            os.write("  show      play the native cracker animations (this is the default)");
+            os.write("  noshow    no animations");
+            os.write("  ownlogs   also wipe MY OWN /log (default: keep it)");
+            os.write("  newip     assign a new IP after the run (this is the default)");
+            os.write("  keepip    keep the current IP");
             os.write("  instant   run every non-port step in the same frame (fastest)");
             os.write("  fast      shorten the pause between non-port steps (default: normal)");
             os.write("  script=F  run a scripted action list from file F (see below)");

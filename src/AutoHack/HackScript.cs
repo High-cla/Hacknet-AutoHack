@@ -3,6 +3,7 @@ namespace AutoHack;
 using System.Globalization;
 using System.IO;
 using Hacknet;
+using Pathfinder.Util;
 
 /// <summary>
 /// 入侵脚本：一份动作表，决定每个目标按什么次序被打。
@@ -260,9 +261,8 @@ internal sealed class HackScript
     }
 
     /// <summary>
-    /// 路径解析：先当原样路径试（绝对路径或相对工作目录），再按游戏的加载前缀找
-    /// —— <c>Utils.GetFileLoadPrefix()</c> 在扩展模式下返回扩展目录、否则 "Content/"，
-    /// 这样放在 <c>Content/HackerScripts/</c> 的脚本能直接按名字引用。
+    /// 路径解析：先当原样路径试（绝对路径或相对工作目录），再走 <see cref="Candidates"/>
+    /// 按内容目录次序找 —— 这样放在 <c>Content/HackerScripts/</c> 的脚本能直接按名字引用。
     /// </summary>
     private static string ResolvePath(string name)
     {
@@ -282,24 +282,45 @@ internal sealed class HackScript
         return null;
     }
 
+    /// <summary>
+    /// 按次序给出候选路径：先在默认目录（<c>Content/HackerScripts/</c>）里找，
+    /// 再退到内容根目录直接按名字找。每条各试「带 <c>.txt</c> / 不带」两个变体
+    /// —— 游戏自带脚本都带后缀，但玩家未必写。
+    ///
+    /// <b>前缀不自己拼</b>：「内容目录在哪」是框架的知识（扩展模式走扩展目录，
+    /// 否则补 <c>"Content/"</c>），游戏本体（<c>Utils.GetFileLoadPrefix</c>，
+    /// Utils.cs:1386-1393）与 Pathfinder（<see cref="StringExtensions.ContentFilePath"/>，
+    /// StringExtensions.cs:19-36）已各实现过一次，本仓库不写第三份。
+    ///
+    /// <b>本地化也不用自己调</b>：<see cref="LocalizationFix"/> 已把
+    /// <c>GetLocalizedFilepath</c> 挂在 <c>ContentFilePath</c> 出口（Postfix），
+    /// 于是这里每一次调用都自动命中译文，再套一层是重复。
+    ///
+    /// <b>与旧写法的一处行为差异</b>：旧实现只给默认目录那组查本地化，根目录回退那组
+    /// 直接取原文。改走 <c>ContentFilePath</c> 后两组都会查（非 en-us 且译文存在即命中）。
+    /// 统一是有意的 —— 同一件事在两条分支上给出不同答案看着是偶然，而非设计。
+    /// en-us 下无任何差异（<see cref="LocalizationFix"/> 的守卫直接放行）。
+    /// </summary>
     private static IEnumerable<string> Candidates(string name)
     {
-        var prefixed = Utils.GetFileLoadPrefix() + DefaultDirectory + "/" + name;
-
-        // 本地化版本优先（游戏自己的脚本就是这么放的），其次是原文件。
-        yield return LocalizedFileLoader.GetLocalizedFilepath(prefixed);
-
-        // 带 .txt 与不带 .txt 各试一遍 —— 游戏自带脚本都带后缀，但玩家未必写。
-        if (!name.EndsWith(".txt", StringComparison.OrdinalIgnoreCase))
+        foreach (var variant in WithTxtSuffix(DefaultDirectory + "/" + name))
         {
-            yield return LocalizedFileLoader.GetLocalizedFilepath(prefixed + ".txt");
+            yield return variant.ContentFilePath();
         }
 
-        yield return Utils.GetFileLoadPrefix() + name;
+        foreach (var variant in WithTxtSuffix(name))
+        {
+            yield return variant.ContentFilePath();
+        }
+    }
 
+    /// <summary>带 <c>.txt</c> 与不带各一次；已带后缀则只给一个，不叠成 <c>.txt.txt</c>。</summary>
+    private static IEnumerable<string> WithTxtSuffix(string name)
+    {
+        yield return name;
         if (!name.EndsWith(".txt", StringComparison.OrdinalIgnoreCase))
         {
-            yield return Utils.GetFileLoadPrefix() + name + ".txt";
+            yield return name + ".txt";
         }
     }
 }

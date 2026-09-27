@@ -40,8 +40,17 @@ internal static class HackOverlay
 
     internal static void Open(OS os)
     {
+        // 换过 OS（回主菜单再开档）就是新的一局：重新从 cfg 读设置，
+        // 免得上一局的改动把新一局带偏。同一 OS 内重复开关面板不动状态。
+        // 注意：只有 Open 会创建 _state —— 面板因此保持「开局不显示」。
+        if (_state == null || !ReferenceEquals(_os, os))
+        {
+            var fresh = new HackPanelState();
+            PanelSettings.Load(fresh);
+            _state = fresh;
+        }
+
         _os = os;
-        _state ??= new HackPanelState();
         _state.Open = true;
         _run = null;
     }

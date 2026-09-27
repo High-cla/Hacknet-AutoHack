@@ -3,7 +3,7 @@
 > Hacknet 的 BepInEx / Pathfinder 插件：用游戏自身的原生机制一键入侵全网，带控制面板与脚本驱动。
 > 本文件面向要理解或修改本仓库的编码 agent。规范见 https://llmstxt.org
 
-当前 v1.32.3。构建产物直投游戏插件目录，无需手动拷贝：
+当前 v1.32.4。构建产物直投游戏插件目录，无需手动拷贝：
 
 ```
 D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
@@ -299,6 +299,23 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     `Computer.connect`（:386）与 `navigatedTo`（:73）两条拒绝路径都走到。
     查询时用游戏自己的 `IPCanPassWhitelist` 现算失效，绕过成功后记录自动作废。
 
+32. **`Pathfinder.Options` 只有 UI 层，持久化得自己接 `ConfigFile`** —— 千万别把
+    框架的 `OptionCheckbox` 当成「选项页 + 落盘通道」：它的 `Value` 只是个内存
+    `bool` 字段（`Pathfinder.Options/OptionCheckbox.cs:11`），框架里**没有任何**把
+    Option 值写成文件的代码。落盘是**调用方**自己做的 —— 看框架自己的实现就很清楚
+    （`Pathfinder.Options/PathfinderOptions.cs`）：`Config.Bind` 读进 Option，
+    `Config.Save()` 写回，两步都在插件侧。
+    所以「想持久化」= BepInEx `ConfigFile`，与用不用 Options **无关**。
+    由此还引出两条：
+    - `HacknetPlugin.Config` 是 public 属性，构造时已建好
+      `BepInEx/config/<GUID>.cfg`（`BepInEx.Hacknet.dll` 的 `HacknetPlugin` 构造器），
+      插件直接用即可，不必自己拼路径。
+    - `ConfigFile.SaveOnConfigSet` **缺省 true** —— 每次给 `entry.Value` 赋值都会
+      落盘。像拖动滑条这种每帧改值的控件，必须先置 false，再在指针抬起后显式
+      `Save()`。忘记这一步的表现是「游戏卡顿 + 磁盘狂写」，而不是报错。
+    mod 侧的落地见 `PanelSettings.cs`；落盘触发点用 `HackPanelState.Settings` 快照
+    比对（`record struct`，新增字段自动进比较），不逐个控件埋保存调用。
+
 ## 仓库文档
 
 - [README.md](README.md): 面向使用者的说明 —— 顶层五节：安装 / 使用 / 构建 / 架构 / 相关开发资料（「使用」含面板、命令行、追踪、十个独立工具、脚本模式；「架构」含文件职责图与第二个插件 HacknetSaveFix；「构建」含产物核对）。**刻意保持精简**，设计决策与取证细节见源码注释、docs/API.md 与 git 历史
@@ -317,6 +334,8 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
 - [src/AutoHack/ToolFiles.cs](src/AutoHack/ToolFiles.cs): 工具的落盘公共部分
 - [src/AutoHack/HackEngine.cs](src/AutoHack/HackEngine.cs): 决策层 —— 目标解析、端口表、提权门槛、清痕、白名单绕过
 - [src/AutoHack/RefusedWhitelist.cs](src/AutoHack/RefusedWhitelist.cs): 记下「刚被白名单拒的那台」，供 `here` 在池空时回落（见坑 31）
+- [src/AutoHack/PanelSettings.cs](src/AutoHack/PanelSettings.cs): 面板设置的落盘层（ConfigFile 读写，无 UI；见坑 32）
+- [src/AutoHack/ScanTools.cs](src/AutoHack/ScanTools.cs): 地图扫描 —— 标出当前节点所在连通分量
 - [src/AutoHack/HackRun.cs](src/AutoHack/HackRun.cs): 执行层 —— 动作序列、逐帧推进、指令回显
 - [src/AutoHack/HackScript.cs](src/AutoHack/HackScript.cs): 入侵脚本的解析与校验（`script=` 模式）；路径解析交给框架 `StringExtensions.ContentFilePath`，不自己拼内容目录前缀
 - [src/AutoHack/IpTools.cs](src/AutoHack/IpTools.cs): 收尾换 IP —— 原生三步 + 肉鸡归属迁移 + 重建 Pathfinder 查找表（见坑 29）

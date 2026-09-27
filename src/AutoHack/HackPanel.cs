@@ -123,6 +123,45 @@ internal sealed class HackPanelState
     /// </summary>
     internal string Script { get; set; }
 
+    /// <summary>
+    /// 需要跨会话保留的那组值的快照。
+    ///
+    /// 用 <c>record struct</c> 而非逐字段比较：相等性由编译器生成，新增字段时
+    /// 只需改这一处，不会漏掉某个字段导致「改了却不落盘」。且是值类型 ——
+    /// 每帧取一次快照不产生堆分配。
+    ///
+    /// 不含 <see cref="Open"/>：那是「此刻是否显示」，属会话内 UI 状态，
+    /// 每次开局重新隐藏。
+    /// </summary>
+    internal readonly record struct Settings(
+        HackScope Scope,
+        float PortDelay,
+        bool ClearLogs,
+        bool ClearOwnLogs,
+        bool UploadMarker,
+        bool ConnectFirst,
+        bool Disconnect,
+        bool SkipOwned,
+        bool AllNodes,
+        bool UseCredentials,
+        bool ShowExes,
+        bool ResetIP,
+        int X,
+        int Y,
+        bool Collapsed);
+
+    /// <summary>
+    /// 有改动尚未落盘。拖动面板或拉滑条时每帧都在改值，逐帧写盘会把磁盘打满；
+    /// 而松手那一帧值已不再变化，只比「本帧前后」会漏掉最后一次改动，
+    /// 故用这个标记把待写状态记到指针抬起为止。
+    /// </summary>
+    internal bool Dirty { get; set; }
+
+    /// <summary>当前设置快照。供 <see cref="HackPanel.Draw"/> 比对是否发生了改动。</summary>
+    internal Settings Fingerprint => new(
+        Scope, PortDelay, ClearLogs, ClearOwnLogs, UploadMarker, ConnectFirst, Disconnect,
+        SkipOwned, AllNodes, UseCredentials, ShowExes, ResetIP, X, Y, Collapsed);
+
     internal HackOptions ToOptions() => new(
         Scope,
         Array.Empty<string>(),
@@ -254,6 +293,32 @@ internal static class HackPanel
     }
 
     internal static PanelAction Draw(HackPanelState state, HackRun run, OS os, Rectangle screen)
+    {
+        // 设置在这里统一落盘：比对绘制前后的快照，有变化才写。
+        // 放在这一层的理由 —— 上层 14 个控件各自改自己的字段，本层一次覆盖全部，
+        // 将来新增控件也自动被覆盖，不必记得去某个控件里补一句存盘。
+        // （用快照而非「哪个控件被点」：拖动滑条持续改值，按帧比对天然合并成一次写入。）
+        var before = state.Fingerprint;
+        var action = DrawBody(state, run, os, screen);
+
+        if (!state.Fingerprint.Equals(before))
+        {
+            state.Dirty = true;
+        }
+
+        // 没有控件正被操作时才写盘（GuiData.active == -1）：
+        // 拖动面板 / 拉滑条期间每帧都在改值，逐帧写盘是不可接受的 IO。
+        // 点击类控件在点击那一帧就把 active 复位，故单击立即落盘。
+        if (state.Dirty && GuiData.active == -1)
+        {
+            PanelSettings.Persist(state);
+            state.Dirty = false;
+        }
+
+        return action;
+    }
+
+    private static PanelAction DrawBody(HackPanelState state, HackRun run, OS os, Rectangle screen)
     {
         var c = new Palette(os);
         var action = PanelAction.None;

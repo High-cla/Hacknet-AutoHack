@@ -232,6 +232,13 @@ internal enum HackStepKind
 
     /// <summary>TraceTracker.stop()：直接毙掉进行中的追踪，零每帧开销。</summary>
     KillTrace,
+
+    /// <summary>
+    /// 白名单服务器被拒后的绕过：把玩家 IP 追加进目标 <c>/Whitelist/list.txt</c> 再重连。
+    /// 这是游戏设计的正路（官方任务 PAE2_Whitelist.xml 的 list_add_manual.txt 明写
+    /// 「append list.txt &lt;你的IP&gt;」），见 <see cref="HackEngine.AppendToWhitelist"/>。
+    /// </summary>
+    BypassWhitelist,
 }
 
 /// <summary>

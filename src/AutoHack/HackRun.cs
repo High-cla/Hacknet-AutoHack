@@ -46,8 +46,19 @@ internal sealed class HackRun
     private readonly HashSet<Computer> _loggedIn = new();
 
     /// <summary>
-    /// 连接被目标主动拒绝的机器 —— 其全部步骤跳过。
-    /// 理由见 <see cref="Apply"/> 的 Connect 分支：连接没成，后续步骤却照样会「成功」。
+    /// 连接被目标主动拒绝（白名单）的机器。
+    ///
+    /// 它**只跳过依赖连接的步骤**（<see cref="HackStepKind.Connect"/>、
+    /// <see cref="HackStepKind.CleanLogs"/>、<see cref="HackStepKind.Disconnect"/>），
+    /// 其余（破端口 / 解跳板 / 解防火墙 / login / 提权 / 投放）全部照常执行 ——
+    /// 那些步骤直接操作 <c>target</c> 对象，本就不经过连接。
+    ///
+    /// v1.23.0 曾整段跳过这类目标，理由是「连接没成而后续照样成功 = 假战果」。
+    /// 那个顾虑只对<b>依赖连接语义</b>的步骤成立（rm 的目标机取自
+    /// <c>os.connectedComp</c>，断开后 rm 会打到自己的文件系统上）；
+    /// 对操作对象本身的步骤并不成立 —— 端口表的 <c>Cracked</c> 状态、
+    /// <c>giveAdmin</c> 写入的 <c>adminIP</c> 都落在目标机上，是真的战果。
+    /// 整段跳过等于把一台本来能拿下的机器直接放弃，这才是真损失。
     /// </summary>
     private readonly HashSet<Computer> _refused = new();
 
@@ -135,9 +146,10 @@ internal sealed class HackRun
 
             var step = _steps[_index];
 
-            // 该目标的连接被拒：后续步骤（破端口、提权、投放）全都直接操作 target
-            // 对象，根本不需要连接，于是照样会「成功」—— 那是假战果。整段跳过。
-            if (_refused.Contains(step.Target))
+            // 该目标的连接被拒（白名单）：只跳过**依赖连接**的步骤，其余照常执行。
+            // 依据见 _refused 的字段注释 —— 破端口/提权/投放操作的是 target 对象本身，
+            // 不经连接，跳过它们等于白白放弃一台能拿下的机器。
+            if (_refused.Contains(step.Target) && DependsOnConnection(step.Kind))
             {
                 _index++;
                 continue;
@@ -165,6 +177,22 @@ internal sealed class HackRun
 
     /// <summary>单帧最多执行多少步，防止 Instant 档在极端规模下一帧卡死。</summary>
     private const int MaxStepsPerFrame = 512;
+
+    /// <summary>
+    /// 该步骤是否依赖「已连接」这一状态。
+    ///
+    /// 只有三个：Connect 自己；清痕（<c>rm</c> 的目标机取自 <c>os.connectedComp</c>，
+    /// Programs.cs:956）；断开（未连接时是空操作）。其余步骤操作的是 <c>target</c>
+    /// 对象本身，不经连接 —— 端口表的 <c>Cracked</c> 状态与 <c>giveAdmin</c> 写入的
+    /// <c>adminIP</c> 都落在目标机上，连不连得上都成立。
+    /// </summary>
+    private static bool DependsOnConnection(HackStepKind kind) => kind switch
+    {
+        HackStepKind.Connect => true,
+        HackStepKind.CleanLogs => true,
+        HackStepKind.Disconnect => true,
+        _ => false,
+    };
 
     /// <summary>
     /// 该步骤是否已被 login 提权化为无用功。只对<b>本次运行中确实靠 login 拿下</b>
@@ -239,7 +267,7 @@ internal sealed class HackRun
                 {
                     _refused.Add(target);
                     os.write("[autohack] " + target.name
-                        + " :: connection refused (whitelist) - node left untouched");
+                        + " :: connection refused (whitelist) - continuing without a session");
                     break;
                 }
 
@@ -287,7 +315,14 @@ internal sealed class HackRun
 
             case HackStepKind.Probe:
                 Phase = "PROBING " + Upper(target.name);
-                Echo(os, step.Command ?? "probe");
+
+                // 只有连着目标时 probe 才是在探它 —— 未连接时 Programs.probe 的目标是
+                // os.connectedComp ?? os.thisComputer（Programs.cs:1387），回显会是假命令。
+                // 端口报告本身取自目标对象（HackEngine.ProbeReport），不看连接，故照常输出。
+                if (os.connectedComp == target)
+                {
+                    Echo(os, step.Command ?? "probe");
+                }
                 foreach (var line in HackEngine.ProbeReport(target))
                 {
                     os.write(line);
@@ -297,7 +332,14 @@ internal sealed class HackRun
 
             case HackStepKind.OpenPort:
                 Phase = "CRACKING PORT " + step.Port.DisplayPort;
-                Echo(os, step.Command);
+
+                // 破解程序的作用域是「当前连接」；未连接时它无从打到目标上，
+                // 而下面的 HackEngine.OpenPort 是直接写目标机端口表，照样生效。
+                if (os.connectedComp == target)
+                {
+                    Echo(os, step.Command);
+                }
+
                 HackEngine.OpenPort(target, step.Port, os.thisComputer.ip);
 
                 // 状态已写好，这里只是把原版动画挂上 RAM 面板（缺省关）。
@@ -310,14 +352,25 @@ internal sealed class HackRun
 
             case HackStepKind.SolveFirewall:
                 Phase = "BYPASSING FIREWALL ON " + Upper(target.name);
-                Echo(os, "solve " + (target.firewall?.solution ?? string.Empty));
+
+                // 同 OpenPort：solve 命令的作用域是当前连接，未连接时是假命令。
+                if (os.connectedComp == target)
+                {
+                    Echo(os, "solve " + (target.firewall?.solution ?? string.Empty));
+                }
+
                 SolveFirewall(os, target);
                 break;
 
             case HackStepKind.Escalate:
                 Phase = "ESCALATING";
 
-                Echo(os, step.Command ?? "porthack");
+                // 未连接时 porthack 在终端里无从下手（它读 os.connectedComp），
+                // 而下面的 giveAdmin 是直接写目标机的 adminIP，照样生效。
+                if (os.connectedComp == target)
+                {
+                    Echo(os, step.Command ?? "porthack");
+                }
 
                 // 只用 giveAdmin，不用 os.takeAdmin(ip)：后者内部还会 runCommand("connect " + ip)
                 // （OS.cs:1871-1879），而 connect 的第一件事就是无条件断开旧连接
@@ -326,6 +379,39 @@ internal sealed class HackRun
                 if (HackEngine.CanEscalate(target))
                 {
                     target.giveAdmin(os.thisComputer.ip);
+                }
+
+                break;
+
+            case HackStepKind.BypassWhitelist:
+                // 只对确实被拒的目标动手 —— 连接正常的机器没必要（也不该）改它的白名单。
+                if (!_refused.Contains(target))
+                {
+                    break;
+                }
+
+                Phase = "BYPASSING WHITELIST ON " + Upper(target.name);
+
+                // 这一步不是终端指令（未连接状态下 <c>append</c> 的「当前目录」是玩家
+                // 自己的文件系统，回显出来会是一条假命令），故不发 Echo，只报状态。
+                if (HackEngine.AppendToWhitelist(target, os.thisComputer.ip))
+                {
+                    os.write("[autohack] " + target.name + " :: local IP appended to /Whitelist/list.txt");
+                }
+                else
+                {
+                    os.write("[autohack] " + target.name
+                        + " :: /Whitelist/list.txt absent or IP already listed - staying session-less");
+                    break;
+                }
+
+                // 白名单已放行，重连应当成功；成了就恢复正常流程
+                // （清痕与断开都依赖连接，之前被 DependsOnConnection 挡掉了）。
+                Programs.connect(["connect", target.ip], os);
+                if (ReferenceEquals(os.connectedComp, target))
+                {
+                    _refused.Remove(target);
+                    os.write("[autohack] " + target.name + " :: reconnected - whitelist bypassed");
                 }
 
                 break;
@@ -453,7 +539,14 @@ internal sealed class HackRun
         }
     }
 
-    /// <summary>回显一条指令：格式与 OS.runCommand 完全一致（换行 + 当前提示符 + 原文）。</summary>
+    /// <summary>
+    /// 回显一条指令：格式与 <c>OS.runCommand</c> 完全一致（换行 + 当前提示符 + 原文）。
+    ///
+    /// 命令以「当前连接」为作用域时才回显 —— 未连接时玩家敲同一条命令得到的是
+    /// 另一个效果（<c>probe</c> 会探测自己、<c>porthack</c> 无从下手），
+    /// 回显它就成了一条假命令。<c>Apply</c> 已在每处按需决定是否回显，
+    /// 这里只兜住「拿不准就别写」这一条。
+    /// </summary>
     private static void Echo(OS os, string command)
     {
         if (string.IsNullOrEmpty(command) || os.terminal == null)
@@ -513,14 +606,6 @@ internal sealed class HackRun
 
         foreach (var target in _targets)
         {
-            // 被拒的目标一个端口都没碰、也没提权，报 0/0 比报它的真实端口表诚实 ——
-            // 后者会让「拒绝」看起来像「打过了但没成功」。原因行已在 Connect 步写出。
-            if (_refused.Contains(target))
-            {
-                Outcomes.Add(new TargetOutcome(target.name, 0, 0, false));
-                continue;
-            }
-
             // 两个数取自同一次快照：分两次查会各分配一份端口表副本
             // （GetAllPortStates 是 ...Values.ToList()），且理论上可能显示
             // opened > total 的不一致比例。PortInfo 自带 Cracked，无需第二次遍历。
@@ -560,7 +645,7 @@ internal sealed class HackRun
         if (_refused.Count > 0)
         {
             os.write("[autohack] " + _refused.Count
-                + " node(s) refused the connection and were left untouched.");
+                + " node(s) refused the session (whitelist) - cracked without one.");
         }
 
         if (ForcedLogWipe > 0)
@@ -632,6 +717,16 @@ internal sealed class HackRun
             }
 
             steps.Add(new HackStep(HackStepKind.Escalate, target, default, "porthack"));
+
+            // 白名单机器无条件排一步绕过（与开关解耦）：它的 connect 会被拒，
+            // 而破端口/提权不经连接、照样能拿下 —— 拿下之后再把自己的 IP 追加进它的
+            // /Whitelist/list.txt，重连即恢复会话，后续清痕与断开才走得通。
+            // 这是游戏设计的正路（官方任务 PAE2_Whitelist.xml 的 list_add_manual.txt
+            // 明写「append list.txt <你的IP>」），详见 HackEngine.AppendToWhitelist。
+            if (HackEngine.HasWhitelist(target))
+            {
+                steps.Add(new HackStep(HackStepKind.BypassWhitelist, target, default, null));
+            }
 
             if (options.UploadMarker)
             {

@@ -18,6 +18,12 @@ internal static class HackEngine
 {
     private const string LogFolderName = "log";
 
+    /// <summary>白名单 daemon 的文件夹名（WhitelistConnectionDaemon.cs:26/29）。</summary>
+    private const string WhitelistFolderName = "Whitelist";
+
+    /// <summary>白名单文件名（WhitelistConnectionDaemon.ListFilename，:12）。</summary>
+    private const string WhitelistListFilename = "list.txt";
+
     /// <summary>
     /// 读取目标的端口表。
     ///
@@ -780,6 +786,79 @@ internal static class HackEngine
     /// Computer.cs:338-354），以 '@' 开头 ⇒ deleteFile 跳过
     /// <c>log("FileDeleted: ...")</c> 自写（Computer.cs:543）。
     /// </summary>
+    /// <summary>
+    /// 该机器是否带白名单认证器（<c>WhitelistConnectionDaemon</c>）—— 连接会被它拒绝。
+    ///
+    /// 判定走 <c>getDaemon</c>，与游戏自己的取法一致（<c>Computer.connect</c> 内部即如此，
+    /// Computer.cs:383）。判 daemon 有无而不是「这台机器会不会拒我」：后者要看
+    /// <c>IPCanPassWhitelist</c>（Computer.cs:123-160）的完整语义（含
+    /// <c>AuthenticatesItself</c>、<c>RemoteSourceIP</c> 递归、list.txt 逐行比对），
+    /// 而真正的判据就在游戏里 —— 本方法只用来决定「要不要排一个绕过步骤」，
+    /// 排了没生效也无害（见 <see cref="AppendToWhitelist"/> 的返回值语义）。
+    /// </summary>
+    internal static bool HasWhitelist(Computer comp)
+        => comp?.getDaemon(typeof(WhitelistConnectionDaemon)) is WhitelistConnectionDaemon;
+
+    /// <summary>
+    /// 把玩家 IP 追加进目标的白名单文件，让游戏下次放行连接。返回是否真的写进去了。
+    ///
+    /// <b>依据</b>：官方任务 <c>Content/DLC/Missions/Airline2/PAE2_Whitelist.xml</c> 里
+    /// 那台的 <c>list_add_manual.txt</c> 写明正路 ——「navigate to the folder containing
+    /// your whitelist... append list.txt &lt;你的IP&gt;」。白名单的比对逻辑读的正是
+    /// <c>/Whitelist/list.txt</c> 逐行 trim 比对玩家 IP（Computer.cs:146-158）。
+    ///
+    /// <b>为什么能改到它</b>：白名单只拦 <c>connect</c>（Computer.cs:383-388），
+    /// 文件系统本身并未因此上锁 —— <c>makeFile</c> 这类原语走的是权限门禁
+    /// （判 <c>adminIP == 玩家IP</c>），与连接无关。故「先拿下这台机器（破端口 + 提权），
+    /// 再回来改它的白名单」是可行的 —— 这正是本步骤排在 Escalate 之后的原因。
+    ///
+    /// 找不到 <c>/Whitelist/list.txt</c> 时返回 false：该 daemon 自己会在
+    /// <c>initFiles</c> 里建出 <c>Whitelist</c> 夹与 <c>list.txt</c>
+    /// （WhitelistConnectionDaemon.cs:24-42），故正常存档里必然存在；
+    /// 缺失说明这是一台被人工改过的机器，不臆造文件。
+    /// </summary>
+    internal static bool AppendToWhitelist(Computer comp, string playerIP)
+    {
+        var folder = comp?.files?.root?.searchForFolder(WhitelistFolderName);
+        var list = folder?.searchForFile(WhitelistListFilename);
+        if (list == null)
+        {
+            return false;
+        }
+
+        // 已在名单里就什么都不做 —— 重复追加会让 list.txt 无限增长，
+        // 且每轮入侵都会跑这一步，幂等是硬要求。
+        if (AlreadyAllowed(list.data, playerIP))
+        {
+            return false;
+        }
+
+        list.data += "\n" + playerIP;
+        return true;
+    }
+
+    /// <summary>
+    /// 白名单文件里是否已有该 IP。判据照抄游戏：按换行切分、逐行 <c>Trim()</c> 后比对
+    /// （Computer.cs:151-158）。
+    /// </summary>
+    private static bool AlreadyAllowed(string data, string playerIP)
+    {
+        if (string.IsNullOrEmpty(data) || string.IsNullOrEmpty(playerIP))
+        {
+            return false;
+        }
+
+        foreach (var line in data.Split('\n', '\r'))
+        {
+            if (string.Equals(line.Trim(), playerIP, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     internal static IReadOnlyList<string> ClearLogs(Computer comp, string ipFrom)
     {
         var root = comp?.files?.root;

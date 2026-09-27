@@ -186,10 +186,12 @@ internal static class HackPanel
         (ToolDispatch.Purge, "PURGE FILES", true),
         (ToolDispatch.Drop, "DROP NODE", true),
 
-        // 唯一一个「保命」按钮，故不给告警色：danger 的语义是「这一下会毁东西」，
-        // 而 trace 擦的是追踪者的 /log —— 玩家在被追踪时才来点它，
-        // 那一刻最不需要的就是「别点」的视觉暗示。行数由 ToolRows 自算。
-        (ToolDispatch.Trace, "STOP TRACE", false),
+        // 反追踪：一个按钮同时止住两套追踪 —— 看得见的 TraceTracker 倒计时，
+        // 与看不见的 TrackersInProgress 脱机追踪（连带擦掉其 /log）。
+        // 不给告警色：danger 的语义是「这一下会毁东西」，而它擦的是追踪者的 /log；
+        // 玩家在被追时才来点它，那一刻最不需要的就是「别点」的视觉暗示。
+        // 行数由 ToolRows 自算，加按钮不必改任何高度常量。
+        (ToolDispatch.Trace, "ANTI-TRACE", false),
     };
 
     /// <summary>TOOLS 区列数；行数由按钮数算出，故加按钮不必改任何高度常量。</summary>
@@ -357,7 +359,10 @@ internal static class HackPanel
         y += CheckRowHeight;
 
         state.ConnectFirst = Check(state.IdBase + 20, left, y, ColumnWidth, state.ConnectFirst, Loc.T("connect first"), c);
-        state.Disconnect = Check(state.IdBase + 21, left + ColumnWidth + 8, y, ColumnWidth, state.Disconnect, Loc.T("anti-trace dc"), c);
+        // 文案按真实机制写（这一步就是给每个目标发 dc）。此前叫 "anti-trace dc"，
+        // 而 v1.31.0 起 ANTI-TRACE 按钮也用「反追踪」一词 —— 同一个面板上两个东西
+        // 同名，玩家没法判断该点哪个。机制名不会与按钮歧义。
+        state.Disconnect = Check(state.IdBase + 21, left + ColumnWidth + 8, y, ColumnWidth, state.Disconnect, Loc.T("disconnect when done"), c);
         y += CheckRowHeight;
 
         state.UploadMarker = Check(state.IdBase + 22, left, y, ColumnWidth, state.UploadMarker, Loc.T("upload marker"), c);

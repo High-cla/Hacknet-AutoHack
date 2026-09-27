@@ -1491,6 +1491,30 @@ for (int i = 0; i < os.ActiveHackers.Count; i++) {
 
 故结论：shell/Trap 对「解决计时」零帮助，不做。
 
+### 6.7b 工具动词曾区分大小写（v1.31.0 修）
+
+`ToolDispatch.Handles` 此前是 `Array.IndexOf(Verbs, verb) >= 0` —— **区分大小写**，
+而两处的比对都不区分：
+
+- 游戏自己：`ProgramRunner.ExecuteProgram` 大量写 `array[0].ToLower().Equals("connect")`
+  （`ProgramRunner.cs:15/46/55`），玩家由此天然预期终端命令不分大小写；
+- 本插件的 `run` 分支：`args[0].Equals("run", StringComparison.OrdinalIgnoreCase)`
+  （`AutoHackPlugin.cs:99`）。
+
+于是 `autohack SKIP` 既不被 `Handles` 认作工具，也不等于 `"run"` ⇒ 一路落到
+**开关控制面板**分支 —— 玩家看到面板开/关、任务纹丝不动，症状正是「敲了没效果」。
+中文输入法下敲英文时大小写随机，这条尤其容易踩。
+
+修法：`ToolDispatch.Canonical(verb)` = `verb?.ToLowerInvariant()`，
+**`Handles` 与 `Dispatch` 必须用同一个归一值**。只改 `Handles` 会更糟 ——
+认了工具却匹配不上 `switch`，命令静默什么都不做（连面板都不开）。
+
+同时给 `skip` 的无任务回显补上自证信息：原来只写 `no mission is active.`，
+与「命令根本没进来」在终端上长得一模一样。现在写明「主线与支线两份列表都查过了」，
+并报出被完成的支线标题。
+
+---
+
 ### 6.8 tracker="true" 是断线触发的定时炸弹
 
 `OS.handleDisconnection`（`OS.cs:944-960`）：
@@ -1513,7 +1537,7 @@ if (computer != null) {
 字段链：`public bool HasTracker = false;`（`Computer.cs:101`）← `ComputerLoader.cs:506`
 `c.HasTracker = true;`（XML `tracker="true"`）← 存档 `getSaveString`（`Computer.cs:916`）双向持久化。
 
-### 6.9 两套「追踪」：TraceTracker 与 TrackersInProgress（v1.30.0）
+### 6.9 一个入口止住两套追踪（v1.30.0 起，v1.31.0 合并）
 
 名字撞车，机制完全不同，**必须分清**：前者是玩家日常说的「被追踪」，后者是断线触发的
 静默定时炸弹。§6.1/§6.6 讲的一直是前者。
@@ -1545,7 +1569,17 @@ if (computer != null) {
 **日志是复发源（决定了清法）**：`CompShouldStartTrackerFromLogs` 按 `/log` 判定，
 故只清计时不清日志，下次从那台断开即原地复活。⇒ `trace` 工具必须**连 `/log` 一起擦**。
 
-**v1.30.0 交付两件（用户定：B 跟着 A 走）**：
+**为什么合并成一个入口（用户定：B 跟着 A 走）**：两套追踪对玩家回答的是同一个问题 ——
+「现在有没有东西在追我、怎么让它停下」。分开成两个动作时，玩家在最紧张的那一刻
+还得先判断自己中的是哪一套；而「判断」本身就需要工具先给出提示，等于把工具的职责
+推回给人。故 v1.31.0 起 `trace` 动词（面板 `ANTI-TRACE`）**一次止住两套**，
+`TraceTools.Run` 内部先调 `HackEngine.KillTrace`（与每目标末尾那步同一实现，不复制
+`stop()`），再清 `TrackersInProgress` 并擦其 `/log`。
+
+**连带改名**：原复选框 `anti-trace dc` 与新按钮同名会让玩家无法判断该点哪个 ——
+改按真实机制命名 `disconnect when done`（它做的确实就是给每个目标发 `dc`）。
+
+**v1.30.0 交付两件**：
 
 1. `TraceHud.cs` —— 把那张表常驻画出来（`count` 台 + 最近一台剩余秒数）。
    位置对齐 `TraceTracker.Draw` 的屏幕左下角与同色，但上移 `BottomOffset = 78px`
@@ -1555,7 +1589,7 @@ if (computer != null) {
    同样带 `begun` 标志 + `catch (InvalidOperationException)` —— **HUD 比面板更该容忍**：
    它每帧都画，错一帧的代价是少两行字，不是整个存档。
 2. `TraceTools.cs` + `ToolDispatch.Trace = "trace"` —— 停表 + 擦 `/log`，命令行与面板
-   `Tools` 表双入口（面板新增 `STOP TRACE`，**唯一不给 danger 色的按钮**：
+   `Tools` 表双入口（面板新增 `ANTI-TRACE`，**唯一不给 danger 色的按钮**：
    它在玩家最需要保命时出现，不该给「别点」的视觉暗示）。
    `TrackersInProgress` 由游戏线程每帧遍历，而命令行入口跑在 `OS.execute` 的独立线程
    （`OS.cs:1754-1767）—— 故先取快照再一次性 `Clear()`，写窗口只有一次调用；

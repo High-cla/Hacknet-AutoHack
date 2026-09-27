@@ -30,13 +30,19 @@ internal static class MissionTools
         {
             if (os.branchMissions == null || os.branchMissions.Count == 0)
             {
-                os.write("[autohack] skip: no mission is active.");
+                // 回显里写明两处都查过了 —— 否则「没任务」与「命令没进来」在终端上
+                // 长得一模一样，玩家无从分辨（本命令曾因动词大小写敏感而静默落到
+                // 开关面板分支，症状正是「敲了没反应」）。
+                os.write("[autohack] skip: no active mission (main and branch lists are both empty).");
                 return;
             }
 
+            var branchTitle = string.IsNullOrEmpty(os.branchMissions[0].postingTitle)
+                ? "(unnamed)"
+                : os.branchMissions[0].postingTitle;
             os.branchMissions[0].finish();
             os.MissionCompleteFlashTime = 3f;
-            os.write("[autohack] skip: branch mission completed.");
+            os.write("[autohack] skip: branch mission \"" + branchTitle + "\" completed.");
             return;
         }
 

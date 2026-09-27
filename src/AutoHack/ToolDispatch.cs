@@ -37,18 +37,32 @@ internal static class ToolDispatch
         (Pull, "pull                  download every file in the current directory to local home"),
         (Purge, "purge                 delete every file in the current directory (shared with log wipe)"),
         (Drop, "drop                  disconnect and remove the connected node from the map"),
-        (Trace, "trace                 stop every pending tracker and wipe the /log behind it"),
+        (Trace, "trace                 anti-trace: stop the countdown and every pending tracker"),
         (Skip, "skip                  complete the active mission and take the next one"),
     };
 
+    /// <summary>
+    /// 命令动词的归一化。<b>两个入口都必须过这里</b> —— 否则 <see cref="Handles"/> 认了、
+    /// <see cref="Dispatch"/> 的 switch 认不得，命令会静默什么都不做。
+    ///
+    /// 为什么必须不区分大小写：游戏自己的 <c>ProgramRunner.ExecuteProgram</c> 大量写的是
+    /// <c>array[0].ToLower().Equals("connect")</c>（ProgramRunner.cs:15/46/55），玩家由此
+    /// 天然预期终端命令不分大小写；本插件的 <c>run</c> 分支用的也是 OrdinalIgnoreCase。
+    /// 只有工具这边此前是 <c>Array.IndexOf</c>（区分大小写），于是 <c>autohack SKIP</c>
+    /// 会一路掉到「开关面板」分支 —— 玩家看到的是面板开/关，而不是任务被跳过，
+    /// 表现就是「敲了没效果」。中文输入法下敲英文大小写随机，这条尤其容易踩。
+    /// </summary>
+    private static string Canonical(string verb) => verb?.ToLowerInvariant();
+
     internal static bool Handles(string verb)
-        => verb != null && Array.IndexOf(Verbs, verb) >= 0;
+        => Array.IndexOf(Verbs, Canonical(verb)) >= 0;
 
     internal static void Run(OS os, string verb, bool allNodes)
     {
+        var canonical = Canonical(verb);
         try
         {
-            Dispatch(os, verb, allNodes);
+            Dispatch(os, canonical, allNodes);
         }
         catch (Exception ex) when (ex is FormatException or NullReferenceException
                                        or ArgumentException or IndexOutOfRangeException
@@ -58,7 +72,7 @@ internal static class ToolDispatch
             // InvalidOperationException 在列上是因为「Collection was modified」：
             // 命令走 OS.execute 的独立线程（OS.cs:1754-1767），cd 会改 os.navigationPath，
             // 而本方法在游戏线程读它 —— 工具与终端并发时这是唯一的真实竞态面。
-            os.write("[autohack] " + verb + " failed: " + ex.GetType().Name + " - " + ex.Message);
+            os.write("[autohack] " + canonical + " failed: " + ex.GetType().Name + " - " + ex.Message);
         }
     }
 

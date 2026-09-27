@@ -3,7 +3,7 @@
 > Hacknet 的 BepInEx / Pathfinder 插件：用游戏自身的原生机制一键入侵全网，带控制面板与脚本驱动。
 > 本文件面向要理解或修改本仓库的编码 agent。规范见 https://llmstxt.org
 
-当前 v1.30.0。构建产物直投游戏插件目录，无需手动拷贝：
+当前 v1.31.0。构建产物直投游戏插件目录，无需手动拷贝：
 
 ```
 D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
@@ -21,7 +21,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    **绝不下载 Release 附件回来比对** —— 只读构建输出目录（即游戏插件目录）那份产物的 MD5。
 3. **`gh release create` 绝不自动执行** —— 等用户显式发令。`git push` 可以直接做。
 
-**二十六条最容易踩的坑 / 最该知道的机制**（都带行号，可直接 grep）
+**二十七条最容易踩的坑 / 最该知道的机制**（都带行号，可直接 grep）
 
 1. `Computer.portsOpen` 恒为 0 —— Pathfinder 用 Harmony Prefix 接管 `openPort`/`openPorts`
    并 `return false`，状态改存 `PortState.Cracked`。任何读 `portsOpen` 的判断都是错的，
@@ -198,7 +198,14 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     是 `RemoveAt` **移除**（`OS.cs:825-830`），不是暂停；② 它的复发源是目标 `/log`
     （`CompShouldStartTrackerFromLogs`，`TrackerCompleteSequence.cs:30-47`），
     **只清计时不清日志 = 下次断开原地复活**。
-26. **`CrashModule.BOOT_TIME` 是 static 字段，值在静态初始化器里固化**
+26. **工具动词此前区分大小写，而 `run` 与游戏都不区分** —— `ToolDispatch.Handles`
+    曾直接 `Array.IndexOf(Verbs, verb)`，于是 `autohack SKIP` 不被认作工具、
+    一路掉到「开关面板」分支，玩家看到面板开关而任务没跳过，症状是「敲了没效果」。
+    游戏自己大量写 `array[0].ToLower().Equals("connect")`（`ProgramRunner.cs:15/46/55`），
+    玩家天然预期终端不区分大小写；中文输入法下敲英文大小写随机，尤其容易踩。
+    修法：`ToolDispatch.Canonical(verb)` 归一后 **`Handles` 与 `Dispatch` 必须用同一个值**
+    —— 只改一处会让命令静默什么都不做。
+27. **`CrashModule.BOOT_TIME` 是 static 字段，值在静态初始化器里固化**
     （`CrashModule.cs:15`）—— 之后再改 `Settings.FastBootText` **无效**（且该设置根本不落
     `Settings.txt`），只能覆写字段本身。`bootTextDelay` 是实例字段、只在 `LoadContent()`
     （`:78`）算一次，那一刻读到的已是新值，**不要手动重算**：`reset()`（`:319-331`）

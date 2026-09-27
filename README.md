@@ -109,13 +109,15 @@ autohack -h                                     # 帮助
 | `autohack mem [allnodes]` | 查看本机内存转储（紧凑格式，截断显示）、导出到 `/home/MemDumps`、扫描节点上的 `.mem` 并解其内嵌 DEC |
 | `autohack exes` | 把游戏能生成的破解程序全部补进玩家 `/bin`（幂等） |
 | `autohack unbreakable` | 加固玩家自己这台机器（**不可逆**） |
-| `autohack pull` | 把**当前目录**下全部文件下载到本机（按扩展名分流，同游戏 `scp`；**绝不新建文件夹**） |
+| `autohack pull` | 把**当前目录**下全部文件下载到本机 `/home/misc`（**一个夹**，不分流） |
 | `autohack purge` | 删除**当前目录**下全部文件（同游戏 `rm`；与清痕**同一实现**；**只删文件，不删文件夹**） |
 | `autohack drop` | 断开并把当前连接的节点从网络图上摘掉 |
 
 `allnodes` 只对 `dec` / `mem` 有意义（缺省只作用于当前连接节点，与 `run` 口径一致）；`exes` 与 `unbreakable` 天然只针对玩家自己。
 
-**两个远程动作都不碰文件夹**：`pull` 只往已存在的目录里放（`/bin`、`/sys`、`/home`），落不下就退回 `/home`，**不会新建**；`purge` 只清文件，**不删文件夹**。原因是游戏自身**没有任何删除文件夹的入口**（`Programs` 里没有 rmdir，官方 Action 也只有 `<DeleteFile>`），mod 一旦建出文件夹，玩家就永远清不掉 —— 所以干脆不建，也不假装能删。`purge` 的回显会把「还剩几个子文件夹」一并报出，免得对着一个空夹反复试。
+**两个远程动作都不碰文件夹**：`pull` 全部落到 `/home/misc` —— 这个夹**游戏自己就建**（`OS.cs:386-388` 给玩家机建 home 时一并加了 `stash` 与 `misc`，存档里也持久化），mod 只兜底；`purge` 只清文件，**不删文件夹**。原因是游戏自身**没有任何删除文件夹的入口**（`Programs` 里没有 rmdir，官方 Action 也只有 `<DeleteFile>`），mod 一旦建出文件夹，玩家就永远清不掉。`purge` 的回显会把「还剩几个子文件夹」一并报出，免得对着一个空夹反复试。
+
+注意 `pull` 拉回来的 `.exe` **不能直接跑**：游戏只在 `/bin` 里解析可执行程序（`ProgramRunner.cs:689` 写死 `searchForFolder("bin")`），要用得先 `mv` 到 `/bin`。
 
 #### DEC 解密：反推而非暴力
 
@@ -229,9 +231,9 @@ src/AutoHack/
 | 项 | 值 |
 |---|---|
 | 产物路径 | `D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll` |
-| 当前版本 | v1.23.0 |
-| 字节数 | 90624 |
-| MD5 | `a6f0ee9ef576f0fbd5de764447301067` |
+| 当前版本 | v1.24.0 |
+| 字节数 | 90112 |
+| MD5 | `88bebb87e43d8ce49125c87e5101006c` |
 
 核对流程：清理 `obj`/`bin` → 构建（须 0 警告 0 错误）→ 记 `md5sum` 与字节数，
 与上一版比对。构建成功即证明源码已编入（增量缓存已清，漏编会报错）；
@@ -242,6 +244,7 @@ MD5 只用于确认部署确实是新的那个产物。
 
 | 版本 | 字节数 | MD5 | 要点 |
 |---|---|---|---|
+| v1.24.0 | 90112 | `88bebb87e43d8ce49125c87e5101006c` | `pull` 落点统一到 `/home/misc`（游戏自建的夹，不再按扩展名分流到 `/bin`/`/sys`/`/home`）；删除 `RemoteTools.Destination`，新增 `ToolFiles.Misc`（§32） |
 | v1.23.0 | 90624 | `a6f0ee9ef576f0fbd5de764447301067` | 连接被拒不再是假战果：核对 `os.connectedComp`，被拒目标整段跳过并如实报 0/0。`tracker="true"` 的机器断线即自动追踪（`deleteFile` 必留带玩家 IP 的 `FileDeleted` 行），故无条件强制清痕（§31） |
 | v1.22.0 | 89600 | `0c3d23467926cdb469c088b8e4ee1ae3` | EOS 设备：端口容量天生等于门槛（2 = 2）故永不提权 —— 那是游戏刻意的，正路是全系统一的固定密码 `alpine`。新增 `RevealAttachedDevices` 免跑 exe 补发现（原版 `eosDeviceScan.exe` 等价物），EOS 放行 login 路径（§30） |
 | v1.21.0 | 89088 | `7deb395a07a4b0a924220ba8682ea75e` | 修面板控件 ID 冲突：`DragId` 硬编码 7099 撞上 PURGE 按钮（`IdBase+30+5`），点击被拖动逻辑吃掉；`DragId` 改为从 `IdBase` 派生（§29） |
@@ -338,7 +341,7 @@ dotnet build src/SaveFix/SaveFix.csproj -c Release
 
 ## 调研资料
 
-- `docs/RESEARCH.md` — 完整调研：原生机制、API 精确签名、陷阱（§1–§31，每条结论带 `文件:行号`）
+- `docs/RESEARCH.md` — 完整调研：原生机制、API 精确签名、陷阱（§1–§32，每条结论带 `文件:行号`）
 - `docs/EXTENSIONS.md` — 游戏自带 `Extensions/` 官方样本的格式参考：节点 XML、占位符、行为系统、任务、阵营、主题
 - `docs/HACKERSCRIPTS.md` — 自替换占位符全表 + HackerScript 动词表，以游戏实现与官方样本为准，已标出 wiki 的错漏处
 

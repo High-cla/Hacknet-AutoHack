@@ -3,7 +3,7 @@
 > Hacknet 的 BepInEx / Pathfinder 插件：用游戏自身的原生机制一键入侵全网，带控制面板与脚本驱动。
 > 本文件面向要理解或修改本仓库的编码 agent。规范见 https://llmstxt.org
 
-当前 v1.23.0。构建产物直投游戏插件目录，无需手动拷贝：
+当前 v1.24.0。构建产物直投游戏插件目录，无需手动拷贝：
 
 ```
 D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
@@ -87,8 +87,10 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     两个入口与新工具自动继承。
 
 16. **游戏没有任何删除文件夹的入口** —— `Programs` 里没有 rmdir，官方 Action 也只有
-    `<DeleteFile>`（EXTENSIONS.md §5.2）。故 mod **绝不新建文件夹**：`pull` 只往已存在的
-    `/bin`、`/sys`、`/home` 里放，`purge` 只清文件、不删夹。一旦建出来玩家永远清不掉。
+    `<DeleteFile>`（EXTENSIONS.md §5.2）。故 mod **绝不新建文件夹**：`pull` 全部落到
+    `/home/misc`（**游戏自建**，`OS.cs:386-388` 建 home 时一并加 `stash` + `misc`，存档持久化；
+    mod 只兜底），`purge` 只清文件、不删夹。一旦建出来玩家永远清不掉。
+    落进 `misc` 的 `.exe` **不能直接跑** —— 游戏只在 `/bin` 里解析程序（`ProgramRunner.cs:689`）。
     另：`deleteFile` 会**抛**而不只是返回 false —— 它内部对每个非 `@` 文件调 `log()`，
     而 `log()` 直接 `files.root.searchForFolder("log").files.Insert(...)`（Computer.cs:338-354），
     目标机没有 `log` 夹时 NRE（官方 Extension 的 11 个节点全都没有）。
@@ -137,7 +139,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
 ## 仓库文档
 
 - [README.md](README.md): 面向使用者的说明 —— 安装、面板与命令行用法（含七个独立工具）、脚本模式、架构、验证方式。**刻意保持精简**，设计决策与取证细节一律在 docs/RESEARCH.md
-- [docs/RESEARCH.md](docs/RESEARCH.md): 源码级取证与设计决策，§1–§31，每条结论都带 `文件:行号`。**细节的唯一归属地**（README 只留给人看的结论）
+- [docs/RESEARCH.md](docs/RESEARCH.md): 源码级取证与设计决策，§1–§32，每条结论都带 `文件:行号`。**细节的唯一归属地**（README 只留给人看的结论）
 - [docs/EXTENSIONS.md](docs/EXTENSIONS.md): 游戏自带 `Extensions/` 官方样本的格式参考 —— 节点 XML、占位符、行为系统、任务、阵营、主题
 - [docs/HACKERSCRIPTS.md](docs/HACKERSCRIPTS.md): 自替换占位符全表 + HackerScript 动词表（以游戏实现与官方样本为准，已标出 wiki 错漏处）
 - [llms.txt](llms.txt): 本文件

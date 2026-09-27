@@ -99,40 +99,6 @@ internal static class RemoteTools
     }
 
     /// <summary>
-    /// 落点：只在**已存在**的目录里挑，绝不新建。
-    ///
-    /// 分流规则取自 <c>Programs.scp</c>（Programs.cs:632-655），但去掉了它的建夹行为：
-    /// .exe → /bin、.sys → /sys（仅当该夹已存在 —— 落下去就能直接跑），
-    /// 其余（含 '@' 开头的日志）→ /home。
-    ///
-    /// 为什么不去建 <c>/home/dl_logs</c>：**游戏没有任何删除文件夹的入口**
-    /// （<c>Programs</c> 里没有 rmdir，官方 Action 也只有 <c>&lt;DeleteFile&gt;</c>），
-    /// mod 建出来的夹玩家永远清不掉，只能进到里面把文件删空、夹子留着。
-    /// 下载这种一次性动作不该留下永久痕迹，故宁可落平也不造夹。
-    /// home 缺失时退到当前根 —— 依然不造夹。
-    /// </summary>
-    private static Folder Destination(Computer local, string name)
-    {
-        var root = local.files.root;
-        var lower = name.ToLowerInvariant();
-
-        var preferred = lower.EndsWith(".exe") ? "bin"
-            : lower.EndsWith(".sys") ? "sys"
-            : null;
-
-        if (preferred != null)
-        {
-            var existing = root.searchForFolder(preferred);
-            if (existing != null)
-            {
-                return existing;
-            }
-        }
-
-        return root.searchForFolder("home") ?? root;
-    }
-
-    /// <summary>
     /// 把当前目录下的全部文件下载到玩家自己的机器。等价于终端 <c>scp *</c>，
     /// 只是不睡：游戏版每文件间隔 250ms，几十个文件就是十几秒的卡帧。
     /// </summary>
@@ -157,9 +123,9 @@ internal static class RemoteTools
         // 但「遍历中不改动被遍历的 List」是本仓库的既有约束，不靠巧合成立。
         var sources = new List<FileEntry>(dir.files);
 
+        var misc = ToolFiles.Misc(os);
         var copied = 0;
         var denied = 0;
-        var landed = new List<string>();
 
         foreach (var file in sources)
         {
@@ -176,21 +142,15 @@ internal static class RemoteTools
                 continue;
             }
 
-            // 落点只挑已存在的夹（Destination 从不新建）；
-            // 重名规则复用 ToolFiles.Write（stem 即完整文件名、扩展名留空）。
-            var dest = Destination(os.thisComputer, file.name);
-            ToolFiles.Write(dest, file.name, string.Empty, file.data);
+            // 落点固定 home/misc，不按扩展名分流。重名规则复用 ToolFiles.Write
+            // （stem 即完整文件名、扩展名留空）。
+            ToolFiles.Write(misc, file.name, string.Empty, file.data);
             copied++;
-
-            if (!landed.Contains(dest.name))
-            {
-                landed.Add(dest.name);
-            }
         }
 
         var tail = denied > 0 ? ", " + denied + " denied (needs admin access)" : string.Empty;
         os.write("[autohack] pull: " + copied + " file(s) from " + comp.name + " :: " + where
-                 + " -> local " + string.Join(", ", landed) + tail + ".");
+                 + " -> local /home/misc" + tail + ".");
     }
 
     /// <summary>

@@ -3463,3 +3463,57 @@ if (computer != null) {
 ### 31.7 交付
 
 90624 B / `a6f0ee9ef576f0fbd5de764447301067`。构建 0 警告 0 错误。
+
+## §32 v1.24.0：pull 落点统一到 /home/misc
+
+### 32.1 改动
+
+`pull` 拉取回来的文件**全部**落到玩家机 `/home/misc`，不再按扩展名分流。
+新增 `ToolFiles.Misc(OS)`，`RemoteTools.Destination`（按扩展名挑 bin/sys/home 的那套）删除。
+
+### 32.2 为什么 /home/misc 不需要 mod 去建
+
+这个夹**游戏自己就建**：`OS.LoadContent` 给玩家机建 home 时一并加了 `stash` 与 `misc`
+（`OS.cs:386-388`）：
+
+```csharp
+Folder folder = thisComputer.files.root.searchForFolder("home");
+folder.folders.Add(new Folder("stash"));
+folder.folders.Add(new Folder("misc"));
+```
+
+存档里也持久化 —— 官方测试存档 `Content/Tests/DLCTests/save_preDLC.xml:18-22` 里 `home` 下
+正是 `stash` + `misc`。故 `Misc()` 用 `createFoldersThatDontExist: true` 只是兜底，
+与 `MemDumps()` 同一写法：正常存档下夹子早就在，不会真的新建。
+
+### 32.3 为什么放弃 scp 的分流
+
+原落点路由逐条照抄 `Programs.scp`（`Programs.cs:637-657`）：`.exe` → `/bin`、`.sys` → `/sys`、
+`'@'` 开头 → `home/dl_logs`（不存在则**建**）、其余 → `/home`。两个问题：
+
+1. 一次下载散落在三四个夹里，玩家得挨个找。
+2. `dl_logs` 要现建，而**游戏没有任何删除文件夹的入口**（`Programs` 里没有 rmdir，官方
+   Action 也只有 `<DeleteFile>`，见 §28）。mod 建出来的夹玩家永远清不掉。
+
+§28 当时把建夹行为去掉、退成「只往已存在的夹里放」，落平到 `/bin`、`/sys`、`/home`。
+但那是把「散落」换成了「平铺」：几十个文件连同 `.exe`/`.sys` 全堆在 `/home` 根，
+与玩家自己的文件混在一起。统一到 `/home/misc` 同时解决两头 —— 一个夹、且是游戏自带的夹。
+
+### 32.4 副作用：落进 misc 的 .exe 不能直接跑
+
+游戏只在 `bin` 里解析可执行程序：`ProgramRunner.AttemptExeProgramExecution`
+（`ProgramRunner.cs:689`）写死 `os.thisComputer.files.root.searchForFolder("bin")`，
+`GetFileIndexOfExeProgram` 只在这个夹里找名字。故拉回来的 `.exe` 落到 `/home/misc` 后
+**不能直接当程序执行** —— 想跑就得 `mv` 到 `/bin`（或 `scp` 时手动指定落点）。
+
+这是「一个夹」换来的代价，已知且可绕。`pull` 是「取回文件」而不是「安装程序」，
+落点统一比省一步 `mv` 更重要。
+
+### 32.5 回显
+
+原为 `-> local ` + `string.Join(", ", landed)`（动态列出实际落到的夹名，故可能是
+`bin, home` 这种混合），现固定 `-> local /home/misc`。
+
+### 32.6 交付
+
+90112 B / `88bebb87e43d8ce49125c87e5101006c`。构建 0 警告 0 错误。

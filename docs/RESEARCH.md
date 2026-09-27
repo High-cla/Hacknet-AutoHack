@@ -3367,3 +3367,99 @@ Apply Login → TryLogin → login("admin","alpine") == 1 → giveAdmin
 ### 30.8 交付
 
 89600 B / `0c3d23467926cdb469c088b8e4ee1ae3`。构建 0 警告 0 错误。
+
+## §31 连接被拒的假战果，与 tracker 机器的自杀式留痕
+
+### 31.1 症状
+
+对带白名单的机器（DLC Airline 的 `PA_WhitelistServer` / `PA_Bookings_Mainframe`）跑全网扫描：
+终端明明写了 `External Computer Refused Connection`，战果报告却照样写「入侵成功」。
+
+另一半更隐蔽：打下一台 `tracker="true"` 的机器，**断开的那一刻**开始倒计时，10~20 秒后
+玩家被端（终端锁死、追踪条归零）。用户没开 `clearLogs`（缺省 false）就必中。
+
+### 31.2 根因一：连接是「可失败但无返回值」的
+
+NaN
+
+```csharp
+if (disabled) return false;
+WhitelistConnectionDaemon wl = (WhitelistConnectionDaemon)getDaemon(typeof(WhitelistConnectionDaemon));
+if (wl != null && ipFrom == os.thisComputer.ip && !wl.IPCanPassWhitelist(ipFrom, isFromRemote: false))
+{ wl.DisconnectTarget(); return false; }
+```
+
+`WhitelistConnectionDaemon`（文件名 `WhitelistConnectionDaemon.cs`，**类名却是**
+`WhitelistAuthenticatorDaemon`）：`AuthenticatesItself` 缺省 `true`（`:20`），`initFiles`（`:24-56`）
+在 `RemoteSourceIP == null` 时把 `list.txt` 写成**机器自己的 adminIP** ⇒ 玩家 IP 不在表内
+⇒ `IPCanPassWhitelist` 返回 false ⇒ `DisconnectTarget()`（`:77-98`）执行 `os.execute("disconnect")`
++ `os.display.command = "connectiondenied"` + 写 9 行 CONNECTION ERROR 横幅。
+
+上游 `Programs.connect` 只写一行 `"External Computer Refused Connection"` 再把
+`os.connectedComp` 置 null（`Programs.cs:313-322`）—— **同样不返回值**。
+
+⇒ mod 侧原先的 `case HackStepKind.Connect:` 是 `Programs.connect([...], os); break;`，
+完全不知道连接成没成。而后续 `OpenPort` / `Escalate` / `CleanLogs` 全部**直接对 `target`
+对象操作，压根不经过连接**（`comp.openPort(...)`、`comp.giveAdmin(...)`、
+`Computer.deleteFile(...)`）—— 于是照样「成功」。这就是假战果。
+
+### 31.3 根因二：`tracker="true"` 是断线触发的定时炸弹
+
+`OS.handleDisconnection`（`OS.cs:944-960`）：
+
+```csharp
+Computer computer = Programs.getComputer(this, connectedIPLastFrame);
+if (computer != null) {
+    computer.admin?.disconnectionDetected(computer, this);
+    if (computer.HasTracker && TrackerCompleteSequence.CompShouldStartTrackerFromLogs(this, computer))
+    { float timeLeft = TrackerCompleteSequence.MinTrackTime + Utils.randm(MaxTrackTime - MinTrackTime);
+      TrackersInProgress.Add(new TrackerDetail { comp = computer, timeLeft = timeLeft }); }
+}
+```
+
+`CompShouldStartTrackerFromLogs`（`TrackerCompleteSequence.cs:30-47`）读目标 `/log`，任一行
+同时含玩家 IP 与 `FileCopied`/`FileDeleted`/`FileMoved` 即返回 true。而
+**`Computer.deleteFile` 每次都会写 `log("FileDeleted: by " + ipFrom + ...)`**（`Computer.cs:543`）
+⇒ mod 的 `purge` 与 `ClearLogs` 都在目标 log 留下带玩家 IP 的 `FileDeleted` 行。
+
+字段链：`public bool HasTracker = false;`（`Computer.cs:101`）← `ComputerLoader.cs:506`
+`c.HasTracker = true;`（XML `tracker="true"`）← 存档 `getSaveString`（`Computer.cs:916`）双向持久化。
+
+### 31.4 修法
+
+**缺口一（连接被拒即中止该目标）** —— `HackRun.cs` 五处：
+
+1. 新增 `private readonly HashSet<Computer> _refused = new();`。
+2. `Tick` 取步后先查 `_refused.Contains(step.Target)` ⇒ `_index++; continue;`。
+3. `Connect` 分支 `Programs.connect(...)` 之后核对 `if (!ReferenceEquals(os.connectedComp, target))`
+   ⇒ 登记 `_refused`、写 `"<name> :: connection refused (whitelist) - node left untouched"`、`break`。
+   用 `ReferenceEquals` 而非 `==`：`Computer` 未重载运算符，但显式表达「必须是同一实例」。
+4. `Finish` 战果循环对被拒目标报 `new TargetOutcome(target.name, 0, 0, false)` —— **不报它的真实端口表**，
+   否则「拒绝」看起来像「打过了但没成功」。
+5. `Finish` 汇总行 `"N node(s) refused the connection and were left untouched."`。
+
+**缺口二（tracker 机器强制清痕）** —— 五处：
+
+6. 新增 `internal int ForcedLogWipe { get; }`。
+7. ctor：`ForcedLogWipe = options.ClearLogs ? 0 : _targets.Count(t => t.HasTracker);`
+   —— `clearLogs` 已开时全体都清，不存在「额外强制」的机器。
+8. `BuildSteps` 清痕条件 `if (options.ClearLogs)` → `if (options.ClearLogs || target.HasTracker)`。
+9. `AppendScripted` 在 `KillTrace` 兜底之前补：`if (target.HasTracker && !emitted.Contains(HackStepKind.CleanLogs))`
+   —— 即便脚本已 `dc`，`ClearLogs` 仍按 `folderPath` 直取目标 `/log`（`HackEngine.cs:741`），不依赖连接。
+10. `Finish` 汇总行 `"wiped N node(s) carrying tracker=\"true\" - their /log would auto-start a trace on disconnect."`
+
+### 31.5 为什么强制清痕放在 BuildSteps 而不是 ResolveTargets
+
+用户原话是「让 ResolveTargets 读 comp.HasTracker」，实际落点选在 `BuildSteps` + ctor 统计：
+强制清痕是**步骤展开**问题，不是**目标筛选**问题 —— 放 `ResolveTargets` 会把它误伤成「剔除该目标」，
+而 `tracker="true"` 的机器恰恰是**最该打**的（剧情关键节点常带追踪）。
+
+### 31.6 教训
+
+「不返回值的 API 必须核对副作用」。`Programs.connect` / `Programs.rm` / `Programs.probe`
+这一族全部无返回值（`rm` 还带 `Thread.Sleep`，见坑 2），mod 侧只要调它们就必须自己核对状态。
+连接这一步尤其危险：**后续步骤不依赖连接也能「成功」**，失败因此完全静默。
+
+### 31.7 交付
+
+90624 B / `a6f0ee9ef576f0fbd5de764447301067`。构建 0 警告 0 错误。

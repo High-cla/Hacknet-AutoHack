@@ -3,7 +3,7 @@
 > Hacknet 的 BepInEx / Pathfinder 插件：用游戏自身的原生机制一键入侵全网，带控制面板与脚本驱动。
 > 本文件面向要理解或修改本仓库的编码 agent。规范见 https://llmstxt.org
 
-当前 v1.22.0。构建产物直投游戏插件目录，无需手动拷贝：
+当前 v1.23.0。构建产物直投游戏插件目录，无需手动拷贝：
 
 ```
 D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
@@ -21,7 +21,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    **绝不下载 Release 附件回来比对** —— 只读构建输出目录（即游戏插件目录）那份产物的 MD5。
 3. **`gh release create` 绝不自动执行** —— 等用户显式发令。`git push` 可以直接做。
 
-**十八个最容易踩的坑**（都带行号，可直接 grep）
+**二十个最容易踩的坑**（都带行号，可直接 grep）
 
 1. `Computer.portsOpen` 恒为 0 —— Pathfinder 用 Harmony Prefix 接管 `openPort`/`openPorts`
    并 `return false`，状态改存 `PortState.Cracked`。任何读 `portsOpen` 的判断都是错的，
@@ -121,10 +121,23 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     `attatchedDeviceIDs` 反向补（`RevealAttachedDevices`），否则 = 「没有进行 eos 扫描」。
     注意 `discoverNode` 改写 `visibleNodes`，**只能在游戏线程调**（见 `PendingRuns.cs:28-36`）。
 
+19. **连接是可失败且不返回值的，必须自己核对 `os.connectedComp`** —— 带 `WhitelistConnectionDaemon` 的机器
+    （类名是 `WhitelistAuthenticatorDaemon`，文件名却叫 `WhitelistConnectionDaemon.cs`）在 `Computer.connect` 里
+    查白名单，不过就 `DisconnectTarget()` 并 `return false`（`Computer.cs:383-388`）；上游 `Programs.connect` 只写
+    一行 `"External Computer Refused Connection"` 再把 `os.connectedComp` 置 null（`Programs.cs:313-322`）——
+    **两者都不返回值**。而 `OpenPort`/`Escalate`/`CleanLogs` 全部直接对 `target` 对象操作，**不经过连接**，
+    于是玩家看到 Refused 却收到「入侵成功」—— 假战果。核对 `ReferenceEquals(os.connectedComp, target)` 即可。
+    同族的 `Programs.rm`/`probe` 也无返回值（`rm` 还带 `Thread.Sleep`，见坑 2）：调这一族就必须自己核对状态。
+
+20. **`tracker="true"` 的机器断线即自动追踪，留痕 = 自杀** —— `OS.handleDisconnection`
+    （`OS.cs:944-960`）在断开时检查目标 `/log`：只要有一行同时含玩家 IP 与
+    `FileCopied`/`FileDeleted`/`FileMoved`，就排入追踪（`TrackerCompleteSequence.cs:30-47`），10~20 秒后
+    端掉玩家。而 `Computer.deleteFile` 每次都会写 `"FileDeleted: by <玩家IP>"`（`Computer.cs:543`）。
+    故这类机器**无条件**清痕，不受 `clearLogs` 开关约束（缺省 false，必中）。
 ## 仓库文档
 
 - [README.md](README.md): 面向使用者的说明 —— 安装、面板与命令行用法（含七个独立工具）、脚本模式、架构、验证方式。**刻意保持精简**，设计决策与取证细节一律在 docs/RESEARCH.md
-- [docs/RESEARCH.md](docs/RESEARCH.md): 源码级取证与设计决策，§1–§30，每条结论都带 `文件:行号`。**细节的唯一归属地**（README 只留给人看的结论）
+- [docs/RESEARCH.md](docs/RESEARCH.md): 源码级取证与设计决策，§1–§31，每条结论都带 `文件:行号`。**细节的唯一归属地**（README 只留给人看的结论）
 - [docs/EXTENSIONS.md](docs/EXTENSIONS.md): 游戏自带 `Extensions/` 官方样本的格式参考 —— 节点 XML、占位符、行为系统、任务、阵营、主题
 - [docs/HACKERSCRIPTS.md](docs/HACKERSCRIPTS.md): 自替换占位符全表 + HackerScript 动词表（以游戏实现与官方样本为准，已标出 wiki 错漏处）
 - [llms.txt](llms.txt): 本文件

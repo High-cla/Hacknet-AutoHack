@@ -45,6 +45,12 @@ internal sealed class HackRun
     /// <summary>本次运行中靠已知凭据登入（即已提权）的机器，其破端口类步骤整体跳过。</summary>
     private readonly HashSet<Computer> _loggedIn = new();
 
+    /// <summary>
+    /// 连接被目标主动拒绝的机器 —— 其全部步骤跳过。
+    /// 理由见 <see cref="Apply"/> 的 Connect 分支：连接没成，后续步骤却照样会「成功」。
+    /// </summary>
+    private readonly HashSet<Computer> _refused = new();
+
     /// <summary>本次运行的入侵脚本；null = 用内置次序。构造期已解析完成。</summary>
     private readonly HackScript _script;
 
@@ -61,6 +67,10 @@ internal sealed class HackRun
         _targets = plan.Targets;
         SkippedOwned = plan.SkippedOwned;
         SkippedHopeless = plan.SkippedHopeless;
+
+        // clearLogs 已开时全体都清，不存在「额外强制」的机器，故那种情况计 0。
+        ForcedLogWipe = options.ClearLogs ? 0 : _targets.Count(t => t.HasTracker);
+
         _steps = BuildSteps(_targets, plan.Skipped, options, os, _script);
         Current = _targets.Count > 0 ? _targets[0].name : "-";
         Phase = "ENGAGING";
@@ -87,6 +97,12 @@ internal sealed class HackRun
 
     /// <summary>因提权门槛高于端口表容量（永远打不通）而跳过的机器数。</summary>
     internal int SkippedHopeless { get; }
+
+    /// <summary>
+    /// 因带 <c>tracker="true"</c> 而被强制清痕的机器数（不受 <c>clearLogs</c> 开关约束）。
+    /// 理由见 <see cref="BuildSteps"/> 的清痕分支。
+    /// </summary>
+    internal int ForcedLogWipe { get; }
 
     /// <summary>
     /// 面板标题一律大写。在每个 Phase 赋值处转换一次，
@@ -118,6 +134,14 @@ internal sealed class HackRun
             }
 
             var step = _steps[_index];
+
+            // 该目标的连接被拒：后续步骤（破端口、提权、投放）全都直接操作 target
+            // 对象，根本不需要连接，于是照样会「成功」—— 那是假战果。整段跳过。
+            if (_refused.Contains(step.Target))
+            {
+                _index++;
+                continue;
+            }
 
             // 该目标已靠 login 提权：破端口/解防火墙/porthack 都是无用功，
             // 直接跳过（不回显、不耗时）。停机也计入 Done，进度条才走得准。
@@ -202,6 +226,23 @@ internal sealed class HackRun
                 Phase = "CONNECTING TO " + Upper(target.name);
                 Echo(os, step.Command);
                 Programs.connect(["connect", target.ip], os);
+
+                // 连接可以被目标主动拒绝。带 WhitelistConnectionDaemon 的机器在
+                // Computer.connect 里检查白名单，不通过就调 DisconnectTarget() 并
+                // return false（Computer.cs:383-388）；Programs.connect 只写一行
+                // "External Computer Refused Connection" 再把 os.connectedComp 置 null
+                // （Programs.cs:313-322）。两者都不返回值，故只能核对结果。
+                //
+                // 不核对就是假战果：OpenPort / Escalate / CleanLogs 全部直接对 target
+                // 对象操作，压根不经过连接，于是玩家看到 Refused 却收到「入侵成功」。
+                if (!ReferenceEquals(os.connectedComp, target))
+                {
+                    _refused.Add(target);
+                    os.write("[autohack] " + target.name
+                        + " :: connection refused (whitelist) - node left untouched");
+                    break;
+                }
+
                 break;
 
             case HackStepKind.Neutralize:
@@ -442,6 +483,14 @@ internal sealed class HackRun
 
         foreach (var target in _targets)
         {
+            // 被拒的目标一个端口都没碰、也没提权，报 0/0 比报它的真实端口表诚实 ——
+            // 后者会让「拒绝」看起来像「打过了但没成功」。原因行已在 Connect 步写出。
+            if (_refused.Contains(target))
+            {
+                Outcomes.Add(new TargetOutcome(target.name, 0, 0, false));
+                continue;
+            }
+
             // 两个数取自同一次快照：分两次查会各分配一份端口表副本
             // （GetAllPortStates 是 ...Values.ToList()），且理论上可能显示
             // opened > total 的不一致比例。PortInfo 自带 Cracked，无需第二次遍历。
@@ -476,6 +525,18 @@ internal sealed class HackRun
         {
             os.write("[autohack] skipped " + SkippedHopeless
                 + " node(s) whose port table cannot reach the escalation threshold.");
+        }
+
+        if (_refused.Count > 0)
+        {
+            os.write("[autohack] " + _refused.Count
+                + " node(s) refused the connection and were left untouched.");
+        }
+
+        if (ForcedLogWipe > 0)
+        {
+            os.write("[autohack] wiped " + ForcedLogWipe
+                + " node(s) carrying tracker=\"true\" - their /log would auto-start a trace on disconnect.");
         }
 
         Current = "done - " + _targets.Count + " target(s)";
@@ -560,7 +621,13 @@ internal sealed class HackRun
             // os.connectedComp 与 os.navigationPath（Programs.cs:1531-1534 →
             // getFolderAtDepth :1536-1560），Programs.disconnect 又会把
             // navigationPath 清空。断开之后再清，回显的 rm 就是条假命令。
-            if (options.ClearLogs)
+            // 带 tracker="true" 的机器**无条件**清痕，不受 clearLogs 开关约束。
+            // OS.handleDisconnection（OS.cs:944-960）在断开时检查目标 /log：只要有一行
+            // 同时含玩家 IP 与 FileCopied/FileDeleted/FileMoved，就自动排入追踪
+            // （TrackerCompleteSequence.cs:30-47），10~20 秒后计时归零端掉玩家。
+            // 而 deleteFile 每次都会写 "FileDeleted: by <玩家IP>"（Computer.cs:543）。
+            // 这类机器上「留痕」不是疏忽而是自杀。
+            if (options.ClearLogs || target.HasTracker)
             {
                 steps.Add(new HackStep(HackStepKind.CleanLogs, target, default, "rm log/*"));
             }
@@ -675,6 +742,14 @@ internal sealed class HackRun
             }
 
             steps.Add(new HackStep(action.Kind, target, default, CommandFor(action.Kind)));
+        }
+
+        // 带 tracker="true" 的机器：脚本没写清痕也要补上（理由见 BuildSteps）。
+        // 排在 KillTrace 之前。即便脚本已 dc，ClearLogs 仍按 folderPath 直取目标
+        // /log（HackEngine.cs:741），不依赖连接 —— 只是不再回显那条 rm。
+        if (target.HasTracker && !emitted.Contains(HackStepKind.CleanLogs))
+        {
+            steps.Add(new HackStep(HackStepKind.CleanLogs, target, default, "rm log/*"));
         }
 
         // 兜底反追踪：与内置次序同理，脚本没写也要有 —— 断开已让它失效，

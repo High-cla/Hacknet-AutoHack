@@ -3625,3 +3625,104 @@ KBT_PortTest / TorrentStreamInjector / PacificPortcrusher / RTSPCrack。
 `EXTENSIONS.md:319` 另有一条对本仓库的既有结论：「全部取
 `PortExploits.crackExeData[port]` —— 这是 ExeTools 数据源正确的最终佐证」，
 与 §33.5「数据必须一并传」同源。
+
+## §34 v1.26.0：扫描漏掉「指向目标机的机器」（links 是有向图）
+
+### 34.1 症状
+
+玩家原话：**「扫描，还有连接到的没扫到」**，随后修正为
+**「不是指向我，而是其他机器指向目标机器」** —— 即：链路上有 A → B，B 已被发现
+（甚至已连接、已拿下），但 A 从来不出现在入侵目标池里。
+
+### 34.2 根因：`links` 是**有向**的，而 mod 与原生都只走出边
+
+两款加载标签**都只往自己的 `links` 里加边**，方向完全相同：
+
+| 标签 | 位置 | 语义 |
+|---|---|---|
+| `<link target=X>` | `ComputerLoader.cs:344-356` | 立即 `c.links.Add(os.netMap.nodes.IndexOf(X))` |
+| `<dlink target=X>` | `ComputerLoader.cs:357-373` | 延迟到 `postAllLoadedActions` 再 `local.links.Add(...)` |
+
+`dlink` 的「d」指的是**延迟**（目标机可能尚未加载），**不是双向** ——
+它加进来的仍然只是 `local` 自己的出边。故整张图是**有向图**，
+「指向我」与「我指向」是两组完全不同的边。
+
+游戏原生 `Programs.scan`（`Programs.cs:1258-1294`）也只遍历出边：
+
+```csharp
+Computer computer2 = ((os.connectedComp != null) ? os.connectedComp : os.thisComputer);
+if (os.hasConnectionPermission(admin: true))
+{
+    for (int i = 0; i < computer2.links.Count; i++)   // ← 只有出边
+    {
+        if (!os.netMap.visibleNodes.Contains(computer2.links[i]))
+            os.netMap.visibleNodes.Add(computer2.links[i]);
+        ...
+    }
+}
+```
+
+`NetworkMap.doGui` 画连线也是出边（`NetworkMap.cs:506-512`，且两端都需在
+`visibleNodes` 里）。mod 的 `ReachableComputers` 此前同样只沿 `comp.links` 展开 ——
+**入边整片不可达**。
+
+### 34.3 量级：真实存档实测
+
+解析 `C:/Users/11/Documents/My Games/Hacknet/Accounts/` 下的两份存档
+（正则切 `<computer ...>...</computer>` 取 `<links>`），
+以「玩家机 + 全部 `visibleNodes`」为多源种子：
+
+| 存档 | 节点 | 出边闭包 | 无向闭包 | 差额 |
+|---|---|---|---|---|
+| `save_1.xml` | 147 | 8 | 9 | **+1** |
+| `save_a.xml` | 130 | 17 | 17 | 0 |
+
+save_1 多出的那台是 **98「Tim 的 ePhone 4S」**：它的 `links` 指向
+**99「毒蛇 - 作战基地」**，而 99 在 `visibleNodes` 里 —— 于是 99 的正向展开
+永远找不到 98，98 被整片漏掉。
+
+更能说明问题的是全图统计：**「有入边、无出边」的机器**
+（原生 scan 永远指不到，但别的机器指向它）——
+`save_1` **32 / 147 台**，`save_a` **28 / 130 台**，都超过两成。
+这类机器此前只有靠 `visibleNodes` 恰好收录才会被扫到。
+
+> 注：两份存档都是**恰好 2000000 字节**且 XML 未收尾
+> （`<computer>` 开标签比 `</computer>` 闭标签多 1，无 `</Hacknet>`）——
+> 是 `RemoteSaveStorage.cs:31` 的 `int num = 2000000;` 写入上限所致。
+> 上面的闭包规模因此是**下界**，但方向性结论不受影响。
+
+### 34.4 修法：展开时双向走
+
+`ReachableComputers` 里一次 `O(V+E)` 预建**入边邻接表**，展开时出边、入边各走一遍：
+
+```csharp
+var incoming = BuildIncoming(map);          // incoming[i] = 所有 links 指向 i 的机器
+...
+Expand(map, seen, discovered, frontier, comp.links);
+Expand(map, seen, discovered, frontier, incoming[index]);
+```
+
+`Expand` 承接原先内联循环的全部后效（越界与已见忽略、`disabled` 跳过、
+新节点委托 `NetworkMap.discoverNode` 标为已发现 —— `NetworkMap.cs:415`），
+只是把「一批相邻下标」抽成参数，使出边与入边共用同一条路径。
+
+### 34.5 为什么是「无向化」而不是「补齐反向边」
+
+**不改 `Computer.links` 本体。** 往 `comp.links` 里塞反向边会写进存档
+（`Computer.getSaveString` 的 `<links>`，`Computer.cs:926-930`），
+悄悄污染玩家的网络图，且下次加载又被 `ComputerLoader` 当成真实边 ——
+mod 不该改写游戏数据。只在**读取侧**让 BFS 按连通分量展开，存档一字不动。
+
+### 34.6 与原生行为的偏离
+
+原生 `scan` 只扫一跳出边，玩家要逐台 `connect` 手动推进；mod 的
+`ReachableComputers` 本就已越过这个一跳极限（多源种子 + 无界展开），
+本次只是把「同一张连通分量里的机器」补齐 —— 与 §30.7 补 EOS 设备同属一类：
+**图的形状不该决定哪些机器被看见**。
+
+### 34.7 交付
+
+92672 B / `28f21c9125ac177ad04c3abea7e37ee1`。构建 0 警告 0 错误。
+只改 `HackEngine.cs`（`ReachableComputers` 双向展开 + 新增
+`BuildIncoming` / `Expand` 两个私有辅助），无接口与开关变化。
+

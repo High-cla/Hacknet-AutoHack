@@ -231,9 +231,9 @@ src/AutoHack/
 | 项 | 值 |
 |---|---|
 | 产物路径 | `D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll` |
-| 当前版本 | v1.25.0 |
-| 字节数 | 92160 |
-| MD5 | `0fdbbe8c59b6755101528a0edb44e038` |
+| 当前版本 | v1.26.0 |
+| 字节数 | 92672 |
+| MD5 | `28f21c9125ac177ad04c3abea7e37ee1` |
 
 核对流程：清理 `obj`/`bin` → 构建（须 0 警告 0 错误）→ 记 `md5sum` 与字节数，
 与上一版比对。构建成功即证明源码已编入（增量缓存已清，漏编会报错）；
@@ -244,6 +244,7 @@ MD5 只用于确认部署确实是新的那个产物。
 
 | 版本 | 字节数 | MD5 | 要点 |
 |---|---|---|---|
+| v1.26.0 | 92672 | `28f21c9125ac177ad04c3abea7e37ee1` | 扫描漏掉「指向目标机的机器」：`links` 是**有向图**（`link` 与 `dlink` 都只写自己的出边，dlink 只是延迟解析），原生 `scan` 也只走出边，故入边整片不可达 —— 真实存档里「有入边无出边」的机器占两成以上。改为读取侧无向化：预建入边邻接表、双向展开，不污染存档的 `<links>`（§34） |
 | v1.25.0 | 92160 | `0fdbbe8c59b6755101528a0edb44e038` | 原生破解程序演出：`show` 开关（缺省关）把游戏自己的 `SSHCrackExe` 等挂进 RAM 面板放原版动画；端口状态仍由 `HackEngine.OpenPort` 同步保证，exe 的 `Completed()` 再开一次是幂等的。9 个程序入白名单（其余 3 个无 case、1 个要参数、1 个开错端口）。与 `docs/EXTENSIONS.md` §4.2 官方占位符表交叉验证一致（§33） |
 | v1.24.0 | 90112 | `88bebb87e43d8ce49125c87e5101006c` | `pull` 落点统一到 `/home/misc`（游戏自建的夹，不再按扩展名分流到 `/bin`/`/sys`/`/home`）；删除 `RemoteTools.Destination`，新增 `ToolFiles.Misc`（§32） |
 | v1.23.0 | 90624 | `a6f0ee9ef576f0fbd5de764447301067` | 连接被拒不再是假战果：核对 `os.connectedComp`，被拒目标整段跳过并如实报 0/0。`tracker="true"` 的机器断线即自动追踪（`deleteFile` 必留带玩家 IP 的 `FileDeleted` 行），故无条件强制清痕（§31） |
@@ -342,7 +343,7 @@ dotnet build src/SaveFix/SaveFix.csproj -c Release
 
 ## 调研资料
 
-- `docs/RESEARCH.md` — 完整调研：原生机制、API 精确签名、陷阱（§1–§32，每条结论带 `文件:行号`）
+- `docs/RESEARCH.md` — 完整调研：原生机制、API 精确签名、陷阱（§1–§34，每条结论带 `文件:行号`）
 - `docs/EXTENSIONS.md` — 游戏自带 `Extensions/` 官方样本的格式参考：节点 XML、占位符、行为系统、任务、阵营、主题
 - `docs/HACKERSCRIPTS.md` — 自替换占位符全表 + HackerScript 动词表，以游戏实现与官方样本为准，已标出 wiki 的错漏处
 

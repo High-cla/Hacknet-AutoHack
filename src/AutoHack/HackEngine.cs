@@ -494,7 +494,8 @@ internal static class HackEngine
     /// 既保证结果永不退化，又能越过原版 scan 的一跳极限。
     ///
     /// 展开出的新节点按原生 scan 的后效委托 <c>NetworkMap.discoverNode</c> 标为已发现
-    /// （NetworkMap.cs:415），不做自绘的「伪发现」。
+    /// （NetworkMap.cs:415），不做自绘的「伪发现」。入边展开与出边同等对待 ——
+    /// 同一张连通分量里的机器，不该因为边的方向而一半被扫、一半被漏。
     /// </summary>
     internal static Computer[] ReachableComputers(OS os)
     {
@@ -506,6 +507,13 @@ internal static class HackEngine
 
         var seen = new HashSet<int>();
         var frontier = new Queue<int>();
+
+        // links 是**有向**的：ComputerLoader.cs:344-356 的 <link> 与 :357-373 的 <dlink>
+        // 都只往自己的 links 里加边（dlink 仅延迟到 postAllLoadedActions 解析，方向不变），
+        // 而原生 scan 也只遍历 computer2.links（Programs.cs:1282）。于是「别的机器指向
+        // 已知机器」这批入边在正向展开里永远走不到，整片都不会进目标池。
+        // 先摊平入边，展开时双向走，按无向图取连通分量。
+        var incoming = BuildIncoming(map);
 
         // visibleNodes 是 List<int>，逐次 Contains 会退化成 O(V·E)；
         // 先摊平成哈希集，供展开循环做 O(1) 判「已发现」。
@@ -529,7 +537,8 @@ internal static class HackEngine
         var found = new List<Computer>();
         while (frontier.Count > 0)
         {
-            var comp = map.nodes[frontier.Dequeue()];
+            var index = frontier.Dequeue();
+            var comp = map.nodes[index];
             if (comp == null || comp.disabled)
             {
                 continue;
@@ -544,31 +553,8 @@ internal static class HackEngine
             // 必须在 links 展开之外单独补 —— 见 RevealAttachedDevices。
             RevealAttachedDevices(map, os, comp, seen, discovered, frontier);
 
-            if (comp.links == null)
-            {
-                continue;
-            }
-
-            foreach (var next in comp.links)
-            {
-                if (next < 0 || next >= map.nodes.Count || !seen.Add(next))
-                {
-                    continue;
-                }
-
-                var neighbor = map.nodes[next];
-                if (neighbor == null || neighbor.disabled)
-                {
-                    continue;
-                }
-
-                if (discovered.Add(next))
-                {
-                    map.discoverNode(neighbor);
-                }
-
-                frontier.Enqueue(next);
-            }
+            Expand(map, seen, discovered, frontier, comp.links);
+            Expand(map, seen, discovered, frontier, incoming[index]);
         }
 
         return found.ToArray();
@@ -580,6 +566,74 @@ internal static class HackEngine
         if (index >= 0 && index < map.nodes.Count && seen.Add(index))
         {
             frontier.Enqueue(index);
+        }
+    }
+
+    /// <summary>
+    /// 入边邻接表：<c>incoming[i]</c> = 所有 links 指向 i 的机器下标。
+    /// 一次 O(V+E) 扫描即建全 —— 正是正向展开看不见的那半张图。
+    /// </summary>
+    private static List<int>[] BuildIncoming(NetworkMap map)
+    {
+        var incoming = new List<int>[map.nodes.Count];
+        for (var i = 0; i < map.nodes.Count; i++)
+        {
+            var links = map.nodes[i] == null ? null : map.nodes[i].links;
+            if (links == null)
+            {
+                continue;
+            }
+
+            foreach (var target in links)
+            {
+                if (target < 0 || target >= map.nodes.Count)
+                {
+                    continue;
+                }
+
+                if (incoming[target] == null)
+                {
+                    incoming[target] = new List<int>();
+                }
+
+                incoming[target].Add(i);
+            }
+        }
+
+        return incoming;
+    }
+
+    /// <summary>
+    /// 把一批相邻下标并入 frontier，后效与原生 scan 一致：越界与已见忽略，
+    /// 新节点委托 <c>NetworkMap.discoverNode</c> 标为已发现（NetworkMap.cs:415）。
+    /// <paramref name="neighbors"/> 为 null 时无操作 —— 出边与入边都可能是空的。
+    /// </summary>
+    private static void Expand(NetworkMap map, HashSet<int> seen, HashSet<int> discovered, Queue<int> frontier, List<int> neighbors)
+    {
+        if (neighbors == null)
+        {
+            return;
+        }
+
+        foreach (var next in neighbors)
+        {
+            if (next < 0 || next >= map.nodes.Count || !seen.Add(next))
+            {
+                continue;
+            }
+
+            var neighbor = map.nodes[next];
+            if (neighbor == null || neighbor.disabled)
+            {
+                continue;
+            }
+
+            if (discovered.Add(next))
+            {
+                map.discoverNode(neighbor);
+            }
+
+            frontier.Enqueue(next);
         }
     }
 

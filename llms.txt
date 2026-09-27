@@ -3,7 +3,7 @@
 > Hacknet 的 BepInEx / Pathfinder 插件：用游戏自身的原生机制一键入侵全网，带控制面板与脚本驱动。
 > 本文件面向要理解或修改本仓库的编码 agent。规范见 https://llmstxt.org
 
-当前 v1.25.0。构建产物直投游戏插件目录，无需手动拷贝：
+当前 v1.26.0。构建产物直投游戏插件目录，无需手动拷贝：
 
 ```
 D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
@@ -21,7 +21,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    **绝不下载 Release 附件回来比对** —— 只读构建输出目录（即游戏插件目录）那份产物的 MD5。
 3. **`gh release create` 绝不自动执行** —— 等用户显式发令。`git push` 可以直接做。
 
-**二十一个最容易踩的坑**（都带行号，可直接 grep）
+**二十二个最容易踩的坑**（都带行号，可直接 grep）
 
 1. `Computer.portsOpen` 恒为 0 —— Pathfinder 用 Harmony Prefix 接管 `openPort`/`openPorts`
    并 `return false`，状态改存 `PortState.Cracked`。任何读 `portsOpen` 的判断都是错的，
@@ -142,13 +142,24 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     （`OS.cs:2003-2154`，静默空操作）；443 的入口解引用 `args.Length`（`SSLPortExe.cs:44`，传 null 必崩）；
     211 的 `Completed()` 开的是 21 而非 211（`FTPFastExe.cs:60`，开错端口）。
     数据必须一并传 —— `launchExecutable` 靠 data 反查 exe 类型（`OS.cs:2000`），只给名字匹配不上。
+
+22. **`Computer.links` 是**有向图**，只走出边会漏掉整片机器** —— `<link target=X>`
+    （`ComputerLoader.cs:344-356`）与 `<dlink target=X>`（`:357-373`）**都只往自己的 `links`
+    里加边**，`dlink` 的「d」是**延迟**解析（目标机可能后加载）而**不是双向**。原生
+    `Programs.scan`（`Programs.cs:1282`）与 `NetworkMap` 画线（`NetworkMap.cs:506-512`
+    ）也都只看 `computer2.links`。于是「**别的机器指向已发现机器**」这批入边永远走不到 ——
+    真实存档里「有入边、无出边」的机器占 **两成以上**（147 台里 32 台）。修法是**读取侧无向化**：
+    预建入边邻接表 `incoming[i]`，出边入边各展开一遍（`HackEngine.BuildIncoming` / `Expand`）。
+    **绝不往 `comp.links` 里补反向边** —— 那会写进存档的 `<links>`（`Computer.cs:926-930`），
+    污染玩家的网络图。附带警告：存档写到 **2000000 字节**即截断、XML 没收尾
+    （`RemoteSaveStorage.cs:31`），拿存档做图分析前先确认没被截断。
     独立印证：`docs/EXTENSIONS.md` §4.2 的官方占位符表与 `PortExploits.cracks` 差集恰好是
     `1, 8, 3659, 3724, 9418` —— 后三个正是无 case 的那三个，官方自己也没给它们占位符。
 
 ## 仓库文档
 
 - [README.md](README.md): 面向使用者的说明 —— 安装、面板与命令行用法（含七个独立工具）、脚本模式、架构、验证方式。**刻意保持精简**，设计决策与取证细节一律在 docs/RESEARCH.md
-- [docs/RESEARCH.md](docs/RESEARCH.md): 源码级取证与设计决策，§1–§33，每条结论都带 `文件:行号`。**细节的唯一归属地**（README 只留给人看的结论）
+- [docs/RESEARCH.md](docs/RESEARCH.md): 源码级取证与设计决策，§1–§34，每条结论都带 `文件:行号`。**细节的唯一归属地**（README 只留给人看的结论）
 - [docs/EXTENSIONS.md](docs/EXTENSIONS.md): 游戏自带 `Extensions/` 官方样本的格式参考 —— 节点 XML、占位符、行为系统、任务、阵营、主题
 - [docs/HACKERSCRIPTS.md](docs/HACKERSCRIPTS.md): 自替换占位符全表 + HackerScript 动词表（以游戏实现与官方样本为准，已标出 wiki 错漏处）
 - [llms.txt](llms.txt): 本文件

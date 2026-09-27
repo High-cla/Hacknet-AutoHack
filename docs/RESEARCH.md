@@ -2837,6 +2837,70 @@ internal int DragId => IdBase - 1;
 一律走原生节奏；要快档从命令行进。`IdBase + 13..15` 就此留空：
 **留空的 id 位无害，绝不复用给另一个控件**（一个 id 两个控件正是 §9 的 bug）。
 
+### 9.17 人物对话恒英文：Pathfinder 漏了 locale 路径（v1.28.0）
+
+**症状**：locale 为 `zh-cn` 时，IRC 频道对话、任务台词、开场剧情仍显示英文；
+界面其它文案（按钮、菜单）正常中文。
+
+**不是官方漏译**。按源文本计，502 个里有：
+
+| 语言 | 已译 |
+|---|---|
+| de-de | 376 |
+| **zh-cn** | **372** |
+| es-ar / ko-kr / ru-ru | 371 |
+| fr-be | 370 |
+| ja-jp | 356 |
+
+zh-cn 居中，不是短板。zh-cn 缺而别语言有的只有 4 个文件
+（`DLC/Missions/Injections/{Coel_Gateway,NaixSecretLinkServer,TheGibson}.xml`、
+`MemoryDumps/ExpandKeysInjection.xml`）。译文也确实是中文，例如
+`Content/Locales/zh-cn/DLC/ActionScripts/StartupActions.xml` 首句为
+`天啊，TorrentStreamInjector的动画太烦人了。`
+
+**根因是框架把译文读丢了**：
+
+| | 代码 | 本地化 |
+|---|---|---|
+| 原生 | `RunnableConditionalActions.cs:90` `File.OpenRead(LocalizedFileLoader.GetLocalizedFilepath(...))` | ✅ |
+| Pathfinder | `Pathfinder.Replacements/ActionsLoader.cs:20-41` 用 `[HarmonyPrefix]` 接管 `LoadIntoOS` 并 `return false`，`:27` 改成 `new EventExecutor(filepath.ContentFilePath(), isPath: true)` | ❌ |
+
+`ContentFilePath()`（`Pathfinder.Util/StringExtensions.cs:19-36`）只补 `"Content/"` 前缀或
+扩展目录，**不查 locale 路径**；`EventReader`（`Pathfinder.Util.XML/EventReader.cs:48-60`，
+`Text = isPath ? File.ReadAllText(text) : text`）直接读盘。于是
+`Content/Locales/zh-cn/DLC/ActionScripts/*.xml` 的已译中文永远读不到。
+
+**修法**：新增 `src/AutoHack/LocalizationFix.cs`，一条 `[HarmonyPostfix]` 挂在
+`StringExtensions.ContentFilePath` 的**出口**：
+
+```csharp
+if (!string.IsNullOrEmpty(__result) && Settings.ActiveLocale != "en-us")
+{
+    __result = LocalizedFileLoader.GetLocalizedFilepath(__result);
+}
+```
+
+两个落点决策：
+
+- **为何挂被调用方的出口而非 `LoadIntoOS` 的前缀**：Pathfinder 已用返回 `false` 的
+  Prefix 接管该方法，Harmony 遇首个 `return false` 即中止后续 Prefix 与原方法 ——
+  再挂同类 Prefix 只能二选一（Pathfinder 自定义 Action 加载失效，或本修复失效）。
+  挂在它调用的纯函数上，两者共存。
+- **为何一处覆盖全部**：`ContentFilePath` 的调用点只有
+  `ActionsLoader.cs:27`、`CachedCustomTheme.cs:60`/`:84`/`:104`、`SaveLoader.cs:620`、
+  `DebugCommands.cs:19` —— 一条 Postfix 全覆盖。
+
+**保真**：守卫 `Settings.ActiveLocale != "en-us"` 与原生 `Utils.cs:329` 一致。
+`GetLocalizedFilepath` 的语义是「本地化版本存在才替换，否则原样返回」，故 en-us
+与扩展模式（路径不含 `Content/`）行为逐字不变。
+
+**审计过、未动的点**：全项目 `File.ReadAllText` / `File.OpenRead` / `new StreamReader`
+共 42 处不过本地化，逐一核查后确认都是**原生自己也没本地化**的（`CrashModule.cs:71`
+的 BSOD/OSXBoot、`UsernameGenerator.cs:17`、`ThemeManager.cs:290`、存档 IO、
+`Hacknet.Misc/*Tests.cs` 等），且 `Content/Locales/zh-cn/` 下没有对应译文文件。
+
+**交付**：92672 B / `6e90e4413fae56f0264cf186578bc279`。
+
 ## 10. 工具与脚本模式
 
 四个工具都不进 `autohack run` 的自动入侵流程，只在显式调用时执行；命令与面板
@@ -3320,6 +3384,72 @@ v1.14.1 把玩家机清痕塞进了 `if (options.ClearLogs)`（目标清痕开�
 
 这与 v1.15.0 翻转 `useCredentials` 时的处理一致（`creds` / `nocreds` 两个方向
 都保留）。**翻转缺省必须同时保证两个方向都可表达**，否则等于删掉功能。
+
+### 10.22 autohack skip：跳过当前任务（v1.29.0）
+
+**原生本来就有「跳过任务」，只是被启动参数锁着**。两处 Force Complete 按钮：
+
+| 位置 | 代码 | 门禁 |
+|---|---|---|
+| 邮件界面 | `MailServer.cs:693-701` → `os.currentMission.finish()` | `Settings.forceCompleteEnabled` |
+| DHS 面板 | `DLCHubServer.cs:992-995` → `PlayerAttemptCompleteMission(mission, ForceComplete: true)` | 同上 |
+
+`Settings.forceCompleteEnabled` 缺省 `false`（`Settings.cs:23`），只有带 `-enablefc`
+启动且 `Settings.emergencyForceCompleteEnabled`（`:25`，缺省 true）时置真
+（`Program.cs:29-32`）。**该开关从未在 UI 上露出**，故绝大多数玩家没见过这两个按钮。
+
+**两条通道都要走，不能只调 `finish()`**。DLC 合同（Labyrinths 的 DHS 面板）额外持有
+一份 `DLCHubServer.ClaimableMission`（`DLCHubServer.cs:27-36`：`AgentClaim` / `IsComplete` /
+`Mission`），归档与重新序列化都归它管（`:534-543` `CompleteAndArchiveMissionSet`、
+`:443` `ReSerializeActiveMissions`）。只调 `finish()` 会让合同**继续挂在面板上**，
+玩家还能再接一次。
+
+`PlayerAttemptCompleteMission`（`:488-532`）的行为：
+
+```csharp
+ForceComplete = ForceComplete && Settings.forceCompleteEnabled;   // :490 二次门禁
+if (ForceComplete || os.currentMission.isComplete(MissionTextResponses))  // :498
+{
+    ActiveMission currentMission = os.currentMission;
+    os.currentMission = null;                                      // :501
+    if (currentMission.endFunctionName != null)                    // :502
+        MissionFunctions.runCommand(currentMission.endFunctionValue, currentMission.endFunctionName);
+    IRCSystem.AddLog("Channel", "CONTRACT COMPLETE: @<name> ...");  // :510
+    mission.IsComplete = true;
+    if (AutoClearMissionsOnSingleComplete) CompleteAndArchiveMissionSet(list);  // :521
+    os.saveGame();                                                  // :525
+    return true;
+}
+ActiveMissions = list; ReSerializeActiveMissions();                 // :528-529 未完成路径
+```
+
+**实现**（`src/AutoHack/MissionTools.cs`）：
+
+1. 有 `os.currentMission` 时，先在全图找托管它的 `DLCHubServer`
+   —— 按 `ReferenceEquals(c.Mission, mission)` 比对**对象同一性**，不是比标题
+   （标题可重复）。
+2. 命中 → 临时置 `Settings.forceCompleteEnabled = true` → 调原生
+   `PlayerAttemptCompleteMission(contract, ForceComplete: true)` → `finally` 还原。
+   调用的仍是原生方法本身，不复制它的实现，也不永久改动玩家设置。
+3. 未命中 → `mission.finish()`（邮件界面那条路）。
+4. 无主线任务时退到 `os.branchMissions[0].finish()` —— `finish()` 内部本就会
+   `OS.currentInstance.branchMissions.Clear()`（`ActiveMission.cs:244`），
+   故对任一支线调用一次即等于把支线整体收尾。
+
+`finish()`（`ActiveMission.cs:242-268`）自身的链路：清 `branchMissions` → 若
+`nextMission != "NONE"` 则 `ComputerLoader.loadMission("Content/Missions/" + nextMission)`
+并跑新任务的 `startFunction` → 有 `endFunctionName` 则 `MissionFunctions.runCommand`
+→ `saveGame()`。**这就是「完成任务并接下一个」的语义**。
+
+**只走命令行，不进面板**（用户定）。故 `ToolDispatch` 加常量 `Skip`、`Verbs` 数组、
+`Help` 行与 `Dispatch` 分支；`HackPanel.Tools` 表不动。这与面板高度常量完全解耦 ——
+`OptionsBlockHeight` / `ToolsBlockHeight` / `BodyHeight` 一字未改。
+
+**回显三种**：`skip: mission "<title>" completed.` /
+`skip: contract "<title>" completed.` / `skip: no mission is active.`。
+`title` 取 `postingTitle`，为空时报 `(unnamed)`。
+
+**交付**：94720 B / `2af54a059c6c0c302e4da1f0f20a0218`。
 
 ## 11. 相邻插件 HacknetSaveFix
 

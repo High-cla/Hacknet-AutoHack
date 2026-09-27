@@ -21,8 +21,9 @@ internal static class ToolDispatch
     internal const string Pull = "pull";
     internal const string Purge = "purge";
     internal const string Drop = "drop";
+    internal const string Skip = "skip";
 
-    private static readonly string[] Verbs = { Scan, Dec, Mem, Exes, Unbreakable, Pull, Purge, Drop };
+    private static readonly string[] Verbs = { Scan, Dec, Mem, Exes, Unbreakable, Pull, Purge, Drop, Skip };
 
     /// <summary>help 文本来源：子命令与其说明只写一次，命令入口与文档都读这里。</summary>
     internal static readonly (string Verb, string Help)[] Help =
@@ -35,6 +36,7 @@ internal static class ToolDispatch
         (Pull, "pull                  download every file in the current directory to local home"),
         (Purge, "purge                 delete every file in the current directory (shared with log wipe)"),
         (Drop, "drop                  disconnect and remove the connected node from the map"),
+        (Skip, "skip                  complete the active mission and take the next one"),
     };
 
     internal static bool Handles(string verb)
@@ -92,6 +94,10 @@ internal static class ToolDispatch
 
             case Drop:
                 RemoteTools.Drop(os);
+                break;
+
+            case Skip:
+                MissionTools.Run(os);
                 break;
         }
     }

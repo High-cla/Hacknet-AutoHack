@@ -35,6 +35,7 @@ autohack                                        # 开关控制面板
 autohack run [here] [delay=秒] [stay] [redo] [nologs] [nomark] [direct]   # 不开面板，直接执行
 autohack run script=stealth                     # 用脚本决定入侵次序（见下）
 autohack scan|dec|mem|exes|unbreakable [allnodes]  # 独立工具（见「工具」）
+autohack skip                                   # 完成当前任务并接下一个（含 DLC 合同）
 autohack pull|purge|drop                        # 对当前连接节点动手
 autohack -h                                     # 帮助
 ```
@@ -99,7 +100,7 @@ autohack -h                                     # 帮助
 > 差额是「可以直接敲 IP 连上、但不在连线上」的机器 —— `Programs.connect` 遍历的是
 > `netMap.nodes` 全表，本来就不检查 `links`。
 
-### 工具（v1.14.0 起；v1.14.1 / v1.14.2 修缺陷；v1.16.0 加三个远程动作；v1.18.0 删除通道归一；v1.27.0 加扫描）
+### 工具（v1.14.0 起；v1.14.1 / v1.14.2 修缺陷；v1.16.0 加三个远程动作；v1.18.0 删除通道归一；v1.27.0 加扫描；v1.29.0 加跳过任务）
 
 工具与入侵流程**完全独立** —— 不进 `autohack run` 的自动流程，命令与面板 TOOLS 区按钮走**同一份实现**。面板按钮**单击立即执行**，不弹二次确认（`UNBREAKABLE` / `PURGE FILES` / `DROP NODE` 用告警色 + 回显里的 `irreversible` 代替）。
 
@@ -113,8 +114,11 @@ autohack -h                                     # 帮助
 | `autohack pull` | 把**当前目录**下全部文件下载到本机 `/home/misc`（**一个夹**，不分流） |
 | `autohack purge` | 删除**当前目录**下全部文件（同游戏 `rm`；与清痕**同一实现**；**只删文件，不删文件夹**） |
 | `autohack drop` | 断开并把当前连接的节点从网络图上摘掉 |
+| `autohack skip` | **跳过当前任务**：完成它并接下一个（走游戏自己的 Force Complete 通道，含 DLC 合同） |
 
-`allnodes` 只对 `dec` / `mem` 有意义（缺省只作用于当前连接节点，与 `run` 口径一致）；`exes` 与 `unbreakable` 天然只针对玩家自己；`scan` 不看这个开关（它本就只扫当前节点那片连通分量，`allnodes` 的语义是「跳过连线直接连全表」，属 `run` 的目标口径）。
+`allnodes` 只对 `dec` / `mem` 有意义（缺省只作用于当前连接节点，与 `run` 口径一致）；`exes` 与 `unbreakable` 天然只针对玩家自己；`scan` 不看这个开关（它本就只扫当前节点那片连通分量，`allnodes` 的语义是「跳过连线直接连全表」，属 `run` 的目标口径）；`skip` 同理不看（它与网络无关）。
+
+`skip` 是唯一**不属于入侵**的工具：它只推进任务流程，不碰任何机器。游戏原生本就有「Force Complete」，但门禁是 `Settings.forceCompleteEnabled`，缺省关且只有带 `-enablefc` 启动才开 —— 没有任何 UI 能开它。`skip` 走的就是那两个按钮的原生方法，**只走命令行，不进面板**（用户定）。
 
 **两个远程动作都不碰文件夹**：`pull` 全部落到 `/home/misc` —— 这个夹**游戏自己就建**（`OS.cs:386-388` 给玩家机建 home 时一并加了 `stash` 与 `misc`，存档里也持久化），mod 只兜底；`purge` 只清文件，**不删文件夹**。原因是游戏自身**没有任何删除文件夹的入口**（`Programs` 里没有 rmdir，官方 Action 也只有 `<DeleteFile>`），mod 一旦建出文件夹，玩家就永远清不掉。`purge` 的回显会把「还剩几个子文件夹」一并报出，免得对着一个空夹反复试。
 
@@ -232,9 +236,9 @@ src/AutoHack/
 | 项 | 值 |
 |---|---|
 | 产物路径 | `D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll` |
-| 当前版本 | v1.27.0 |
-| 字节数 | 92672 |
-| MD5 | `88b0b63c6891198161aefc127fa8dc67` |
+| 当前版本 | v1.29.0 |
+| 字节数 | 94720 |
+| MD5 | `2af54a059c6c0c302e4da1f0f20a0218` |
 
 核对流程：清理 `obj`/`bin` → 构建（须 0 警告 0 错误）→ 记 `md5sum` 与字节数，
 与上一版比对。构建成功即证明源码已编入（增量缓存已清，漏编会报错）；

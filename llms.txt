@@ -3,7 +3,7 @@
 > Hacknet 的 BepInEx / Pathfinder 插件：用游戏自身的原生机制一键入侵全网，带控制面板与脚本驱动。
 > 本文件面向要理解或修改本仓库的编码 agent。规范见 https://llmstxt.org
 
-当前 v1.27.0。构建产物直投游戏插件目录，无需手动拷贝：
+当前 v1.29.0。构建产物直投游戏插件目录，无需手动拷贝：
 
 ```
 D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
@@ -21,7 +21,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    **绝不下载 Release 附件回来比对** —— 只读构建输出目录（即游戏插件目录）那份产物的 MD5。
 3. **`gh release create` 绝不自动执行** —— 等用户显式发令。`git push` 可以直接做。
 
-**二十二个最容易踩的坑**（都带行号，可直接 grep）
+**二十四条最容易踩的坑 / 最该知道的机制**（都带行号，可直接 grep）
 
 1. `Computer.portsOpen` 恒为 0 —— Pathfinder 用 Harmony Prefix 接管 `openPort`/`openPorts`
    并 `return false`，状态改存 `PortState.Cracked`。任何读 `portsOpen` 的判断都是错的，
@@ -165,9 +165,33 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     与 `PortExploits.cracks` 差集恰好是 `1, 8, 3659, 3724, 9418` ——
     后三个正是 `launchExecutable` 的 switch 里无 case 的那三个（见坑 21）。
 
+23. **Pathfinder 漏了 locale 路径，人物对话恒英文** —— 原生
+    `RunnableConditionalActions.cs:90` 读的是 `LocalizedFileLoader.GetLocalizedFilepath(...)`，
+    而 Pathfinder 用 `[HarmonyPrefix]` 接管了 `LoadIntoOS` 并 `return false`
+    （`Pathfinder.Replacements/ActionsLoader.cs:20-41`），改走
+    `filepath.ContentFilePath()`（`:27`）—— 后者（`Pathfinder.Util/StringExtensions.cs:19-36`）
+    只补 `Content/` 前缀，**不查 locale**，`EventReader`（`Pathfinder.Util.XML/EventReader.cs:50`）
+    直接 `File.ReadAllText`。于是 `Content/Locales/<locale>/...` 的译文永远读不到。
+    **不是官方漏译**：zh-cn 译了 372/502，与 de-de(376) 持平，高于 ja-jp(356)。
+    修法是给 `ContentFilePath` 挂 `[HarmonyPostfix]` 补一次
+    `GetLocalizedFilepath`（带 `Settings.ActiveLocale != "en-us"` 守卫，对齐原生 `Utils.cs:329`）。
+    **不能挂 `LoadIntoOS` 的前缀** —— Pathfinder 已占该位置，Harmony 遇首个 `return false`
+    即中止后续，两者只能活一个。
+
+24. **「跳过任务」原生就有，只是被启动参数锁着** —— 邮件界面
+    `MailServer.cs:693-701` 与 DHS 面板 `DLCHubServer.cs:992-995` 各有一个 Force Complete
+    按钮，门禁都是 `Settings.forceCompleteEnabled`（`Settings.cs:23`，缺省 false），
+    只有带 `-enablefc` 启动才置真（`Program.cs:29-32`）。**DLC 合同必须走
+    `DLCHubServer.PlayerAttemptCompleteMission` 而不是 `ActiveMission.finish()`** ——
+    合同另有一份 `ClaimableMission`（`DLCHubServer.cs:27-36`）管归档与序列化，
+    只调 `finish()` 会让它继续挂在面板上，玩家还能再接一次。匹配托管者要按
+    `ReferenceEquals(c.Mission, mission)` 比**对象同一性**，标题可重复。故
+    `MissionTools.Run` 临时置真该开关、调原生方法、`finally` 还原 ——
+    不复制实现，也不永久改玩家设置。
+
 ## 仓库文档
 
-- [README.md](README.md): 面向使用者的说明 —— 安装、面板与命令行用法（含八个独立工具）、脚本模式、架构、验证方式。**刻意保持精简**，设计决策与取证细节一律在 docs/RESEARCH.md
+- [README.md](README.md): 面向使用者的说明 —— 安装、面板与命令行用法（含九个独立工具）、脚本模式、架构、验证方式。**刻意保持精简**，设计决策与取证细节一律在 docs/RESEARCH.md
 - [docs/RESEARCH.md](docs/RESEARCH.md): 源码级取证与设计决策，§1–§11，**按主题**组织（不是按版本），每条结论都带 `文件:行号`。**细节的唯一归属地**（README 只留给人看的结论）
 - [docs/EXTENSIONS.md](docs/EXTENSIONS.md): 游戏自带 `Extensions/` 官方样本的格式参考 —— 节点 XML、占位符、行为系统、任务、阵营、主题
 - [docs/HACKERSCRIPTS.md](docs/HACKERSCRIPTS.md): 自替换占位符全表 + HackerScript 动词表（以游戏实现与官方样本为准，已标出 wiki 错漏处）

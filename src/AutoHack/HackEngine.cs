@@ -148,6 +148,19 @@ internal static class HackEngine
         => comp != null && Ports(comp).Count > comp.portsNeededForCrack;
 
     /// <summary>
+    /// 是否是 EOS 设备（<see cref="Computer.EOS"/> = 5，Computer.cs:21）。
+    ///
+    /// EOS 设备在端口上是个死局：<c>portsNeededForCrack = 2</c> 而端口表恰好也只有
+    /// 2 个（22 + 3659，ContentLoader.cs:825/:828），而 porthack 的门禁是<b>严格大于</b>
+    /// （<c>OpenPortCount &gt; portsNeededForCrack</c>，OS.cs:1896-1942）——
+    /// 2 &gt; 2 恒假，破满端口也提不了权。<b>这是游戏刻意的</b>：EOS 从来不是靠破端口进的，
+    /// 而是靠全系统一的固定密码（见 <see cref="TryLogin"/> 与游戏自带的
+    /// Content/Post/eosScannerMail.txt:7-9）。
+    /// </summary>
+    internal static bool IsEosDevice(Computer comp)
+        => comp != null && comp.type == Computer.EOS;
+
+    /// <summary>
     /// 用已知账号登录目标机 —— 走游戏自身的 <c>Computer.login</c>（Computer.cs:849-865）。
     ///
     /// 这不是「绕过」，是更原生的路径：<c>login</c> 在用户名为 admin 且密码匹配时
@@ -446,7 +459,14 @@ internal static class HackEngine
                 // 提权门槛高于端口表容量的机器靠破端口永远打不通，全网扫描剔除
                 // —— 除非能直接用已知凭据登入（那条路不看端口数）。
                 // 显式点名时仍尊重玩家选择。
-                if (!CanEverEscalate(comp) && !(options.UseCredentials && HasAnyCredential(comp)))
+                //
+                // EOS 设备是这个判据的例外：它的端口容量天生等于门槛（2 = 2），
+                // 破端口永远出不来，但 adminPass 是公开固定的 "alpine"，
+                // 用凭据一定能进。故对 type=5 放行 login 路径，与 UseCredentials
+                // 开关解耦 —— 那个开关对普通机器是「架空玩法」，对 EOS 却是
+                // 游戏设计的正路（见 IsEosDevice）。
+                var canLogin = HasAnyCredential(comp) && (options.UseCredentials || IsEosDevice(comp));
+                if (!CanEverEscalate(comp) && !canLogin)
                 {
                     skippedHopeless++;
                     skipped.Add(comp);
@@ -520,6 +540,10 @@ internal static class HackEngine
                 found.Add(comp);
             }
 
+            // EOS 设备挂在父机的 attatchedDeviceIDs 上，links 里没有反向边，
+            // 必须在 links 展开之外单独补 —— 见 RevealAttachedDevices。
+            RevealAttachedDevices(map, os, comp, seen, discovered, frontier);
+
             if (comp.links == null)
             {
                 continue;
@@ -555,6 +579,56 @@ internal static class HackEngine
     {
         if (index >= 0 && index < map.nodes.Count && seen.Add(index))
         {
+            frontier.Enqueue(index);
+        }
+    }
+
+    /// <summary>
+    /// 把一台机器上「已同步的 EOS 设备」补进网络图 —— 等价于原版
+    /// <c>eosDeviceScan.exe</c> 的 <c>Completed()</c>（EOSDeviceScannerExe.cs:82-124）
+    /// 干的事，但免跑 exe、免 8 秒计时、免 <c>hasConnectionPermission</c> 门禁
+    /// （那个门禁在 <c>connectedComp.currentUser</c> 为 null 时会 NRE，OS.cs:1848）。
+    ///
+    /// 为什么必须补：EOS 设备的 <c>links</c> 是「设备 → 父机」单向
+    /// （ContentLoader.cs:975-982），父机的 links 里根本没有它 ——
+    /// 故沿 links 展开的 BFS 从父机永远走不到设备，设备进不了扫描池。
+    ///
+    /// 设备清单来自父机的 <c>attatchedDeviceIDs</c>（逗号分隔的 idName，
+    /// 且会随存档持久化，Computer.cs:915/:1531），按 <c>Programs.getComputer</c>
+    /// 三字段查找还原成 <see cref="Computer"/>（Programs.cs:1570-1580）。
+    /// 发现的设备一律走原生 <c>NetworkMap.discoverNode</c>（NetworkMap.cs:415-423），
+    /// 与游戏自身的「已发现」标记同源，不做自绘的伪发现。
+    /// </summary>
+    private static void RevealAttachedDevices(
+        NetworkMap map, OS os, Computer comp, HashSet<int> seen, HashSet<int> discovered, Queue<int> frontier)
+    {
+        var ids = comp?.attatchedDeviceIDs;
+        if (string.IsNullOrEmpty(ids))
+        {
+            return;
+        }
+
+        foreach (var id in ids.Split(Utils.commaDelim, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var device = Programs.getComputer(os, id);
+            if (device == null || device.disabled)
+            {
+                continue;
+            }
+
+            var index = map.nodes.IndexOf(device);
+            if (index < 0 || !seen.Add(index))
+            {
+                continue;
+            }
+
+            // 已在 visibleNodes 里的设备不重复 discoverNode（避免多余的高亮闪烁），
+            // 但仍要入队 —— 它同样需要沿自己的 links 继续展开。
+            if (discovered.Add(index))
+            {
+                map.discoverNode(device);
+            }
+
             frontier.Enqueue(index);
         }
     }

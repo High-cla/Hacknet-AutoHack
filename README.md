@@ -229,9 +229,9 @@ src/AutoHack/
 | 项 | 值 |
 |---|---|
 | 产物路径 | `D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll` |
-| 当前版本 | v1.21.0 |
-| 字节数 | 89088 |
-| MD5 | `7deb395a07a4b0a924220ba8682ea75e` |
+| 当前版本 | v1.22.0 |
+| 字节数 | 89600 |
+| MD5 | `0c3d23467926cdb469c088b8e4ee1ae3` |
 
 核对流程：清理 `obj`/`bin` → 构建（须 0 警告 0 错误）→ 记 `md5sum` 与字节数，
 与上一版比对。构建成功即证明源码已编入（增量缓存已清，漏编会报错）；
@@ -241,6 +241,7 @@ MD5 只用于确认部署确实是新的那个产物。
 
 | 版本 | 字节数 | MD5 | 要点 |
 |---|---|---|---|
+| v1.22.0 | 89600 | `0c3d23467926cdb469c088b8e4ee1ae3` | EOS 设备：端口容量天生等于门槛（2 = 2）故永不提权 —— 那是游戏刻意的，正路是全系统一的固定密码 `alpine`。新增 `RevealAttachedDevices` 免跑 exe 补发现（原版 `eosDeviceScan.exe` 等价物），EOS 放行 login 路径（§30） |
 | v1.21.0 | 89088 | `7deb395a07a4b0a924220ba8682ea75e` | 修面板控件 ID 冲突：`DragId` 硬编码 7099 撞上 PURGE 按钮（`IdBase+30+5`），点击被拖动逻辑吃掉；`DragId` 改为从 `IdBase` 派生（§29） |
 | v1.20.0 | 89088 | `3a5f848d9b108d743d199112ef644fa0` | `pull` 绝不新建文件夹；`purge` 只删文件并如实报出子夹数；目录回显改全路径；`RemoveFiles` 补兜异常（§28） |
 | v1.19.0 | 88064 | `291e23446587d0e4682266f5db5e565e` | 异常护栏下沉到 `ToolDispatch`（命令入口此前裸奔、失败静默）；工具目标口径抽 `ToolTargets`；端口表一次快照（§27） |
@@ -335,7 +336,7 @@ dotnet build src/SaveFix/SaveFix.csproj -c Release
 
 ## 调研资料
 
-- `docs/RESEARCH.md` — 完整调研：原生机制、API 精确签名、陷阱（§1–§29，每条结论带 `文件:行号`）
+- `docs/RESEARCH.md` — 完整调研：原生机制、API 精确签名、陷阱（§1–§30，每条结论带 `文件:行号`）
 - `docs/EXTENSIONS.md` — 游戏自带 `Extensions/` 官方样本的格式参考：节点 XML、占位符、行为系统、任务、阵营、主题
 - `docs/HACKERSCRIPTS.md` — 自替换占位符全表 + HackerScript 动词表，以游戏实现与官方样本为准，已标出 wiki 的错漏处
 

@@ -3222,3 +3222,151 @@ internal int DragId => IdBase - 1;
 `local machine - not connected` / `folders are never removed` / `has no file` /
 `still there (unexpected)` / `file(s) removed from` 均命中，`already empty`（旧文案）未命中，
 `1.20.0` 未命中、`1.21.0` 命中。旧常量 7099 已从 IL 中消失。
+
+---
+
+## §30 v1.22.0：EOS 设备 —— 端口死局与发现通道
+
+### 30.1 症状与结论
+
+两个 bug：「没有进行 eos 扫描」「eos 设备也无法破解」。
+**同一个根因的两面**：EOS 设备根本不是靠破端口进的，mod 却拿「端口容量」当唯一准入判据。
+
+### 30.2 EOS 是 Labyrinths DLC 的电脑类型
+
+`Computer.EOS = 5`（`Computer.cs:21`）。对照：**type=4 是玩家机**
+（`OS.cs:382` `new Computer(username + " PC", ..., 5, 4, this)`），type=5 才是 EOS。
+
+`generateRandomFileSystem`（`Computer.cs:143-198`）对 type 分流：`if (type != 5 && type != 4)`
+才生成随机文件夹；`else if (type == 5)` → `fileSystem.root.folders.Insert(0, EOSComp.GenerateEOSFolder())`
+（`:193-196`）。故 EOS 根目录只有 `eos/`（外加 FileSystem ctor 自建的 home/log/bin/sys）。
+
+`type` 双向持久化：写出 `Computer.cs:917`（`type="..."`），读回 `Pathfinder SaveLoader.cs:312`
+`info.Attributes.GetByte("type", 0)` ⇒ **重启游戏后判定仍成立**。
+
+### 30.3 构造：Pathfinder 已完整接管
+
+`ContentLoader.cs:806-845` 的 `Computer.eosDevice` executor（原生 `EOSComp.AddEOSComp` 已被替换）：
+
+| 行 | 内容 |
+|---|---|
+| :820 | `new Computer(..., 0, (byte)5, os)` — **type = 5，seclevel = 0** |
+| :825 | `portsNeededForCrack = 2` |
+| :828 | `PortManager.LoadPortsFromStringVanilla(eos, "22,3659")` — 端口表**恰好 2 个** |
+| :829 | `setAdminPassword(GetString("passOverride", "alpine"))` |
+| :975-982 | `item2.links.Add(item)` — **EOS → 父机 单向**，父机 `links` 里没有 EOS |
+| :838-844 | 父机 `comp.attatchedDeviceIDs` 追加 `"," + eos.idName` |
+
+`attatchedDeviceIDs` 同样持久化：`Computer.cs:915` 写 `devices="..."`、`:1531` 读回。
+
+### 30.4 端口死局
+
+porthack 门禁是**严格大于**：`if (num2 > connectedComp.portsNeededForCrack) flag = true`
+（`OS.cs:1896-1942`；Pathfinder 用 `FixPortHack` IL 改写（`ComputerExtensions.cs:486-513`）
+把它读的口径从原生 `portsOpen` 换成 `CountOpenPorts`，与框架端口表一致）。
+
+EOS：`portsNeededForCrack = 2`，端口表 2 个（22 有 `SSHcrack.exe`、3659 有 `confloodEOS.exe`，
+`PortExploits.cs:54/:103`）⇒ 破满也只有 `2 > 2 = false`。
+
+**这是游戏刻意的。**
+
+### 30.5 游戏的设计意图：全系统一的固定密码
+
+游戏自带邮件 `Content/Post/eosScannerMail.txt:7-9`：
+
+> because eos users dont get access to the terminal on their own device, **all the admin passwords are the same** (!) - across the entire product range!
+> It's **"alpine"**
+
+对应 `ContentLoader.cs:829`。`Computer.login` 的 admin 分支不看 users 表，直接 `giveAdmin`
+（`Computer.cs:849-865`）⇒ `login("admin", "alpine")` 必然提权。
+
+### 30.6 mod 侧的两个 bug
+
+**Bug 1「eos 设备无法破解」** —— 端口容量判据把它判死：
+
+- `HackEngine.cs:147-148` `CanEverEscalate = Ports(comp).Count > comp.portsNeededForCrack` → `2 > 2` = false
+- `HackEngine.cs:133-136` `CanEscalate` 同样 false
+- ⇒ `HackEngine.cs:449` 的 hopeless 剔除生效，全网扫描直接把 EOS 扔掉
+
+**唯一活路**在 `HackEngine.cs:222`（`comp.adminPass != null && comp.login("admin", comp.adminPass) == 1`）
+—— EOS 的 `adminPass` 就是 `"alpine"`。但 `HackPanel.cs:87` `UseCredentials = false` **缺省关**。
+
+> 附带事实：`HasAnyCredential`（`HackEngine.cs:170-191`）对**所有**机器恒真 —— `adminPass` 在
+> `Computer` ctor 里就被赋 `PortExploits.getRandomPassword()`（`Computer.cs:109-129`），永远非 null。
+> 故 `:449` 真正起作用的门是 `options.UseCredentials` 那半个 `&&`。
+
+**Bug 2「没有进行 eos 扫描」** —— 双向都断：
+
+1. mod 零 EOS 代码（`grep -i eos src/AutoHack` → no matches），从不启动 `eosDeviceScan.exe`，
+   也不读 `attatchedDeviceIDs`。
+2. 即便玩家手动扫过，`ReachableComputers`（`HackEngine.cs:479-551`）的 BFS 沿 `comp.links`
+   **出边**展开 —— EOS 的 link 指向父机，**父机的 links 里没有 EOS**，从父机走不到它。
+
+### 30.7 修法 B + A（用户选定）
+
+**B：让 EOS 被自动发现** —— 新增 `HackEngine.RevealAttachedDevices`，在 `ReachableComputers`
+的 BFS 展开处对每个已访问机器调用。
+
+等价于原版 `eosDeviceScan.exe` 的 `Completed()`（`EOSDeviceScannerExe.cs:82-124`），但**免跑 exe、
+免 8 秒计时、免 `hasConnectionPermission` 门禁** —— 那个门禁在 `connectedComp.currentUser` 为 null 时
+**会 NRE**（`OS.cs:1848` 无判空）。
+
+```csharp
+var ids = comp?.attatchedDeviceIDs;
+if (string.IsNullOrEmpty(ids)) return;
+foreach (var id in ids.Split(Utils.commaDelim, StringSplitOptions.RemoveEmptyEntries))
+{
+    var device = Programs.getComputer(os, id);              // Programs.cs:1570-1580
+    ...
+    if (discovered.Add(index)) map.discoverNode(device);    // NetworkMap.cs:415-423
+    frontier.Enqueue(index);
+}
+```
+
+`Utils.commaDelim = { " ,", ", ", "," }`（`Utils.cs:69`）；`attatchedDeviceIDs` 存的是 `idName`，
+`Programs.getComputer` 三字段匹配 ip/idName/name 能命中。
+
+**线程约束（必须遵守）**：`discoverNode` 改写 `netMap.visibleNodes`，而游戏线程每帧读它
+（`HubServerAlertsIcon` 等）。`HackRun` 构造函数**全程在游戏线程** —— `PendingRuns.cs:51-57`
+（延迟到 `OS.Update` 才构造）与 `HackOverlay.cs:171`（面板按钮本就在游戏线程）。
+故放在 `ResolveTargets` → `ReachableComputers` 内是安全的。
+
+**A1：EOS 不被判 hopeless**（`HackEngine.cs:449`）：
+
+```csharp
+var canLogin = HasAnyCredential(comp) && (options.UseCredentials || IsEosDevice(comp));
+if (!CanEverEscalate(comp) && !canLogin) { skippedHopeless++; ... }
+```
+
+**A2：EOS 无条件排 Login 步**（`HackRun.cs:528`）：
+
+```csharp
+if (options.UseCredentials || HackEngine.IsEosDevice(target)) { steps.Add(new HackStep(HackStepKind.Login, ...)); }
+```
+
+**为什么必须成对**：A1 只让它进 `_targets`，但 `BuildSteps` 不给它生成 `Login` 步，它就会被生成
+`OpenPort×2 → Escalate`；`Escalate` 里 `CanEscalate` 为 false ⇒ `giveAdmin` 不执行 ⇒ 白跑一趟，
+最后 `Finish` 写 `2/2 ports, admin=no`。**这正是「无法破解」的表象。**
+
+新增 `HackEngine.IsEosDevice(Computer)` = `comp.type == Computer.EOS`（用常量，不用字面量 5）。
+
+**修完的链路**（零新执行代码，全走既有路径）：
+
+```
+A1 → EOS 不再被判 hopeless，进入 _targets
+A2 → 生成 Login 步
+Apply Login → TryLogin → login("admin","alpine") == 1 → giveAdmin
+  → _loggedIn.Add(target) → IsRedundantAfterLogin 跳过 OpenPort/SolveFirewall/Escalate
+  → "[autohack] <name> :: admin via login (admin:alpine) - skipping port cracks"
+```
+
+**修法 C 未采用**：给 BFS 补 `attatchedDeviceIDs` 反向边。B 已把 EOS 推进 `visibleNodes`，
+而 `visibleNodes` 正是 BFS 种子（`HackEngine.cs:495-502`），故 C 冗余。
+
+**副作用**：普通机器行为一字不变（`UseCredentials` 仍是它们的门）。唯一偏离设计处：免了原版
+「先拿到目标机 admin 才能扫」的前置（邮件第 4 行 `needs admin access on the target machine`）
+—— 这是便利性取舍，记在此处备查。
+
+### 30.8 交付
+
+89600 B / `0c3d23467926cdb469c088b8e4ee1ae3`。构建 0 警告 0 错误。

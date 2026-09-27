@@ -3,7 +3,7 @@
 > Hacknet 的 BepInEx / Pathfinder 插件：用游戏自身的原生机制一键入侵全网，带控制面板与脚本驱动。
 > 本文件面向要理解或修改本仓库的编码 agent。规范见 https://llmstxt.org
 
-当前 v1.21.0。构建产物直投游戏插件目录，无需手动拷贝：
+当前 v1.22.0。构建产物直投游戏插件目录，无需手动拷贝：
 
 ```
 D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
@@ -20,7 +20,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    MD5 只回答「部署是否新鲜」。副产品判据：改源码 MD5 必变，只改注释/文档 MD5 不变（注释不进 IL）。
 3. **`gh release create` 绝不自动执行** —— 等用户显式发令。`git push` 可以直接做。
 
-**十七个最容易踩的坑**（都带行号，可直接 grep）
+**十八个最容易踩的坑**（都带行号，可直接 grep）
 
 1. `Computer.portsOpen` 恒为 0 —— Pathfinder 用 Harmony Prefix 接管 `openPort`/`openPorts`
    并 `return false`，状态改存 `PortState.Cracked`。任何读 `portsOpen` 的判断都是错的，
@@ -108,10 +108,22 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     `Drag` 在 `Chrome` 之后、`DrawTools` **之前**跑（`HackPanel.cs:211` vs `:262`），
     而 `Track` 只在 `GuiData.active == -1` 时抢占 —— 这是二者能互相顶掉的前提。
 
+18. **EOS 设备（`Computer.EOS` = 5）在端口上是死局，别拿它当普通机器** —— 它的
+    `portsNeededForCrack = 2` 而端口表恰好也只有 2 个（22 + 3659，`ContentLoader.cs:825/:828`），
+    而 porthack 门禁是**严格大于**（`OpenPortCount > portsNeededForCrack`）⇒ `2 > 2` 恒假。
+    **这是游戏刻意的**：EOS 靠全系统一的固定密码 `alpine` 进（`ContentLoader.cs:829` + 游戏邮件
+    `Content/Post/eosScannerMail.txt:7-9`），`Computer.login` 的 admin 分支直接 `giveAdmin`。
+    故 `CanEverEscalate` 判死它是对的，但**必须放行 login 路径**（`IsEosDevice` 豁免），
+    否则全网扫描把它当 hopeless 剔除 = 「EOS 无法破解」。
+    另一半是发现：EOS 的 `links` 是**设备 → 父机单向**（`ContentLoader.cs:975-982`），
+    父机 `links` 里没有它，沿 links 展开的 BFS **永远走不到** —— 必须从父机的
+    `attatchedDeviceIDs` 反向补（`RevealAttachedDevices`），否则 = 「没有进行 eos 扫描」。
+    注意 `discoverNode` 改写 `visibleNodes`，**只能在游戏线程调**（见 `PendingRuns.cs:28-36`）。
+
 ## 仓库文档
 
 - [README.md](README.md): 面向使用者的说明 —— 安装、面板与命令行用法（含七个独立工具）、脚本模式、架构、验证方式。**刻意保持精简**，设计决策与取证细节一律在 docs/RESEARCH.md
-- [docs/RESEARCH.md](docs/RESEARCH.md): 源码级取证与设计决策，§1–§29，每条结论都带 `文件:行号`。**细节的唯一归属地**（README 只留给人看的结论）
+- [docs/RESEARCH.md](docs/RESEARCH.md): 源码级取证与设计决策，§1–§30，每条结论都带 `文件:行号`。**细节的唯一归属地**（README 只留给人看的结论）
 - [docs/EXTENSIONS.md](docs/EXTENSIONS.md): 游戏自带 `Extensions/` 官方样本的格式参考 —— 节点 XML、占位符、行为系统、任务、阵营、主题
 - [docs/HACKERSCRIPTS.md](docs/HACKERSCRIPTS.md): 自替换占位符全表 + HackerScript 动词表（以游戏实现与官方样本为准，已标出 wiki 错漏处）
 - [llms.txt](llms.txt): 本文件

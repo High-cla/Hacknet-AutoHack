@@ -522,7 +522,10 @@ internal sealed class HackRun
 
             // 已知凭据登录排在最前：成功即提权，后面整段破端口动作都不必跑。
             // 放在 probe 之后是为了让终端先有原生端口报告，再看到 login。
-            if (options.UseCredentials)
+            //
+            // EOS 设备无条件排这一步：它的端口容量等于提权门槛，破端口是死路，
+            // 固定密码 "alpine" 才是游戏设计的正路（见 HackEngine.IsEosDevice）。
+            if (options.UseCredentials || HackEngine.IsEosDevice(target))
             {
                 steps.Add(new HackStep(HackStepKind.Login, target, default, null));
             }

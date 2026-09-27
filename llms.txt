@@ -3,7 +3,7 @@
 > Hacknet 的 BepInEx / Pathfinder 插件：用游戏自身的原生机制一键入侵全网，带控制面板与脚本驱动。
 > 本文件面向要理解或修改本仓库的编码 agent。规范见 https://llmstxt.org
 
-当前 v1.31.0。构建产物直投游戏插件目录，无需手动拷贝：
+当前 v1.32.0。构建产物直投游戏插件目录，无需手动拷贝：
 
 ```
 D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
@@ -198,13 +198,17 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     是 `RemoveAt` **移除**（`OS.cs:825-830`），不是暂停；② 它的复发源是目标 `/log`
     （`CompShouldStartTrackerFromLogs`，`TrackerCompleteSequence.cs:30-47`），
     **只清计时不清日志 = 下次断开原地复活**。
-26. **工具动词此前区分大小写，而 `run` 与游戏都不区分** —— `ToolDispatch.Handles`
-    曾直接 `Array.IndexOf(Verbs, verb)`，于是 `autohack SKIP` 不被认作工具、
-    一路掉到「开关面板」分支，玩家看到面板开关而任务没跳过，症状是「敲了没效果」。
-    游戏自己大量写 `array[0].ToLower().Equals("connect")`（`ProgramRunner.cs:15/46/55`），
-    玩家天然预期终端不区分大小写；中文输入法下敲英文大小写随机，尤其容易踩。
-    修法：`ToolDispatch.Canonical(verb)` 归一后 **`Handles` 与 `Dispatch` 必须用同一个值**
-    —— 只改一处会让命令静默什么都不做。
+26. **命令动词在 `args[1]`，不在 `args[0]`**（v1.32.0 修，此前从 1.7.0 起全错）。
+    Pathfinder 的 `CommandManager.OnCommandExecute`（`:42`）拿**注册名**去比
+    `args.Args[0]`，故 `[Command("autohack")]` 的处理函数收到的恒为
+    `{"autohack", <动词>, …}`。游戏侧同此：`os.display.command = args[0]`
+    （`Programs.cs:269`）、目标取 `args[1]`（`:278-281`）。
+    `AutoHackPlugin` 曾每一处都读 `args[0]` ⇒ 恒为 `"autohack"` ⇒ 一律掉进
+    「开关面板」分支：不止 `skip`，`run` / `allnodes` / `script=` / 全部工具
+    **从未生效过**。裸命令（`verb == null`）仍按原设计开面板。
+    同名误诊：v1.31.0 曾归因于「动词区分大小写」——大小写是另一个真问题
+    （`Canonical` 归一时 **`Handles` 与 `Dispatch` 必须用同一个值**），
+    两者叠成了同一个症状「全都开面板」。详见 RESEARCH §6.7b。
 27. **`CrashModule.BOOT_TIME` 是 static 字段，值在静态初始化器里固化**
     （`CrashModule.cs:15`）—— 之后再改 `Settings.FastBootText` **无效**（且该设置根本不落
     `Settings.txt`），只能覆写字段本身。`bootTextDelay` 是实例字段、只在 `LoadContent()`

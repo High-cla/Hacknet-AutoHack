@@ -46,6 +46,16 @@ internal sealed record HackOptions(
     HackSpeed Speed,
     string Script)
 {
+    /// <summary>
+    /// 本轮收尾时是否清除两套追踪（<see cref="Disconnect"/> 为真即要）。
+    ///
+    /// 特意做成派生属性而不是新加一个 record 参数：它和 <see cref="Disconnect"/>
+    /// 是同一个决定的两面 —— 谁都不该出现「断开但不反追踪」或「反追踪但不断开」的
+    /// 组合，做成两个可独立赋值的字段就等于允许那个组合存在。面板那边同理，
+    /// 见 HackPanelState.Disconnect（面板）与 HackRun.Finish（收尾）。
+    /// </summary>
+    internal bool WantsAntiTrace => Disconnect;
+
     internal const float DefaultPortDelay = 0.6f;
 
     /// <summary>端口间隔下限。0.02s = 50 端口/秒，比真人手速快得多但仍逐条回显。</summary>

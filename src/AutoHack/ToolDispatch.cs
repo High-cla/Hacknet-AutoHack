@@ -29,17 +29,20 @@ internal static class ToolDispatch
     /// <summary>help 文本来源：子命令与其说明只写一次，命令入口与文档都读这里。</summary>
     internal static readonly (string Verb, string Help)[] Help =
     {
-        (Scan, "scan                  reveal the whole network component around the current node"),
-        (Dec, "dec [allnodes]        decrypt every #DEC_ENC file into /home/MemDumps"),
-        (Mem, "mem [allnodes]        show + export this machine's memory, scan for dumps"),
-        (Exes, "exes                  fill /bin with every crack program the game can produce"),
-        (Unbreakable, "unbreakable           harden THIS machine (irreversible)"),
-        (Pull, "pull                  download every file in the current directory to local home"),
-        (Purge, "purge                 delete every file in the current directory (shared with log wipe)"),
-        (Drop, "drop                  disconnect and remove the connected node from the map"),
-        (Trace, "trace                 anti-trace: stop the countdown and every pending tracker"),
-        (Skip, "skip                  complete the active mission and take the next one"),
+        (Scan, "reveal the whole network component around the current node"),
+        (Dec, "dec [allnodes]  decrypt every #DEC_ENC file into /home/MemDumps"),
+        (Mem, "mem [allnodes]  show + export this machine's memory, scan for dumps"),
+        (Exes, "fill /bin with every crack program the game can produce"),
+        (Unbreakable, "harden THIS machine (irreversible)"),
+        (Pull, "download every file in the current directory to local home"),
+        (Purge, "delete every file in the current directory (shared with log wipe)"),
+        (Drop, "disconnect and remove the connected node from the map"),
+        (Trace, "anti-trace: stop the countdown and every pending tracker"),
+        (Skip, "complete the active mission and take the next one"),
     };
+
+    /// <summary>help 里动词列的宽度，供调用方排版。</summary>
+    internal const int HelpVerbWidth = 18;
 
     /// <summary>
     /// 命令动词的归一化。<b>两个入口都必须过这里</b> —— 否则 <see cref="Handles"/> 认了、
@@ -48,9 +51,13 @@ internal static class ToolDispatch
     /// 为什么必须不区分大小写：游戏自己的 <c>ProgramRunner.ExecuteProgram</c> 大量写的是
     /// <c>array[0].ToLower().Equals("connect")</c>（ProgramRunner.cs:15/46/55），玩家由此
     /// 天然预期终端命令不分大小写；本插件的 <c>run</c> 分支用的也是 OrdinalIgnoreCase。
-    /// 只有工具这边此前是 <c>Array.IndexOf</c>（区分大小写），于是 <c>autohack SKIP</c>
-    /// 会一路掉到「开关面板」分支 —— 玩家看到的是面板开/关，而不是任务被跳过，
-    /// 表现就是「敲了没效果」。中文输入法下敲英文大小写随机，这条尤其容易踩。
+    /// 中文输入法下敲英文大小写随机，这条尤其容易踩。
+    ///
+    /// <b>注意它不负责的事</b>：v1.31.0 曾把 <c>autohack SKIP</c> 无效归因于「工具这边
+    /// 用了区分大小写的 <c>Array.IndexOf</c>」—— 那是误诊。真凶是动词读错了参数位
+    /// （<c>args[0]</c> 恒为命令名 <c>"autohack"</c>，动词在 <c>args[1]</c>），
+    /// 已由调用方修正。归一化修的是另一个真问题，两者曾叠成同一个症状
+    /// 「全都掉进开关面板分支」—— 详见 RESEARCH §6.7b。
     /// </summary>
     private static string Canonical(string verb) => verb?.ToLowerInvariant();
 

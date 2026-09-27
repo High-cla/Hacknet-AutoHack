@@ -1491,27 +1491,43 @@ for (int i = 0; i < os.ActiveHackers.Count; i++) {
 
 故结论：shell/Trap 对「解决计时」零帮助，不做。
 
-### 6.7b 工具动词曾区分大小写（v1.31.0 修）
+### 6.7b 命令动词读错了参数位（v1.31.0 误诊，v1.32.0 修）
 
-`ToolDispatch.Handles` 此前是 `Array.IndexOf(Verbs, verb) >= 0` —— **区分大小写**，
-而两处的比对都不区分：
+**根因不是大小写，是参数位。** v1.31.0 曾把 `autohack SKIP` 无效归因于
+`ToolDispatch.Handles` 用了区分大小写的 `Array.IndexOf` —— 那是误诊，且修不掉问题。
 
-- 游戏自己：`ProgramRunner.ExecuteProgram` 大量写 `array[0].ToLower().Equals("connect")`
-  （`ProgramRunner.cs:15/46/55`），玩家由此天然预期终端命令不分大小写；
-- 本插件的 `run` 分支：`args[0].Equals("run", StringComparison.OrdinalIgnoreCase)`
-  （`AutoHackPlugin.cs:99`）。
+真正的机制：Pathfinder 的 `CommandManager.OnCommandExecute`（：42）拿**注册名**
+`"autohack"` 去比 `args.Args[0]`，命中才认这条命令。故 `[Command("autohack")]`
+的处理函数收到的 `args` 恒为 `{"autohack", <动词>, …}` —— **动词在 `args[1]`**。
 
-于是 `autohack SKIP` 既不被 `Handles` 认作工具，也不等于 `"run"` ⇒ 一路落到
-**开关控制面板**分支 —— 玩家看到面板开/关、任务纹丝不动，症状正是「敲了没效果」。
-中文输入法下敲英文时大小写随机，这条尤其容易踩。
+两处独立取证：
 
-修法：`ToolDispatch.Canonical(verb)` = `verb?.ToLowerInvariant()`，
-**`Handles` 与 `Dispatch` 必须用同一个归一值**。只改 `Handles` 会更糟 ——
-认了工具却匹配不上 `switch`，命令静默什么都不做（连面板都不开）。
+- 游戏侧 `os.display.command = args[0]`（`Programs.cs:269`），目标取 `args[1]`
+  （`Programs.cs:278-281`）；整个游戏把 `args[0]` 当命令名用。
+- 已装在游戏里的 `BepInEx/plugins/PathfinderAPI.dll` 反编译同此（用 ilspycmd 核对过
+  实际发布的那一份，不只是仓库里的 decompiled 副本）。
 
-同时给 `skip` 的无任务回显补上自证信息：原来只写 `no mission is active.`，
-与「命令根本没进来」在终端上长得一模一样。现在写明「主线与支线两份列表都查过了」，
-并报出被完成的支线标题。
+而 `AutoHackPlugin.AutoHackCommand` 从 1.7.0 起每一处都按 `args[0]` 判断动词：
+`args[0]` 恒为 `"autohack"`，既不是已知工具、也不等于 `"run"`，**一律掉进
+「开关面板」分支**。故不止 `skip` —— `autohack run`、`allnodes`、`script=`
+与全部工具命令**从未生效过**，玩家感知统一是「敲了没效果，只会开关面板」。
+
+修法：`var verb = args is { Length: > 1 } ? args[1] : null;`，
+`args.Skip(1)` 一并改为 `args.Skip(2)`；裸命令（`verb == null`）仍按原设计开面板。
+`Canonical` 归一保留 —— 它修的是另一个真问题（见下），只是当初认错了症状。
+
+**大小写那一半仍然成立、也仍需保留**：游戏自己写 `array[0].ToLower().Equals("connect")`
+（`ProgramRunner.cs:15/46/55`），玩家由此预期终端不分大小写；中文输入法下敲英文大小写
+随机。`Canonical(verb)` 的要点是 **`Handles` 与 `Dispatch` 必须用同一个归一值** ——
+只改 `Handles` 会更糟：认了工具却匹配不上 `switch`，命令静默什么都不做。
+
+教训（比这条 bug 本身值钱）：**两个 bug 会叠成同一个症状**。大小写与参数位都会让
+命令落到开面板分支，于是修了其中一个、症状不变，很容易误判「修法无效」而不是
+「还有第二个」。诊断此类「全都无效」时，先打一行把 `args` 原样回显出来，
+比逐个猜判据快得多。
+
+另外给 `skip` 的无任务回显补了自证信息：原来只写 `no mission is active.`，
+与「命令根本没进来」在终端上长得一模一样。现在写明「主线与支线两份列表都查过了」。
 
 ---
 
@@ -1537,7 +1553,7 @@ if (computer != null) {
 字段链：`public bool HasTracker = false;`（`Computer.cs:101`）← `ComputerLoader.cs:506`
 `c.HasTracker = true;`（XML `tracker="true"`）← 存档 `getSaveString`（`Computer.cs:916`）双向持久化。
 
-### 6.9 一个入口止住两套追踪（v1.30.0 起，v1.31.0 合并）
+### 6.9 一个入口止住两套追踪（v1.30.0 起；v1.31.0 并入面板；v1.32.0 收进复选框）
 
 名字撞车，机制完全不同，**必须分清**：前者是玩家日常说的「被追踪」，后者是断线触发的
 静默定时炸弹。§6.1/§6.6 讲的一直是前者。
@@ -1572,12 +1588,28 @@ if (computer != null) {
 **为什么合并成一个入口（用户定：B 跟着 A 走）**：两套追踪对玩家回答的是同一个问题 ——
 「现在有没有东西在追我、怎么让它停下」。分开成两个动作时，玩家在最紧张的那一刻
 还得先判断自己中的是哪一套；而「判断」本身就需要工具先给出提示，等于把工具的职责
-推回给人。故 v1.31.0 起 `trace` 动词（面板 `ANTI-TRACE`）**一次止住两套**，
+推回给人。故 v1.31.0 起 `trace` 动词**一次止住两套**（v1.32.0 起面板入口改为复选框，见下），
 `TraceTools.Run` 内部先调 `HackEngine.KillTrace`（与每目标末尾那步同一实现，不复制
 `stop()`），再清 `TrackersInProgress` 并擦其 `/log`。
 
 **连带改名**：原复选框 `anti-trace dc` 与新按钮同名会让玩家无法判断该点哪个 ——
 改按真实机制命名 `disconnect when done`（它做的确实就是给每个目标发 `dc`）。
+
+**v1.32.0 收进复选框（用户定：两个追踪按钮合并成一个，删掉 TOOLS 的反追踪按钮）**：
+v1.31.0 的「改名」只是把撞名藏起来，没消掉并列本身 —— 面板上仍同时存在
+`disconnect when done` 复选框与 `ANTI-TRACE` 按钮，玩家仍要判断该点哪个。
+合并的根据是两者本就同一件事：断开即中止倒计时（`TraceTracker.Update` 的
+`connectedComp == null` 分支），清除即掐掉脱机追踪，**没有一种情形只需要其中一半**。
+故 `Tools` 表删掉 `ANTI-TRACE` 一项，复选框更名为 `disconnect & clear traces`，
+并成为唯一与追踪相关的控件；命令行 `autohack trace` 保留为**即时清除**入口
+（不开面板也能用，且能单独清掉「不断开但要停追踪」这一种情况）。
+
+实现上刻意**不新增记录字段**：`HackOptions` 里加的是派生属性
+`internal bool WantsAntiTrace => Disconnect;` —— 若加成第 13 个构造参数，
+就允许表达「断开但不反追踪」与「反追踪但不断开」两种组合，而它们对玩家没有意义。
+派生属性让非法组合**无法被表达**。`HackRun.Finish` 相应改成分支：
+`Options.WantsAntiTrace` 真则走 `TraceTools.Run`，假则沿旧行为 `AbortTrace`
+（只停自己的表，不碰 `TrackersInProgress`）。
 
 **v1.30.0 交付两件**：
 
@@ -1589,8 +1621,9 @@ if (computer != null) {
    同样带 `begun` 标志 + `catch (InvalidOperationException)` —— **HUD 比面板更该容忍**：
    它每帧都画，错一帧的代价是少两行字，不是整个存档。
 2. `TraceTools.cs` + `ToolDispatch.Trace = "trace"` —— 停表 + 擦 `/log`，命令行与面板
-   `Tools` 表双入口（面板新增 `ANTI-TRACE`，**唯一不给 danger 色的按钮**：
-   它在玩家最需要保命时出现，不该给「别点」的视觉暗示）。
+   原设计是命令行与面板 `Tools` 表双入口（面板按钮 `ANTI-TRACE` 曾**故意不给
+   danger 色**：它在玩家最需要保命时出现，不该给「别点」的视觉暗示）；
+   v1.32.0 面板那一路并入复选框后，只剩命令行入口。
    `TrackersInProgress` 由游戏线程每帧遍历，而命令行入口跑在 `OS.execute` 的独立线程
    （`OS.cs:1754-1767）—— 故先取快照再一次性 `Clear()`，写窗口只有一次调用；
    游戏线程的 `for` 每次迭代重读 `Count`，清空后条件当场为假，不会越界。
@@ -3563,10 +3596,38 @@ ActiveMissions = list; ReSerializeActiveMissions();                 // :528-529 
 `OptionsBlockHeight` / `ToolsBlockHeight` / `BodyHeight` 一字未改。
 
 **回显三种**：`skip: mission "<title>" completed.` /
-`skip: contract "<title>" completed.` / `skip: no mission is active.`。
+`skip: contract "<title>" completed.` /
+`skip: no mission is active (main and branch lists are both empty).`。
+`最后一条 v1.32.0 改写为自证句式：原来只写 `no mission is active.`，
+与「命令根本没进来」在终端上**长得一模一样** —— 而当时恰恰正是后者（见 §6.7b），
+于是这句回显把误诊又巩固了一遍。写明「两份列表都查过了」才能把两种情形分开。
 `title` 取 `postingTitle`，为空时报 `(unnamed)`。
 
 **交付**：94720 B / `2af54a059c6c0c302e4da1f0f20a0218`。
+
+### 10.23 命令动词读错参数位（v1.32.0）
+
+**一句话**：动词在 `args[1]`，而代码从 1.7.0 起一直读 `args[0]`，
+故 `run` / `allnodes` / `script=` / 全部十个工具**从未生效过**，
+一律掉进「开关面板」分支。机制与两份取证见 §6.7b；此处只记交付面与设计取舍。
+
+**波及面比症状大**：玩家感知统一是「敲了没效果，只会开关面板」，但底层是**整条命令行**
+都是死的 —— 包括 `autohack run`。`HackPanelState.Open` 缺省 `true`
+（`HackPanel.cs:35`）且 `HackOverlay.Open()` 用 `??=`，
+故首次 `autohack run` 是**把面板关掉**而不是执行入侵 —— 这条恰好掩盖了问题：
+面板会动，看起来像「命令被受理了」。
+
+**改法**：`var verb = args is { Length: > 1 } ? args[1] : null;`，
+参数一律从 `args.Skip(2)` 起；裸命令（`verb == null`）仍按原设计开面板，
+`-h` / `--help` / `help` 才出帮助（此前帮助靠「不是工具也不是 run」
+兜底，动词修对后必须显式判断，否则裸 `autohack` 会刷一整屏帮助而开不了面板）。
+校验顺序：工具 → `run` → 其余开面板。
+
+**同类误诊的教训**：v1.31.0 把同一症状归因于「动词区分大小写」并改了 `Canonical`，
+构建、验证、提交全过，症状却丝毫不变 —— 因为两个 bug 叠成了同一个症状。
+见 §6.7b 末尾的教训段。
+
+**交付**：96256 B / `e9f671027b152ca25327bfe7737a708a`（含 §6.9 的面板合并）。
 
 ## 11. 相邻插件 HacknetSaveFix
 

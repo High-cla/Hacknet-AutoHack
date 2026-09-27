@@ -9,7 +9,8 @@ using Hacknet;
 /// <item><c>os.traceTracker</c>：左下角那个看得见的倒计时（归零崩玩家机）；</item>
 /// <item><c>os.TrackersInProgress</c>：看不见的那批脱机追踪，并连带擦掉其 /log。</item>
 /// </list>
-/// 两者共用一个入口（面板 ANTI-TRACE 按钮 / <c>autohack trace</c>），因为对玩家而言
+/// 两个入口：<c>autohack trace</c>（立即清）与入侵收尾（勾了「disconnect & clear
+/// traces」时走这里，见 HackRun.Finish）。命令是「我现在就要清」的唯一入口。
 /// 它们回答的是同一个问题：「现在有没有东西在追我，怎么让它停下」。分开成两个动作时，
 /// 玩家在最紧张的那一刻还得先判断自己中的是哪一套 —— 而判断本身就需要工具先给出提示。
 ///

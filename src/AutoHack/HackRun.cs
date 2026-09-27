@@ -485,8 +485,23 @@ internal sealed class HackRun
         Finished = true;
         Phase = "COMPLETE";
 
-        // 收尾反追踪：跑完仍连着且被追踪时，断开是唯一的止血动作。
-        AbortTrace(os);
+        // 收尾反追踪。默认只掐看得见的那个倒计时，保住 v1.31.0 之前的行为。
+        //
+        // 勾了「disconnect & clear traces」（WantsAntiTrace）则走完整版：两套追踪
+        // 一起止、并擦掉追踪者的 /log。为什么必须擦日志才叫「清干净」——
+        // 追踪的复发源就是日志：OS.handleDisconnection（OS.cs:944-960）在每次断开时
+        // 检查刚断开那台的 /log，只要有一行同时含玩家 IP 与 FileCopied/FileDeleted/
+        // FileMoved，就自动排入一条新的 TrackerDetail（判据见
+        // TrackerCompleteSequence.CompShouldStartTrackerFromLogs，:30-47），
+        // 10~20 秒后计时归零端掉玩家。只清计时不清日志，下次从那台断开原地复活。
+        if (Options.WantsAntiTrace)
+        {
+            TraceTools.Run(os);
+        }
+        else
+        {
+            AbortTrace(os);
+        }
 
         foreach (var target in _targets)
         {

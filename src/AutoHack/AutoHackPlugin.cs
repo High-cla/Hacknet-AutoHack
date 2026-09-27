@@ -9,7 +9,7 @@ using Pathfinder.Meta.Load;
 /// 命令与扩展点均通过 Pathfinder 的属性自动扫描注册（AttributeManager 挂载于
 /// HacknetChainloader.LoadPlugin），无需手动调用 Register* API。
 /// </summary>
-[BepInPlugin(Guid, "AutoHack", "1.31.0")]
+[BepInPlugin(Guid, "AutoHack", "1.32.0")]
 // Pathfinder 的属性扫描是 IL hook，在 PathfinderAPIPlugin.Load() 里才安装；
 // 缺此依赖本插件会先加载，扫描覆盖不到，命令静默失效。
 [BepInDependency("com.Pathfinder.API")]
@@ -56,7 +56,22 @@ public sealed class AutoHackPlugin : BepInEx.Hacknet.HacknetPlugin
             return;
         }
 
-        if (args is { Length: > 0 } && args[0] is "-h" or "--help" or "help")
+        // 动词在 args[1]，不在 args[0]。
+        //
+        // 取证（两处独立，且已装在游戏里的 PathfinderAPI.dll 同此）：
+        //   · CommandManager.OnCommandExecute（CommandManager.cs:42）拿**注册名**
+        //     "autohack" 去比 args.Args[0]，命中才算这条命令 —— 首参数是命令名本身。
+        //   · 游戏侧 os.display.command = args[0]（Programs.cs:269），目标取 args[1]
+        //     （Programs.cs:278-281）。整个游戏把 args[0] 当命令名用。
+        // 故 autohack 命令收到的 args 是 {"autohack", <动词>, ...}。
+        //
+        // 此前每一处都按 args[0] 判断动词，于是 args[0] 恒为 "autohack"：
+        // 既不是已知工具、也不等于 "run"，**一律掉进「开关面板」分支**。
+        // 表现为「autohack run 什么都不干，只会开关面板」。
+        var verb = args is { Length: > 1 } ? args[1] : null;
+
+        // 裸 `autohack`（无动词）仍按原设计开关面板；只有显式 help 才打帮助。
+        if (verb is "-h" or "--help" or "help")
         {
             os.write("autohack              - toggle the control panel");
             os.write("autohack run [options] [target...] - run headless");
@@ -79,9 +94,9 @@ public sealed class AutoHackPlugin : BepInEx.Hacknet.HacknetPlugin
             os.write("  script=F  run a scripted action list from file F (see below)");
             os.write("");
             os.write("autohack <tool> [allnodes] - run one tool, no panel needed:");
-            foreach (var (verb, help) in ToolDispatch.Help)
+            foreach (var (tool, help) in ToolDispatch.Help)
             {
-                os.write("  " + help);
+                os.write("  " + tool.PadRight(ToolDispatch.HelpVerbWidth) + help);
             }
 
             os.write("");
@@ -95,14 +110,17 @@ public sealed class AutoHackPlugin : BepInEx.Hacknet.HacknetPlugin
         }
 
         // 四个工具与 run 平级，各自独立执行；allnodes 只对 dec / mem 有意义。
-        if (args is { Length: > 0 } && ToolDispatch.Handles(args[0]))
+        if (ToolDispatch.Handles(verb))
         {
-            var allNodes = args.Skip(1).Any(a => a.Equals("allnodes", StringComparison.OrdinalIgnoreCase));
-            ToolDispatch.Run(os, args[0], allNodes);
+            var allNodes = args.Skip(2).Any(a => a.Equals("allnodes", StringComparison.OrdinalIgnoreCase));
+            ToolDispatch.Run(os, verb, allNodes);
             return;
         }
 
-        if (args is not { Length: > 0 } || !args[0].Equals("run", StringComparison.OrdinalIgnoreCase))
+        // 裸 `autohack`（verb 为 null）与任何未知动词都归这里：开关面板。
+        // 这也是 v1.32.0 之前**所有**命令行的归宿 —— 当时动词读的是 args[0]（恒为
+        // "autohack"），四个分支没一个能命中，于是 run 与全部工具都变成了开面板。
+        if (verb == null || !verb.Equals("run", StringComparison.OrdinalIgnoreCase))
         {
             HackOverlay.Toggle(os);
             os.write(HackOverlay.IsOpen
@@ -119,7 +137,7 @@ public sealed class AutoHackPlugin : BepInEx.Hacknet.HacknetPlugin
             return;
         }
 
-        var options = HackOptions.Parse(args.Skip(1).ToArray());
+        var options = HackOptions.Parse(args.Skip(2).ToArray());
 
         // 脚本在入队前校验一遍：语法错/文件缺失当场报出来，而不是等首帧构造
         // HackRun 时在游戏线程抛出。边界校验前置，错误带原始行号。

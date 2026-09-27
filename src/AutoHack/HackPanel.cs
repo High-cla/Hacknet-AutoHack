@@ -67,9 +67,24 @@ internal sealed class HackPanelState
     internal bool ConnectFirst { get; set; } = true;
 
     /// <summary>
-    /// 每个目标跑完就 dc。缺省**关**（v1.16.0 起）—— 保持连接是更中性的默认，
-    /// 断开是「反追踪」这一特定目的的手段（追踪只在连着目标时推进，断开即中止），
-    /// 而它同时会终止会话、清空 navigationPath。要反追踪须显式勾选。
+    /// 每个目标跑完就 dc，并顺带清除两套追踪。缺省**关**（v1.16.0 起）—— 保持连接是
+    /// 更中性的默认，断开是「反追踪」这一特定目的的手段（追踪只在连着目标时推进，
+    /// 断开即中止），而它同时会终止会话、清空 navigationPath。要反追踪须显式勾选。
+    ///
+    /// 面板上曾有两处与追踪沾边：TOOLS 区的「ANTI-TRACE」按钮（单击立即止住两套
+    /// 追踪）与这个复选框（旧名 "anti-trace dc"，管跑完断不断开）。两个控件回答的是
+    /// 同一个玩家问题 ——「有没有东西在追我、怎么让它停」——却要玩家先分清「我现在
+    /// 是被追着，还是只是想跑完自动断开」才敢点。合并成一个：勾上它，本轮跑完每个目标
+    /// 都断开（断开本身就中止追踪），收尾时再把两套追踪一起掐掉、擦掉追踪者的 /log
+    /// （见 <see cref="HackOptions.WantsAntiTrace"/> 与 HackRun.Finish）。
+    ///
+    /// 为什么不是「勾了就立刻清」：那会把一次入侵设置变成立即动作，玩家勾一下就得在
+    /// 游戏线程上跑完整套清除；而追踪在<b>跑完之后</b>才是问题（跑的时候本来就连着，
+    /// <c>TraceTracker.Update</c> 在连着目标时压根不递减，TrackersInProgress 同理由
+    /// <c>OS.cs:823-839</c> 挂着不动）。故清除统一排在收尾，与断开同一时刻。
+    ///
+    /// 按钮没了，<c>autohack trace</c> 命令仍在 —— 它是「我现在就要清」的唯一入口，
+    /// 与复选框互不替代（一个立即、一个随本轮收尾）。
     /// </summary>
     internal bool Disconnect { get; set; } = false;
 
@@ -186,12 +201,9 @@ internal static class HackPanel
         (ToolDispatch.Purge, "PURGE FILES", true),
         (ToolDispatch.Drop, "DROP NODE", true),
 
-        // 反追踪：一个按钮同时止住两套追踪 —— 看得见的 TraceTracker 倒计时，
-        // 与看不见的 TrackersInProgress 脱机追踪（连带擦掉其 /log）。
-        // 不给告警色：danger 的语义是「这一下会毁东西」，而它擦的是追踪者的 /log；
-        // 玩家在被追时才来点它，那一刻最不需要的就是「别点」的视觉暗示。
-        // 行数由 ToolRows 自算，加按钮不必改任何高度常量。
-        (ToolDispatch.Trace, "ANTI-TRACE", false),
+        // 这里**没有**独立的反追踪按钮：止追踪已并进选项区的「disconnect & clear
+        // traces」复选框（见 HackPanelState.Disconnect）。两个控件的取舍理由见
+        // 那个属性的注释 —— 一句话：面板上只该有一个与追踪有关的控件。
     };
 
     /// <summary>TOOLS 区列数；行数由按钮数算出，故加按钮不必改任何高度常量。</summary>
@@ -359,10 +371,13 @@ internal static class HackPanel
         y += CheckRowHeight;
 
         state.ConnectFirst = Check(state.IdBase + 20, left, y, ColumnWidth, state.ConnectFirst, Loc.T("connect first"), c);
-        // 文案按真实机制写（这一步就是给每个目标发 dc）。此前叫 "anti-trace dc"，
-        // 而 v1.31.0 起 ANTI-TRACE 按钮也用「反追踪」一词 —— 同一个面板上两个东西
-        // 同名，玩家没法判断该点哪个。机制名不会与按钮歧义。
-        state.Disconnect = Check(state.IdBase + 21, left + ColumnWidth + 8, y, ColumnWidth, state.Disconnect, Loc.T("disconnect when done"), c);
+
+        // 这一个控件同时管两件事，名字里就把两件都写出来：
+        //   ① 每个目标跑完发一条 dc；
+        //   ② 顺带把两套追踪止住（TraceTracker 倒计时 + TrackersInProgress
+        //      脱机追踪，并擦其 /log）。文本宽度放不下完整解释，详情见
+        //      HackPanelState.Disconnect 的文档注释。
+        state.Disconnect = Check(state.IdBase + 21, left + ColumnWidth + 8, y, ColumnWidth, state.Disconnect, Loc.T("disconnect & clear traces"), c);
         y += CheckRowHeight;
 
         state.UploadMarker = Check(state.IdBase + 22, left, y, ColumnWidth, state.UploadMarker, Loc.T("upload marker"), c);

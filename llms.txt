@@ -3,7 +3,7 @@
 > Hacknet 的 BepInEx / Pathfinder 插件：用游戏自身的原生机制一键入侵全网，带控制面板与脚本驱动。
 > 本文件面向要理解或修改本仓库的编码 agent。规范见 https://llmstxt.org
 
-当前 v1.32.0。构建产物直投游戏插件目录，无需手动拷贝：
+当前 v1.32.1。构建产物直投游戏插件目录，无需手动拷贝：
 
 ```
 D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
@@ -178,16 +178,26 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     **不能挂 `LoadIntoOS` 的前缀** —— Pathfinder 已占该位置，Harmony 遇首个 `return false`
     即中止后续，两者只能活一个。
 
-24. **「跳过任务」原生就有，只是被启动参数锁着** —— 邮件界面
-    `MailServer.cs:693-701` 与 DHS 面板 `DLCHubServer.cs:992-995` 各有一个 Force Complete
-    按钮，门禁都是 `Settings.forceCompleteEnabled`（`Settings.cs:23`，缺省 false），
-    只有带 `-enablefc` 启动才置真（`Program.cs:29-32`）。**DLC 合同必须走
-    `DLCHubServer.PlayerAttemptCompleteMission` 而不是 `ActiveMission.finish()`** ——
-    合同另有一份 `ClaimableMission`（`DLCHubServer.cs:27-36`）管归档与序列化，
-    只调 `finish()` 会让它继续挂在面板上，玩家还能再接一次。匹配托管者要按
-    `ReferenceEquals(c.Mission, mission)` 比**对象同一性**，标题可重复。故
-    `MissionTools.Run` 临时置真该开关、调原生方法、`finally` 还原 ——
-    不复制实现，也不永久改玩家设置。
+24. **任务收尾有三条独立通道，别指望一条管全部** ——
+    ① 普通任务 → `ActiveMission.finish()`（`ActiveMission.cs:242-268`）；
+    ② DLC 合同 → `DLCHubServer.PlayerAttemptCompleteMission`（`DLCHubServer.cs:488-533`）；
+    ③ **Kaguya Trials（DLC 引导）→ `DLCIntroExe.MissionWasCompleted()`**（`DLCIntroExe.cs:453-479`）。
+    门禁：②额外要求 `Settings.forceCompleteEnabled`（`Settings.cs:23`，只有带 `-enablefc`
+    启动才置真，`Program.cs:29-32`）；①③无门禁。
+    **②的坑**：合同另有一份 `ClaimableMission`（`DLCHubServer.cs:27-36`）管归档与序列化，
+    只调 `finish()` 会让它继续挂在面板上。而定位托管者**不能靠 `ReferenceEquals`** ——
+    读档后 `os.currentMission`（`OS.cs:1474` `ActiveMission.load`）与
+    `ActiveMissions[].Mission`（`DLCHubServer.cs:412` `restoreMissionFromFile`）是
+    **两条独立重建通道产出的两个不同实例**，同一性恒为假（本坑 2026-09 由 `skip` 失效暴露）。
+    判据改用 `reloadGoalsSourceFile` 比来源文件 —— 全库通用任务定位键，游戏自己也这么做
+    （`DLCHubServer.cs:403`、`MissionHubServer.cs:163`、`MissionListingServer.cs:275`）。
+    **③的坑**：`DLCIntroExe` 自持 `LoadedMission`（`DLCIntroExe.cs:79`、`:429` 自行
+    `readMission` 重建），由 `UpdateState`（`:439-450`）检查 `LoadedMission.isComplete()`
+    推进状态机，`os.currentMission` 只是旁观者（要到 `CompleteExecution` 才置 null，`:233`）。
+    故 Kaguya 阶段 **`os.currentMission == null`** —— 任何先查 `currentMission` 再回退的逻辑
+    都会在这里提前返回，`finish()` 对进度零影响。判据是 `intro.State` 为
+    `OnMission1`/`OnMission2`（其余状态由引导自身计时器推进，别抢）。
+    另注意 `DLCIntroExe` 实例藏在 `os.exes`（`OS.cs:116`）里，不在 `netMap.nodes` 上。
 
 25. **两套「追踪」名字撞车，机制完全不同** —— `TraceTracker`（`OS.cs:114`）是**看得见的**
     左下角红色倒计时，由 `Computer.hostileActionTaken()`（`Computer.cs:294-308`）在

@@ -3548,11 +3548,26 @@ v1.14.1 把玩家机清痕塞进了 `if (options.ClearLogs)`（目标清痕开�
 启动且 `Settings.emergencyForceCompleteEnabled`（`:25`，缺省 true）时置真
 （`Program.cs:29-32`）。**该开关从未在 UI 上露出**，故绝大多数玩家没见过这两个按钮。
 
-**两条通道都要走，不能只调 `finish()`**。DLC 合同（Labyrinths 的 DHS 面板）额外持有
-一份 `DLCHubServer.ClaimableMission`（`DLCHubServer.cs:27-36`：`AgentClaim` / `IsComplete` /
+**三条通道都要走，不能只调 `finish()`**。
+
+**通道 ②：DLC 合同（Labyrinths 的 DHS 面板）** 额外持有一份
+`DLCHubServer.ClaimableMission`（`DLCHubServer.cs:27-36`：`AgentClaim` / `IsComplete` /
 `Mission`），归档与重新序列化都归它管（`:534-543` `CompleteAndArchiveMissionSet`、
 `:443` `ReSerializeActiveMissions`）。只调 `finish()` 会让合同**继续挂在面板上**，
 玩家还能再接一次。
+
+**通道 ③：Kaguya Trials（DLC 引导）** —— `DLCIntroExe`（`DLCIntroExe.cs:11`）是
+`ExeModule`，藏在 `os.exes`（`OS.cs:116`）里而非 `netMap.nodes`。它**自持**一份
+`LoadedMission`（`:79`），在 `AssignMission2` 状态时自行
+`ComputerLoader.readMission(assignment1MissionPath / assignment2MissionPath)` 重建
+（`:429`，路径见 `:67` / `:69`），由 `UpdateState`（`:193-202`）在
+`OnMission1` / `OnMission2` 状态调 `CheckProgressOfCurrentAssignment`（`:437-450`）判
+`LoadedMission.isComplete()` 推进状态机，完成后调 `MissionWasCompleted`（`:453-479`
+按 `IsOnAssignment1` 翻到 `AssignMission2` 或 `Outro`）。**`os.currentMission` 全程只是
+旁观者**，要到 `CompleteExecution`（`:233`）才被置 null —— 即 Kaguya 阶段
+`os.currentMission == null`。故 `finish()` 对它的进度**零影响**，且任何先判
+`currentMission` 再回退的实现都会在这里提前返回。原生 DEBUG Skip 按钮
+（`:588-596`）也不过是补一个 `KaguyaTrial.exe` 进 bin 再调 `CompleteExecution()`。
 
 `PlayerAttemptCompleteMission`（`:488-532`）的行为：
 
@@ -3575,16 +3590,52 @@ ActiveMissions = list; ReSerializeActiveMissions();                 // :528-529 
 
 **实现**（`src/AutoHack/MissionTools.cs`）：
 
-1. 有 `os.currentMission` 时，先在全图找托管它的 `DLCHubServer`
-   —— 按 `ReferenceEquals(c.Mission, mission)` 比对**对象同一性**，不是比标题
-   （标题可重复）。
+0. **先查 Kaguya Trials（通道 ③）** —— `TrySkipKaguyaTrial` 遍历 `os.exes` 找
+   `DLCIntroExe`，若其 `State` 为 `OnMission1` / `OnMission2` 则调
+   `MissionWasCompleted()`。**必须排在最前**：该阶段 `os.currentMission` 为 null，
+   放后面会被第 4 步的「无任务」提前返回吃掉（症状正是「敲了没反应」）。
+   其余状态（`SpinningUp` / `AssignMission*` / `Exiting` …）由引导自身计时器推进，
+   不抢它的状态机，直接返回 false 落回通用分支。
+1. 有 `os.currentMission` 时，先在全图找托管它的 `DLCHubServer`（通道 ②），
+   按下面的两级判据匹配 `ClaimableMission`。
 2. 命中 → 临时置 `Settings.forceCompleteEnabled = true` → 调原生
    `PlayerAttemptCompleteMission(contract, ForceComplete: true)` → `finally` 还原。
    调用的仍是原生方法本身，不复制它的实现，也不永久改动玩家设置。
-3. 未命中 → `mission.finish()`（邮件界面那条路）。
+3. 未命中 → `mission.finish()`（通道 ①，邮件界面那条路）。
 4. 无主线任务时退到 `os.branchMissions[0].finish()` —— `finish()` 内部本就会
    `OS.currentInstance.branchMissions.Clear()`（`ActiveMission.cs:244`），
    故对任一支线调用一次即等于把支线整体收尾。
+
+**合同匹配判据：两级**（v1.32.x 修）。旧实现只比
+`ReferenceEquals(c.Mission, mission)`，**在「读档之后」必然失效**：`os.currentMission`
+由 `OS.cs:1474` 的 `ActiveMission.load(xmlReader)` 重建，而
+`DLCHubServer.ActiveMissions[].Mission` 由 `:412` `ReadActiveMissions` →
+`MissionSerializer.restoreMissionFromFile` 逐个重建 —— **两条独立通道产出两个不同
+实例**，同一性恒为假。而 `ReadActiveMissions` 的触发点是
+`DLCHubServer.navigatedTo()`（`:171`），玩家每次进 DHS 节点都会跑。于是
+`FindContract` 恒返回 false，DLC 合同落到 `mission.finish()`：命令回显 completed，
+合同却仍挂在面板上 —— 这正是「skip 对 DLC 无效」的根因。
+
+修法是两级判据：
+
+| 级 | 判据 | 覆盖场景 |
+|---|---|---|
+| 快路径 | `ReferenceEquals(c.Mission, mission)` | 本会话内刚接受合同：`PlayerAcceptMission` 直接 `os.currentMission = mission.Mission`（`:477`），是同一对象 |
+| 慢路径 | `SameSource(c.Mission.reloadGoalsSourceFile, mission.reloadGoalsSourceFile)` | 读档后两个实例：比**来源文件** |
+
+`reloadGoalsSourceFile` 之所以是稳定键：它在两条通道里都落盘 —— `ActiveMission`
+侧写进 save string 的 `goals` 属性（`ActiveMission.cs:87` 写、`:184` 读回），
+`MissionSerializer` 侧写进 `Code = ` 行（`MissionSerializer.cs:15` 写、`:63-70` 解析后
+传给 `readMission`，再由 `ComputerLoader.cs:1970` 赋回）。且这正是**游戏自身的
+任务定位惯例**：`DLCHubServer.cs:403`、`MissionHubServer.cs:163`、
+`MissionListingServer.cs:275` 三处都这么比。
+
+`SameSource` / `NormalizeSource` 做归一化 —— 不直接字符串相等，因为两条通道写出的
+值可能不同形：`getSaveString` 原样写出，`generateMissionFile` 先编码；读回时
+`ActiveMission.load` 会给裸路径补 `Content/` 前缀（`ActiveMission.cs:144`），
+`LocalizedFileLoader.GetLocalizedFilepath`（`LocalizedFileLoader.cs:14-24`）又会把
+`Content/` 换成 `Content/Locales/<locale>/`。故归一化（斜杠统一为 `/`、剥掉
+`/Locales/<locale>` 段）后比较，并容忍一方是另一方的后缀。
 
 `finish()`（`ActiveMission.cs:242-268`）自身的链路：清 `branchMissions` → 若
 `nextMission != "NONE"` 则 `ComputerLoader.loadMission("Content/Missions/" + nextMission)`

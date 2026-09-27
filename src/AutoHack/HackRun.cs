@@ -683,15 +683,16 @@ internal sealed class HackRun
         // 后者是玩家自己的数据，不该被「入侵时顺手」清掉，故必须显式开。
         //
         // 机器不在 targets 里（ResolveTargets 显式跳过 os.thisComputer，
-        // HackEngine.cs:423），也不在 skipped 里 —— 上面两处都够不着，必须单独追加。
+        // HackEngine.cs:445），也不在 skipped 里 —— 上面两处都够不着，必须单独追加。
         //
         // 排在全部步骤之后是刻意的：玩家的 /log 记的是「谁连过我」，入侵过程中
         // 每连一台都会往自己机器上写一条，提前清会被后续步骤重新写回来。
         //
-        // 不需要等断开：ClearLogs 自己把 folderPath 传给 Computer.deleteFile
-        // （HackEngine.cs:660），而 Programs.getFolderFromNavigationPath
-        // （Programs.cs:1749-1770）只读 path 与 startFolder，不看
-        // os.connectedComp / navigationPath —— 与 rm 命令的作用域规则不同。
+        // 不需要等断开：ClearLogs → RemoveFiles 把 folderPath 直接传给
+        // Computer.deleteFile（HackEngine.cs:848），而
+        // Programs.getFolderFromNavigationPath（Programs.cs:1749-1770）只读 path
+        // 与 startFolder，不看 os.connectedComp / navigationPath ——
+        // 与 rm 命令的作用域规则不同。
         if (options.ClearOwnLogs)
         {
             steps.Add(new HackStep(HackStepKind.CleanLogs, os.thisComputer, default, null));

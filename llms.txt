@@ -48,7 +48,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    catch 吞掉，表现为「面板莫名其妙不显示」。只可用 `smallfont`/`tinyfont`/`font`/`detailfont`。
    同理不用原生 `CheckBox`/`Button`（前者只在 hover 时画文字，后者自动缩字并加 13px 色块），
    面板是自绘的。
-9. **清痕要覆盖玩家自己的机器** —— 玩家机被 `ResolveTargets` 显式跳过（`HackEngine.cs:423`），
+9. **清痕要覆盖玩家自己的机器** —— 玩家机被 `ResolveTargets` 显式跳过（`HackEngine.cs:445`），
    既不入 `Targets` 也不入 `Skipped`，两处清痕追加都够不着它。`BuildSteps` 须在**全部步骤
    之后**单独追加一条玩家机清痕（放末尾是因为入侵途中每连一台都会往玩家 `/log` 写一条）。
    这条不需要等断开：它不产生 `rm` 回显，删除走 `Computer.deleteFile` + 显式 `folderPath`，
@@ -61,13 +61,17 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
 11. **目标清痕与自己的清痕是两回事** —— `ClearLogs`（`wipe target logs`）抹「入侵别人的证据」，
    `ClearOwnLogs`（`wipe my logs`）抹「玩家自己的操作史」。**两条缺省都是关**
    （v1.16.0 起；清痕会改写对方状态，属「玩家明确要求才做」）。
-   玩家机不在 `Targets` 也不在 `Skipped`（`HackEngine.cs:423` 显式跳过），必须单独追加。
+   玩家机不在 `Targets` 也不在 `Skipped`（`HackEngine.cs:445` 显式跳过），必须单独追加。
    同理 `use known creds` 缺省**关**（v1.15.0 起）—— `adminPass` 是公开字段，开着等于
    默认跳过破端口/防火墙/porthack 三套机制，架空玩法。
-12. **三个远程工具的动作全在「当前连接」，且「当前目录」= `os.navigationPath` 的投影** ——
-   `pull`/`purge` 看的是 `Programs.getFolderFromNavigationPath(os.navigationPath, comp.files.root, os)`
-   （`RemoteTools.cs:28`）。**路径必须先快照**：`Programs.disconnect` 会 `os.navigationPath.Clear()`
-   （`Programs.cs:328`），断开后再读就是根目录。`drop` 摘节点照抄官方 `SAHideNode`
+12. **三个远程工具的动作全在「当前连接」，且「当前目录」以游戏自己的 `Programs.getCurrentFolder(os)` 为唯一权威** ——
+   `pull`/`purge` 的 `Current(os)`（`RemoteTools.cs:36`）取 `os.connectedComp ?? os.thisComputer` 与
+   `Programs.getCurrentFolder(os)`（`Programs.cs:1531`，`ls`/提示符/`rm` 都用它），路径再从目录对象**反推**
+   （`PathTo`/`Walk`，`RemoteTools.cs:44/51`），不再二次解析。旧实现自己走
+   `getFolderFromNavigationPath(os.navigationPath, ...)`，与 `getFolderAtDepth` 对越界路径处理不同 ——
+   会出现「`ls` 显示 A、本工具清 B」且两边都不报错。反推后 `Computer.deleteFile` 内部拿这个路径
+   再解一次必然回到同一对象，也不再依赖 `navigationPath` 快照语义（`Programs.disconnect` 会清空它，
+   `Programs.cs:328`）。`drop` 摘节点照抄官方 `SAHideNode`
    的 `while (visibleNodes.Remove(index)) {}`（**循环**，visibleNodes 可能有重复下标），
    且必须先断开（官方三处摘节点都在断开之后）。绝不可设 `comp.disabled`：
    `NetworkMap.Update` 每帧对 disabled 节点调 `bootupTick`，`bootTimer` 缺省 0 → 下一帧就恢复 false。

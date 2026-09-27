@@ -469,7 +469,7 @@ action 内容见 §5.2。
 ## 8. HackerScript（NPC 入侵脚本）
 
 **这是游戏原生的自动入侵 DSL**，由行为标签 `<LaunchHackScript>` 执行。
-本仓库 AutoHack 的 `script=` 模式（`HackScript.cs`）**故意不复用它**，理由见 RESEARCH §15.2；
+本仓库 AutoHack 的 `script=` 模式（`HackScript.cs`）**故意不复用它**，理由见 RESEARCH §10.5；
 但格式本身值得记录。
 
 ### 8.1 结构

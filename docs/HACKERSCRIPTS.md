@@ -149,7 +149,7 @@ D:\steam\steamapps\common\Hacknet\Extensions\IntroExtension\
 游戏原生的自动入侵 DSL。由行为标签 `<LaunchHackScript>` 执行。
 
 > 本仓库 AutoHack 的 `script=` 模式**故意不复用它**，三条否决理由见
-> [RESEARCH.md §15.2](RESEARCH.md)。本节只记录格式本身。
+> [RESEARCH.md §10.5](RESEARCH.md)。本节只记录格式本身。
 
 ### 2.1 结构
 
@@ -243,7 +243,7 @@ disconnect $#%#$
 | §1.3 程序占位符全走 `PortExploits.crackExeData[port]` | `ExeTools.cs` | 数据源正确。v1.14.1 修的缺陷在**自造的长度守卫**（拿 `EXE_FILE_LENGTH` 当产物长度），不在数据源 |
 | §1.2 `generateBinaryString` 不补前导零 | `ExeTools.cs` | 请求 500 → 实产约 445 字符。**判据用「非空」** |
 | §1.3 `#DECYPHER_PROGRAM#` / `#DECHEAD_PROGRAM#` | `DecTools.cs` | DEC 系程序同样出自 `crackExeData`；密码学在 `FileEncrypter.cs` |
-| §2.2 动词表 | `HackScript.cs` | 本仓库**未复用**游戏 DSL（RESEARCH §15.2）；`makeFile` / `delete` / `setAdminPass` / `write*` 属「游戏有而我们没有」，已列入 `UnsupportedVerbs` |
+| §2.2 动词表 | `HackScript.cs` | 本仓库**未复用**游戏 DSL（RESEARCH §10.5）；`makeFile` / `delete` / `setAdminPass` / `write*` 属「游戏有而我们没有」，已列入 `UnsupportedVerbs` |
 | §2.2 `openPort` 收原始端口号 | `HackScript.cs` | 别名映射到 `HackStepKind` 时保留原始端口语义 |
 
 ### 合规

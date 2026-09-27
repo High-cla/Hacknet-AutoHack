@@ -2045,7 +2045,7 @@ internal static IReadOnlyList<string> RemoveFiles(Computer comp, string ipFrom, 
 | 调用方 | 目录 | 路径来源 |
 |---|---|---|
 | `HackEngine.ClearLogs` | `root.searchForFolder("log")` | `new List<int> { root.folders.IndexOf(logFolder) }` |
-| `RemoteTools.Purge` | `Programs.getFolderFromNavigationPath(navPath, comp.files.root, os)` | `os.navigationPath` 快照 |
+| `RemoteTools.Purge` | `Programs.getCurrentFolder(os)`（`Current`，`RemoteTools.cs:36`） | 目录对象反推（`PathTo`/`Walk`） |
 
 `ClearLogs` 从 39 行缩到 15 行（快照/删除/复核全部下沉）。`RemoteTools.Purge` 从 22 行缩到 10 行，回显改为 `removed.Count`（`RemoveFiles` 的返回值即文件名快照，与 `deleteFile` 的 `"*"` 分支同一过滤条件）。
 
@@ -2324,7 +2324,7 @@ if (kind == HackStepKind.CleanLogs) { return 0f; }
 
 > 需求来源（用户实测报回）：「清理 log 没包括玩家的机器」。
 
-- `HackEngine.ResolveTargets`（`HackEngine.cs:423`）：
+- `HackEngine.ResolveTargets`（`HackEngine.cs:445`）：
   `if (comp == null || comp.disabled || ReferenceEquals(comp, os.thisComputer)) { continue; }`
   —— 玩家机既不入 `Targets` 也不入 `Skipped`。
 - `HackRun.BuildSteps` 只对 `targets`（`:580-583`）与 `skipped`（`:599-605`）追加 `CleanLogs`，
@@ -3190,11 +3190,11 @@ DETECTED」特效分支，只按数字位数生成随机字符串，**不遍历�
 `.exe` → `/bin`（落下即可运行）、`.sys` → `/sys`、`@` 开头 → `/home/dl_logs`、
 其余 → `/home`。改掉会让「下载的破解程序不能直接跑」。
 
-「当前目录」由 `Programs.getFolderFromNavigationPath(os.navigationPath, comp.files.root, os)`
-解出（`Programs.cs:1749`）—— 与 `Computer.deleteFile` 内部用的是**同一个函数**
-（`Computer.cs:523/549`），故报告与动作按构造一致，不会「报 A 删 B」。
-**路径必须先快照**：`Programs.disconnect` 会 `os.navigationPath.Clear()`
-（`Programs.cs:328`），断开后再读就是根目录。
+「当前目录」以 `Programs.getCurrentFolder(os)`（`Programs.cs:1531`，`ls`/提示符/`rm` 都用它）
+为**唯一权威**，路径再从目录对象**反推**（`PathTo`/`Walk`，`RemoteTools.cs:44/51`）——
+`Computer.deleteFile` 内部拿这个路径再解一次（`Computer.cs:523/549`）必然回到同一对象，
+故报告与动作按构造一致，不会「报 A 删 B」，也不再依赖 `os.navigationPath` 快照语义
+（`Programs.disconnect` 会清空它，`Programs.cs:328`）。
 
 #### `purge`：删除当前目录全部文件
 

@@ -3,7 +3,7 @@
 > Hacknet 的 BepInEx / Pathfinder 插件：用游戏自身的原生机制一键入侵全网，带控制面板与脚本驱动。
 > 本文件面向要理解或修改本仓库的编码 agent。规范见 https://llmstxt.org
 
-当前 v1.29.0。构建产物直投游戏插件目录，无需手动拷贝：
+当前 v1.30.0。构建产物直投游戏插件目录，无需手动拷贝：
 
 ```
 D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
@@ -21,7 +21,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    **绝不下载 Release 附件回来比对** —— 只读构建输出目录（即游戏插件目录）那份产物的 MD5。
 3. **`gh release create` 绝不自动执行** —— 等用户显式发令。`git push` 可以直接做。
 
-**二十四条最容易踩的坑 / 最该知道的机制**（都带行号，可直接 grep）
+**二十六条最容易踩的坑 / 最该知道的机制**（都带行号，可直接 grep）
 
 1. `Computer.portsOpen` 恒为 0 —— Pathfinder 用 Harmony Prefix 接管 `openPort`/`openPorts`
    并 `return false`，状态改存 `PortState.Cracked`。任何读 `portsOpen` 的判断都是错的，
@@ -189,9 +189,24 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     `MissionTools.Run` 临时置真该开关、调原生方法、`finally` 还原 ——
     不复制实现，也不永久改玩家设置。
 
+25. **两套「追踪」名字撞车，机制完全不同** —— `TraceTracker`（`OS.cs:114`）是**看得见的**
+    左下角红色倒计时，由 `Computer.hostileActionTaken()`（`Computer.cs:294-308`）在
+    `traceTime > 0f` 时 `start()`，归零走 `os.timerExpired()`（`OS.cs:1433-1452`）崩玩家机；
+    断开即 `active = false`。而 `OS.TrackersInProgress`（`OS.cs:256`）由
+    `handleDisconnection()`（`OS.cs:944-960`）在断线时排入，**全项目没有任何 Draw** ——
+    玩家唯一的感知是 10~20 秒后突然出事。两个易踩点：① 该表在「连着那台目标」时
+    是 `RemoveAt` **移除**（`OS.cs:825-830`），不是暂停；② 它的复发源是目标 `/log`
+    （`CompShouldStartTrackerFromLogs`，`TrackerCompleteSequence.cs:30-47`），
+    **只清计时不清日志 = 下次断开原地复活**。
+26. **`CrashModule.BOOT_TIME` 是 static 字段，值在静态初始化器里固化**
+    （`CrashModule.cs:15`）—— 之后再改 `Settings.FastBootText` **无效**（且该设置根本不落
+    `Settings.txt`），只能覆写字段本身。`bootTextDelay` 是实例字段、只在 `LoadContent()`
+    （`:78`）算一次，那一刻读到的已是新值，**不要手动重算**：`reset()`（`:319-331`）
+    不重算它，手动补的那份重启后失效。
+
 ## 仓库文档
 
-- [README.md](README.md): 面向使用者的说明 —— 安装、面板与命令行用法（含九个独立工具）、脚本模式、架构、验证方式。**刻意保持精简**，设计决策与取证细节一律在 docs/RESEARCH.md
+- [README.md](README.md): 面向使用者的说明 —— 安装、面板与命令行用法（含十个独立工具）、脚本模式、架构、验证方式。**刻意保持精简**，设计决策与取证细节一律在 docs/RESEARCH.md
 - [docs/RESEARCH.md](docs/RESEARCH.md): 源码级取证与设计决策，§1–§11，**按主题**组织（不是按版本），每条结论都带 `文件:行号`。**细节的唯一归属地**（README 只留给人看的结论）
 - [docs/EXTENSIONS.md](docs/EXTENSIONS.md): 游戏自带 `Extensions/` 官方样本的格式参考 —— 节点 XML、占位符、行为系统、任务、阵营、主题
 - [docs/HACKERSCRIPTS.md](docs/HACKERSCRIPTS.md): 自替换占位符全表 + HackerScript 动词表（以游戏实现与官方样本为准，已标出 wiki 错漏处）
@@ -199,7 +214,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
 
 ## 源码
 
-- [src/AutoHack/ToolDispatch.cs](src/AutoHack/ToolDispatch.cs): 八个工具的唯一入口（命令与面板共用）；`RemoteTools.cs` 是其中三个远程动作的实现，`ScanTools.cs` 是 `scan`
+- [src/AutoHack/ToolDispatch.cs](src/AutoHack/ToolDispatch.cs): 十个工具的唯一入口（命令与面板共用）；`RemoteTools.cs` 是其中三个远程动作的实现，`ScanTools.cs` 是 `scan`，`TraceTools.cs` 是 `trace`
 - [src/AutoHack/DecTools.cs](src/AutoHack/DecTools.cs): DEC 解密 —— 反推 passcode + 多层递归 + 批量落盘
 - [src/AutoHack/MemTools.cs](src/AutoHack/MemTools.cs): 内存转储 —— 查看 / 导出 / 扫描内嵌 DEC
 - [src/AutoHack/ExeTools.cs](src/AutoHack/ExeTools.cs): 程序补全 —— 幂等填充 `/bin`

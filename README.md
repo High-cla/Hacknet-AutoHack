@@ -35,8 +35,8 @@ autohack                                        # 开关控制面板
 autohack run [here] [delay=秒] [stay] [redo] [nologs] [nomark] [direct]   # 不开面板，直接执行
 autohack run script=stealth                     # 用脚本决定入侵次序（见下）
 autohack scan|dec|mem|exes|unbreakable [allnodes]  # 独立工具（见「工具」）
+autohack pull|purge|drop|trace                  # 对当前连接节点动手 / 掐掉追踪
 autohack skip                                   # 完成当前任务并接下一个（含 DLC 合同）
-autohack pull|purge|drop                        # 对当前连接节点动手
 autohack -h                                     # 帮助
 ```
 
@@ -62,6 +62,7 @@ autohack -h                                     # 帮助
 | TOOLS 区 `SCAN NETWORK` / `DEC DECRYPT` / `MEMORY DUMP` / `ALL PROGRAMS` | 见「工具」，单击**立即执行**，无二次确认 |
 | TOOLS 区 `PULL FILES` / `PURGE FILES` / `DROP NODE` | 对**当前连接的节点**动手：下载 / 删除当前目录下全部文件、把节点从网络图摘掉（后两个用告警色） |
 | TOOLS 区 `UNBREAKABLE` | 加固本机，**不可逆**，用告警色标注 |
+| TOOLS 区 `STOP TRACE` | 掐掉**全部**进行中的追踪并擦掉其 `/log`（见「追踪」）。**保命键**，故不给告警色 |
 
 执行期间面板切换为进度视图：阶段 + 百分比、分段进度条、当前目标与动作计数，下方滚动显示逐目标战果。完成后显示 `LAST RUN` 与 `RUN AGAIN`。
 
@@ -100,7 +101,18 @@ autohack -h                                     # 帮助
 > 差额是「可以直接敲 IP 连上、但不在连线上」的机器 —— `Programs.connect` 遍历的是
 > `netMap.nodes` 全表，本来就不检查 `links`。
 
-### 工具（v1.14.0 起；v1.14.1 / v1.14.2 修缺陷；v1.16.0 加三个远程动作；v1.18.0 删除通道归一；v1.27.0 加扫描；v1.29.0 加跳过任务）
+### 追踪
+
+游戏里有**两套**都叫「追踪」的机制，别混：
+
+| | 表现 | 怎么应付 |
+|---|---|---|
+| `TRACE :` 倒计时 | 屏幕**左下角**红色数字从 100 往下走，提示音逐渐变密。归零 = 玩家机崩 | **断开连接即中止**（追踪只在连着目标时推进）；面板 `anti-trace dc` 或命令行 `dc` |
+| 追踪中（无任何提示） | **完全看不见**。断线时若那台机器 `/log` 里留有你 IP 的 copy/delete/move 记录，它 10~20 秒后自动反打：开端口 → 闪屏 → forkbomb → 玩家机崩 | v1.30.0 起**左下角常驻显示**「追踪中 : N 台 · M 秒」；敲 `autohack trace` 或点面板 `STOP TRACE` 一键掐掉 |
+
+第二套的**复发源就是日志**，故 `trace` 会连 `/log` 一起擦；只停表不擦日志，下次从那台断开它会原地复活。
+
+### 工具（v1.14.0 起；v1.14.1 / v1.14.2 修缺陷；v1.16.0 加三个远程动作；v1.18.0 删除通道归一；v1.27.0 加扫描；v1.29.0 加跳过任务；v1.30.0 加清追踪）
 
 工具与入侵流程**完全独立** —— 不进 `autohack run` 的自动流程，命令与面板 TOOLS 区按钮走**同一份实现**。面板按钮**单击立即执行**，不弹二次确认（`UNBREAKABLE` / `PURGE FILES` / `DROP NODE` 用告警色 + 回显里的 `irreversible` 代替）。
 
@@ -114,6 +126,7 @@ autohack -h                                     # 帮助
 | `autohack pull` | 把**当前目录**下全部文件下载到本机 `/home/misc`（**一个夹**，不分流） |
 | `autohack purge` | 删除**当前目录**下全部文件（同游戏 `rm`；与清痕**同一实现**；**只删文件，不删文件夹**） |
 | `autohack drop` | 断开并把当前连接的节点从网络图上摘掉 |
+| `autohack trace` | 掐掉全部进行中的追踪，**并擦掉那几台的 `/log`**（不擦会复发，见「追踪」） |
 | `autohack skip` | **跳过当前任务**：完成它并接下一个（走游戏自己的 Force Complete 通道，含 DLC 合同） |
 
 `allnodes` 只对 `dec` / `mem` 有意义（缺省只作用于当前连接节点，与 `run` 口径一致）；`exes` 与 `unbreakable` 天然只针对玩家自己；`scan` 不看这个开关（它本就只扫当前节点那片连通分量，`allnodes` 的语义是「跳过连线直接连全表」，属 `run` 的目标口径）；`skip` 同理不看（它与网络无关）。
@@ -236,9 +249,9 @@ src/AutoHack/
 | 项 | 值 |
 |---|---|
 | 产物路径 | `D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll` |
-| 当前版本 | v1.29.0 |
-| 字节数 | 94720 |
-| MD5 | `2af54a059c6c0c302e4da1f0f20a0218` |
+| 当前版本 | v1.30.0 |
+| 字节数 | 96256 |
+| MD5 | `dc6f0e84f8bd312507376c3cf31b5e85` |
 
 核对流程：清理 `obj`/`bin` → 构建（须 0 警告 0 错误）→ 记 `md5sum` 与字节数，
 与上一版比对。构建成功即证明源码已编入（增量缓存已清，漏编会报错）；

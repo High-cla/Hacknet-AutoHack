@@ -9,7 +9,7 @@ using Pathfinder.Meta.Load;
 /// 命令与扩展点均通过 Pathfinder 的属性自动扫描注册（AttributeManager 挂载于
 /// HacknetChainloader.LoadPlugin），无需手动调用 Register* API。
 /// </summary>
-[BepInPlugin(Guid, "AutoHack", "1.29.0")]
+[BepInPlugin(Guid, "AutoHack", "1.30.0")]
 // Pathfinder 的属性扫描是 IL hook，在 PathfinderAPIPlugin.Load() 里才安装；
 // 缺此依赖本插件会先加载，扫描覆盖不到，命令静默失效。
 [BepInDependency("com.Pathfinder.API")]
@@ -19,6 +19,12 @@ public sealed class AutoHackPlugin : BepInEx.Hacknet.HacknetPlugin
 
     public override bool Load()
     {
+        // 开机文字加速。必须在 PatchAll 之前、且在 OS 构造之前 ——
+        // 它会首次触碰 CrashModule 触发静态初始化，那一刻 BOOT_TIME 才算出来。
+        // CrashModule.BOOT_TIME 是 static 字段（CrashModule.cs:15），而 OS 在
+        // OS.cs:500-501 才 new CrashModule(...)，本 Load() 一定更早。详见 BootBoost。
+        BootBoost.Apply();
+
         // 面板/HUD 靠 patch OS.Draw / OS.Update 叠加到游戏画面上。
         HarmonyInstance.PatchAll(typeof(AutoHackPlugin).Assembly);
         Log.LogInfo("AutoHack loaded (GUI).");

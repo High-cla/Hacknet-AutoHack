@@ -185,6 +185,11 @@ internal static class HackPanel
         (ToolDispatch.Pull, "PULL FILES", false),
         (ToolDispatch.Purge, "PURGE FILES", true),
         (ToolDispatch.Drop, "DROP NODE", true),
+
+        // 唯一一个「保命」按钮，故不给告警色：danger 的语义是「这一下会毁东西」，
+        // 而 trace 擦的是追踪者的 /log —— 玩家在被追踪时才来点它，
+        // 那一刻最不需要的就是「别点」的视觉暗示。行数由 ToolRows 自算。
+        (ToolDispatch.Trace, "STOP TRACE", false),
     };
 
     /// <summary>TOOLS 区列数；行数由按钮数算出，故加按钮不必改任何高度常量。</summary>

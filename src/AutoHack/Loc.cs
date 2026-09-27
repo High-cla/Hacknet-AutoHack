@@ -59,6 +59,7 @@ internal static class Loc
             ["TOOLS"] = "工具",
             ["SCAN NETWORK"] = "扫描网络",
             ["DEC DECRYPT"] = "解密 DEC",
+            ["STOP TRACE"] = "清除追踪",
             ["MEMORY DUMP"] = "内存转储",
             ["ALL PROGRAMS"] = "全部程序",
             ["UNBREAKABLE"] = "不可摧毁",
@@ -68,6 +69,7 @@ internal static class Loc
 
             // 运行态
             ["ENGAGING"] = "执行中",
+            ["TRACKERS"] = "追踪中",
             ["READY"] = "就绪",
         };
 

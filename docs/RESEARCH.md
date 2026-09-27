@@ -110,7 +110,36 @@ README 里 v1.7–v1.12.0 的九块反编译核对记录**已删除**（不再�
 那是**游戏与框架本体**的反编译，是本插件全部决策的依据来源（RESEARCH 里大量
 `文件:行号` 引用都指向它），**必须保留**，与「不再核对 mod 产物」无关。
 
-### 1.4 发布流程约束
+### 1.4 无开关的默认行为
+
+约定：**「修正游戏本身的缺陷」这类改动不给开关、不给命令，装上即生效**；
+「改变玩法取舍」的才给开关。按此，v1.30.0 起有两项默认开启、面板与命令行都没有入口：
+
+| 项 | 落点 | 为什么无开关 |
+|---|---|---|
+| 开机自检文字加速（14.5s → 1.2s） | `BootBoost.Apply()`，在插件 `Load()` 里、`PatchAll` 之前 | 只是让等待变短，不改变任何游戏状态与难度；没有任何玩家会想「我要慢慢看开机文字」 |
+
+**`CrashModule.BOOT_TIME` 的三个坑（`CrashModule.cs:15`）**：
+
+1. 它是 **static 字段**，值在类静态初始化器里一次固化：
+   `BOOT_TIME = (Settings.isConventionDemo ? 5f : (Settings.FastBootText ? 1.2f : 14.5f))`。
+   **之后再改 `Settings.FastBootText` 无效** —— 派生值早算完了，而且 `SettingsLoader` 里
+   根本没有 `FastBootText` 的写入点（它不落 `Settings.txt`，实测该文件只有 12 行）。
+   唯一能生效的做法就是覆写这个字段。
+2. **时序**：`BootBoost.Apply()` 必须在 `OS` 构造之前。`OS.cs:500-501` 才
+   `new CrashModule(...)` 并立即 `LoadContent()`，而插件 `Load()` 一定更早，故安全。
+3. **`bootTextDelay` 不必也不该手动重算**。它是实例字段，只在 `LoadContent()`
+   （`CrashModule.cs:78`：`bootTextDelay = BOOT_TIME / ((bootText.Length - 1) * 2f)`）
+   算一次，那一刻读到的已是新值。而 `reset()`（`CrashModule.cs:319-331`）**不重算**它 ——
+   手动补的那份在重启后会失效，反而更脆。
+
+覆盖面：`BOOT_TIME` 全项目唯一用点是状态机 `CrashModule.cs:120`，
+故改这一个字段即完整；同族的 `BLUESCREEN_TIME`/`BLACK_TIME`/`BOOT_FAIL_CRASH_TIME`
+与逐行文字无关，不动。副作用：会一并覆盖 Convention demo 的 5 秒档，那是展台模式。
+
+---
+
+### 1.5 发布流程约束
 
 **「以后只推送发布，由我来决定」** —— 提交与推送照常（版本控制需要），
 但**发布（`gh release create`）不再自动执行**，等用户明确指示。
@@ -1483,6 +1512,60 @@ if (computer != null) {
 
 字段链：`public bool HasTracker = false;`（`Computer.cs:101`）← `ComputerLoader.cs:506`
 `c.HasTracker = true;`（XML `tracker="true"`）← 存档 `getSaveString`（`Computer.cs:916`）双向持久化。
+
+### 6.9 两套「追踪」：TraceTracker 与 TrackersInProgress（v1.30.0）
+
+名字撞车，机制完全不同，**必须分清**：前者是玩家日常说的「被追踪」，后者是断线触发的
+静默定时炸弹。§6.1/§6.6 讲的一直是前者。
+
+| | `TraceTracker` | `TrackersInProgress` |
+|---|---|---|
+| 声明 | `OS.cs:114` `public TraceTracker traceTracker;` | `OS.cs:256` `public List<TrackerDetail> TrackersInProgress` |
+| 触发 | `Computer.hostileActionTaken()`（`Computer.cs:294-308`）：连着目标且 `traceTime > 0f` → `start(traceTime)` | `OS.handleDisconnection()`（`OS.cs:944-960`）：断开时若 `HasTracker && CompShouldStartTrackerFromLogs` |
+| 时长 | 目标机的 `traceTime`（各机不同） | 固定 `MinTrackTime 10f + rand(10f)`（`TrackerCompleteSequence.cs:5-7`） |
+| 表现 | **屏幕左下角红色 `TRACE :` + 两位小数**（`TraceTracker.cs:122-133`，`timerColor = new Color(170,0,0)` 见 `:37`）；跨 45%/15% 拐点提示音变密 + `warningFlash()`（`:92-98`） | **完全没有 UI** |
+| 归零 | `os.timerExpired()`（`OS.cs:1433-1452`）→ `admin?.traceEjectionDetected` → CSEC 会员走 `TraceDangerSequence`，否则 `thisComputer.crash()` | `TrackerCompleteSequence.TrackComplete`（`:13-28`）→ 删 source `/log` 证据 → `runScript("HackerScripts/TrackSequence.txt", oS, source.ip)` |
+| 停法 | `stop()`（`TraceTracker.cs:116`）；断开即自动 `active = false`（`:65-67`） | 只有 `Clear()`（`TrackerCompleteSequence.cs:16`，即归零时） |
+
+**为什么 `TrackersInProgress` 是隐形的**：全项目仅 5 处引用（`OS.cs:256/:823/:825/:827/:831/:838`、
+`OS.cs:953`、`TrackerCompleteSequence.cs:16`），唯一的读点是每帧递减循环
+（`OS.cs:823-839`），**没有任何 Draw**。玩家唯一的感知是 10~20 秒后突然出事。
+
+**计时规则有一处反直觉**（`OS.cs:825-830`）：`connectedComp == TrackersInProgress[i].comp`
+时是 `RemoveAt(i)` + `i--` + `continue` —— 即**连着被追踪目标时它不在表里**，
+只有断开后才继续走表。故「正在追踪我」的台数天然不含当前连接的那台。
+
+**`TrackSequence.txt`（实测 25 行）**：`connect` → 开 21/22/25/80 → `flash` ×6 →
+`trackseq` → `forkbomb` → `disconnect`。`forkbomb` 经 `HackerScriptExecuter.cs:155-157`
+发 `eForkBomb`，落到 `Multiplayer.cs:256-264` → `new ForkBombExe(...)` —— **打在玩家机上，玩家机崩**。
+`trackseq`（`HackerScriptExecuter.cs:316-322`）只是给 forkbomb 装二次引爆：
+`FlagNextForkbombCompletionToTrace` → `ForkBombExe.Completed`（`ForkBombExe.cs:110-114`）
+→ `TriggerETAS` = `os.timerExpired()`。注意 `ForkBombExe.Killed`（`:49-53`）会把该标志清回 false。
+
+**日志是复发源（决定了清法）**：`CompShouldStartTrackerFromLogs` 按 `/log` 判定，
+故只清计时不清日志，下次从那台断开即原地复活。⇒ `trace` 工具必须**连 `/log` 一起擦**。
+
+**v1.30.0 交付两件（用户定：B 跟着 A 走）**：
+
+1. `TraceHud.cs` —— 把那张表常驻画出来（`count` 台 + 最近一台剩余秒数）。
+   位置对齐 `TraceTracker.Draw` 的屏幕左下角与同色，但上移 `BottomOffset = 78px`
+   （`TraceTracker` 自占最下约 50px），**两套追踪同时存在也不重叠**。
+   挂 `OS.Draw` Postfix 而非面板内：危险恰恰发生在没开面板、正在终端里操作时。
+   与 `HackOverlay.OnOSDraw`（`HackOverlay.cs:94-114`）同路数自行 `Begin/End`，
+   同样带 `begun` 标志 + `catch (InvalidOperationException)` —— **HUD 比面板更该容忍**：
+   它每帧都画，错一帧的代价是少两行字，不是整个存档。
+2. `TraceTools.cs` + `ToolDispatch.Trace = "trace"` —— 停表 + 擦 `/log`，命令行与面板
+   `Tools` 表双入口（面板新增 `STOP TRACE`，**唯一不给 danger 色的按钮**：
+   它在玩家最需要保命时出现，不该给「别点」的视觉暗示）。
+   `TrackersInProgress` 由游戏线程每帧遍历，而命令行入口跑在 `OS.execute` 的独立线程
+   （`OS.cs:1754-1767）—— 故先取快照再一次性 `Clear()`，写窗口只有一次调用；
+   游戏线程的 `for` 每次迭代重读 `Count`，清空后条件当场为假，不会越界。
+
+**`traceTime` 的另一面**：`HardenTools` 把自己的机器 `traceTime` 设为 `1f`
+（`HardenTools.cs:36`），而 `hostileActionTaken` 只在 `traceTime > 0f` 时才 `start()` ——
+即「不可摧毁」同时把自己的机器变成「谁碰我谁被追踪」。
+
+---
 
 ## 7. 文件操作与清痕
 

@@ -173,6 +173,7 @@ internal static class HackOverlay
         if (_run.Total == 0)
         {
             _os.write("[autohack] No eligible targets - nothing to do.");
+            _os.write(HackEngine.NoTargetHint);
             _run = null;
             return;
         }

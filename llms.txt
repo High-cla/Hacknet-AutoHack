@@ -3,7 +3,7 @@
 > Hacknet 的 BepInEx / Pathfinder 插件：用游戏自身的原生机制一键入侵全网，带控制面板与脚本驱动。
 > 本文件面向要理解或修改本仓库的编码 agent。规范见 https://llmstxt.org
 
-当前 v1.32.1。构建产物直投游戏插件目录，无需手动拷贝：
+当前 v1.32.2。构建产物直投游戏插件目录，无需手动拷贝：
 
 ```
 D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
@@ -136,6 +136,9 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     **但被拒 ≠ 拿不下**（见坑 30）：白名单只拦 `connect`，其余动作仍直接操作 `target` 对象。
     mod 现在只跳过依赖连接的步骤（`Connect`/`CleanLogs`/`Disconnect`，见 `HackRun.DependsOnConnection`），
     并排一步 `BypassWhitelist` 把玩家 IP 追加进目标白名单后重连。
+    **「当前节点」（`here`）遇白名单会池空**：池取自 `os.connectedComp`，而被拒时该字段被置 null
+    （`Programs.cs:321`）—— 目标既没连上、也不进任何列表。故 `HackEngine.ConnectedPool` 在此情形下
+    回落到「刚被拒的那台」（见坑 31）。
 
 20. **`tracker="true"` 的机器断线即自动追踪，留痕 = 自杀** —— `OS.handleDisconnection`
     （`OS.cs:944-960`）在断开时检查目标 `/log`：只要有一行同时含玩家 IP 与
@@ -259,13 +262,30 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     `list_add_manual.txt` 明写「navigate to the folder containing your whitelist...
     append list.txt <你的IP>」；游戏比对逻辑读的正是该文件逐行 trim 比对玩家 IP
     （`Computer.cs:146-158`）。追加必须**幂等**（已在名单就别写），否则每轮入侵都会让文件增长。
-    落地：`HackEngine.HasWhitelist` / `HackEngine.AppendToWhitelist` +
+    落地：`HackEngine.HasWhitelist` / `HackEngine.BypassWhitelist` +
     `HackStepKind.BypassWhitelist`（排在 `Escalate` 之后 —— 改文件前得先拿下它）。
+    这一步的门禁是「**实际连不上**」（`ReferenceEquals(os.connectedComp, target)`），
+    **不能**写成「本轮被拒过」：直连路径不排 `Connect` 步，那种写法会让它永远静默空转。
     另：靠 `login` 提权的机器 `IsRedundantAfterLogin` 会跳过 `Escalate`，但 `TryLogin` 只认
     返回 1 的 admin 登录（内部必 `giveAdmin`），故 `adminIP` 一定已写入，绕过步骤不受影响。
     **未连接时 `probe` / 破解程序 / `solve` / `porthack` 不能回显** —— 它们的作用域是当前连接，
     未连接时敲同一条命令得到的是另一个效果（`Programs.probe` 的目标是
     `os.connectedComp ?? os.thisComputer`，`Programs.cs:1387`）。
+
+31. **别用 `os.display.commandArgs` 反推「刚连过哪台」—— 白名单会把它抹掉** —— 想从
+    「玩家点了哪个节点」反推被拒目标时，这是最直觉的候选（`Programs.connect` 无条件写
+    `commandArgs = ["connect", ip]`，`Programs.cs:270`；而 `autohack` 是 Pathfinder 自定义命令，
+    被 `CommandExecuteEvent` 拦在 `ProgramRunner.ExecuteProgram` 入口，那处覆盖不执行）。
+    **但白名单拒绝会连锁再执行一条 `disconnect`**：`Computer.connect` 调 `DisconnectTarget()`
+    （`Computer.cs:386`）→ `os.execute("disconnect")`（`WhitelistConnectionDaemon.cs:79`）；
+    而 `ExecuteProgram` 的 `disconnect` 分支**不像 `connect` 那样把 `flag` 置 false**
+    （`ProgramRunner.cs:15-23`），于是收尾的 `os.display.commandArgs = array`
+    （`ProgramRunner.cs:616`）把 `["connect", ip]` 覆盖成 `["disconnect"]` —— 下一帧读到的
+    目标已经没了。实测日志里成对的 `connect <ip>` / `disconnect` 就是「地图点击 + 被拒自动断开」。
+    正确做法：挂 `WhitelistConnectionDaemon.DisconnectTarget` 的 Postfix 记下那一刻的 `comp`
+    （`src/AutoHack/RefusedWhitelist.cs`）—— 那是游戏自己的「我拒绝了它」动作，
+    `Computer.connect`（:386）与 `navigatedTo`（:73）两条拒绝路径都走到。
+    查询时用游戏自己的 `IPCanPassWhitelist` 现算失效，绕过成功后记录自动作废。
 
 ## 仓库文档
 
@@ -283,7 +303,8 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
 - [src/AutoHack/ExeTools.cs](src/AutoHack/ExeTools.cs): 程序补全 —— 幂等填充 `/bin`
 - [src/AutoHack/HardenTools.cs](src/AutoHack/HardenTools.cs): 自身加固（不可逆）
 - [src/AutoHack/ToolFiles.cs](src/AutoHack/ToolFiles.cs): 工具的落盘公共部分
-- [src/AutoHack/HackEngine.cs](src/AutoHack/HackEngine.cs): 决策层 —— 目标解析、端口表、提权门槛、清痕
+- [src/AutoHack/HackEngine.cs](src/AutoHack/HackEngine.cs): 决策层 —— 目标解析、端口表、提权门槛、清痕、白名单绕过
+- [src/AutoHack/RefusedWhitelist.cs](src/AutoHack/RefusedWhitelist.cs): 记下「刚被白名单拒的那台」，供 `here` 在池空时回落（见坑 31）
 - [src/AutoHack/HackRun.cs](src/AutoHack/HackRun.cs): 执行层 —— 动作序列、逐帧推进、指令回显
 - [src/AutoHack/HackScript.cs](src/AutoHack/HackScript.cs): 入侵脚本的解析与校验（`script=` 模式）
 - [src/SaveFix/SaveFixPlugin.cs](src/SaveFix/SaveFixPlugin.cs): 独立插件 HacknetSaveFix，修游戏本体存档 NRE

@@ -384,8 +384,14 @@ internal sealed class HackRun
                 break;
 
             case HackStepKind.BypassWhitelist:
-                // 只对确实被拒的目标动手 —— 连接正常的机器没必要（也不该）改它的白名单。
-                if (!_refused.Contains(target))
+                // 只对确实连不上的目标动手 —— 连接正常的机器没必要（也不该）改它的白名单。
+                //
+                // 判据不能写成「本轮被拒过」（_refused）：只有 Connect 步失败才会登记，
+                // 而「当前节点」模式压根不排 Connect 步（BuildSteps 里 alreadyConnected
+                // 为真时跳过，见 :679-683），于是这一步在所有直连路径上都静默空转 ——
+                // 正是「当前节点模式下带白名单的机器没反应」的最后一道门。
+                // 改为核对连接结果：连着就别碰，连不上才绕。
+                if (ReferenceEquals(os.connectedComp, target))
                 {
                     break;
                 }
@@ -721,7 +727,7 @@ internal sealed class HackRun
             // 而破端口/提权不经连接、照样能拿下 —— 拿下之后再把自己的 IP 追加进它的
             // /Whitelist/list.txt，重连即恢复会话，后续清痕与断开才走得通。
             // 这是游戏设计的正路（官方任务 PAE2_Whitelist.xml 的 list_add_manual.txt
-            // 明写「append list.txt <你的IP>」），详见 HackEngine.AppendToWhitelist。
+            // 明写「append list.txt <你的IP>」），详见 HackEngine.BypassWhitelist。
             if (HackEngine.HasWhitelist(target))
             {
                 steps.Add(new HackStep(HackStepKind.BypassWhitelist, target, default, null));

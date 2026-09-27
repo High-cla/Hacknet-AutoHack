@@ -68,6 +68,7 @@ internal static class PendingRuns
             if (run.Total == 0)
             {
                 __instance.write("[autohack] No eligible targets found.");
+                __instance.write(HackEngine.NoTargetHint);
                 Pending.TryRemove(__instance, out _);
                 return;
             }

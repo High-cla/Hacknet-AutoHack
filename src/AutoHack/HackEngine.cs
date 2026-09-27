@@ -440,7 +440,7 @@ internal static class HackEngine
 
         var pool = options.Scope switch
         {
-            HackScope.Connected => os.connectedComp is { } connected ? [connected] : [],
+            HackScope.Connected => ConnectedPool(os),
             HackScope.Network => options.AllNodes ? ConnectableComputers(os) : ReachableComputers(os),
             _ => options.Targets
                     .Select(id => ComputerLookup.Find(id))
@@ -500,6 +500,30 @@ internal static class HackEngine
 
         return new TargetPlan(result, skipped, skippedOwned, skippedHopeless);
     }
+
+    /// <summary>
+    /// 「当前节点」的目标池：已连接的机器；没连上时反推**刚被拒的那台**。
+    ///
+    /// 为什么需要反推：地图上点节点走 <c>os.runCommand("connect " + ip)</c>
+    /// （NetworkMap.cs:573），而白名单会拒这个连接 —— <c>Computer.connect</c>
+    /// 调 <c>DisconnectTarget()</c> 后 return false（Computer.cs:383-388），
+    /// <c>Programs.connect</c> 写完 "External Computer Refused Connection" 再把
+    /// <c>os.connectedComp</c> 置 null（Programs.cs:313-322）。于是目标**既没连上、
+    /// 也不进任何列表** —— 只看 <c>connectedComp</c> 的话，「当前节点」就无从知道
+    /// 玩家点的是哪台，表现为「敲了 autohack 什么也没发生」（池空 ⇒ Total == 0）。
+    ///
+    /// 反推依据见 <see cref="RefusedWhitelist.LastRefused"/>。玩家是**显式**点的那个节点，
+    /// 与 <c>here</c>、点名同级，故按「刻意选择」处理：不做 SkipOwned 剔除。
+    /// </summary>
+    private static Computer[] ConnectedPool(OS os)
+        => os.connectedComp is { } connected
+            ? [connected]
+            : RefusedWhitelist.LastRefused(os) is { } refused ? [refused] : [];
+
+    /// <summary>目标池为空时的补充说明 —— 面板与命令行两个入口共用，措辞只写一次。</summary>
+    internal const string NoTargetHint =
+        "[autohack]   'here' follows the session; nothing is connected - "
+        + "name the node, or use 'allnodes'.";
 
     /// <summary>
     /// 广度优先：从玩家机与已发现的节点出发，沿 <c>Computer.links</c> 连线展开可达的服务器。

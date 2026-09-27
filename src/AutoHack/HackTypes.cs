@@ -43,6 +43,7 @@ internal sealed record HackOptions(
     bool AllNodes,
     bool UseCredentials,
     bool ShowExes,
+    bool ResetIP,
     HackSpeed Speed,
     string Script)
 {
@@ -81,6 +82,8 @@ internal sealed record HackOptions(
     private static readonly string[] FastAliases = ["fast", "quick"];
     private static readonly string[] InstantAliases = ["instant", "turbo", "sameframe"];
     private static readonly string[] ShowExesAliases = ["show", "exes", "native", "anim"];
+    private static readonly string[] ResetIPAliases = ["newip", "reset-ip", "resetip"];
+    private static readonly string[] NoResetIPAliases = ["noknewip", "keep-ip", "keepip"];
     private static readonly string[] NoShowExesAliases = ["noshow", "no-exes", "quiet"];
 
     /// <summary>
@@ -119,6 +122,10 @@ internal sealed record HackOptions(
         // exe 只是把原版动画挂进 RAM 面板（见 NativeExes），幂等、不影响战果。
         // 缺省开是为了让脚本跑起来有可看的演出；要安静跑用 noshow。
         var showExes = true;
+
+        // 缺省开：收尾换 IP 是游戏原生的「保命」动作（ISP 服务器的 Assign New IP），
+        // 自动做是为了让玩家不必在追踪危机里手忙脚乱。要固定 IP（如任务要求）可取消勾选。
+        var resetIP = true;
         var speed = HackSpeed.Normal;
         string script = null;
 
@@ -149,6 +156,8 @@ internal sealed record HackOptions(
             if (NoCredentialAliases.Contains(lower)) { useCredentials = false; continue; }
             if (ShowExesAliases.Contains(lower)) { showExes = true; continue; }
             if (NoShowExesAliases.Contains(lower)) { showExes = false; continue; }
+            if (ResetIPAliases.Contains(lower)) { resetIP = true; continue; }
+            if (NoResetIPAliases.Contains(lower)) { resetIP = false; continue; }
             if (SlowAliases.Contains(lower)) { speed = HackSpeed.Normal; continue; }
             if (FastAliases.Contains(lower)) { speed = HackSpeed.Fast; continue; }
             if (InstantAliases.Contains(lower)) { speed = HackSpeed.Instant; continue; }
@@ -181,7 +190,7 @@ internal sealed record HackOptions(
 
         return new HackOptions(
             scope, ids, delay, clearLogs, clearOwnLogs, uploadMarker, connectFirst, disconnect, skipOwned,
-            allNodes, useCredentials, showExes, speed, script);
+            allNodes, useCredentials, showExes, resetIP, speed, script);
     }
 }
 

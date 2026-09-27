@@ -106,6 +106,15 @@ internal sealed class HackPanelState
     internal bool ShowExes { get; set; } = true;
 
     /// <summary>
+    /// 收尾是否把玩家机换成一个新 IP（缺省**开**）。
+    ///
+    /// 走游戏原生的「换 IP 保命」动作（ISP 服务器的 `Assign New IP`，见 IpTools）。
+    /// 缺省开是因为它同时具备保命与清痕双重作用：追踪者判定看的是日志里的玩家 IP，
+    /// 换掉 IP 等于让已有记录失去指向。要固定 IP（如某些任务要求特定地址）可取消勾选。
+    /// </summary>
+    internal bool ResetIP { get; set; } = true;
+
+    /// <summary>
     /// 入侵脚本文件名；null = 内置次序。
     ///
     /// 面板不提供脚本选择器 —— 一份脚本决定整轮的次序与动作集，要把它塞进面板
@@ -127,6 +136,7 @@ internal sealed class HackPanelState
         AllNodes,
         UseCredentials,
         ShowExes,
+        ResetIP,
 
         // 面板不再提供节奏档位（三档 UI 已删）：面板一律走原生节奏，
         // 命令行仍可用 slow / fast / instant 显式选档（见 HackTypes.Parse）。
@@ -368,9 +378,9 @@ internal static class HackPanel
 
         state.ConnectFirst = Check(state.IdBase + 20, left, y, ColumnWidth, state.ConnectFirst, Loc.T("connect first"), c);
 
-        // 这个控件只管断开。清追踪（TraceTracker 倒计时 + TrackersInProgress 脱机追踪
-        // 并擦其 /log）已改为每轮收尾无条件执行，不再由这里控制 —— 理由见
-        // HackPanelState.Disconnect 与 HackOptions.WantsAntiTrace 的文档注释。
+        // 这个控件只管断开。清追踪（TraceTracker 倒计时 + TrackersInProgress
+        // 脱机追踪；不碰对方 /log）已改为每轮收尾无条件执行，不再由这里控制 ——
+        // 理由见 HackPanelState.Disconnect 与 TraceTools 的文档注释。
         state.Disconnect = Check(state.IdBase + 21, left + ColumnWidth + 8, y, ColumnWidth, state.Disconnect, Loc.T("disconnect when done"), c);
         y += CheckRowHeight;
 
@@ -379,6 +389,7 @@ internal static class HackPanel
         y += CheckRowHeight;
 
         state.ShowExes = Check(state.IdBase + 24, left, y, ColumnWidth, state.ShowExes, Loc.T("native exes"), c);
+        state.ResetIP = Check(state.IdBase + 25, left + ColumnWidth + 8, y, ColumnWidth, state.ResetIP, Loc.T("new IP after run"), c);
         y += CheckRowHeight;
 
         next = y + Gap;

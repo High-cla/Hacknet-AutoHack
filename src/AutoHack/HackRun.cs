@@ -485,24 +485,30 @@ internal sealed class HackRun
         Finished = true;
         Phase = "COMPLETE";
 
-        // 收尾反追踪 —— 无条件执行，不是选项：两套追踪一起止、并擦掉追踪者的 /log。
+        // 收尾反追踪 —— 无条件执行，不是选项：止住倒计时 + 清空脱机追踪列表。
+        // **不擦追踪者的 /log**（用户定）：那是目标机的操作史，改由 wipe target logs 单独决定。
+        // 已知代价 —— 追踪的复发源正是那些日志：OS.handleDisconnection（OS.cs:944-960）
+        // 在每次断开时检查刚断开那台的 /log，只要有一行同时含玩家 IP 与
+        // FileCopied/FileDeleted/FileMoved，就自动排入一条新的 TrackerDetail
+        // （判据见 TrackerCompleteSequence.CompShouldStartTrackerFromLogs，:30-47），
+        // 10~20 秒后计时归零端掉玩家。故同一台机器上的追踪可能复发 —— 要断源就开 wipe target logs。
         //
-        // 为什么必须擦日志才叫「清干净」—— 追踪的复发源就是日志：
-        // OS.handleDisconnection（OS.cs:944-960）在每次断开时检查刚断开那台的 /log，
-        // 只要有一行同时含玩家 IP 与 FileCopied/FileDeleted/FileMoved，就自动排入一条
-        // 新的 TrackerDetail（判据见 TrackerCompleteSequence.CompShouldStartTrackerFromLogs，
-        // :30-47），10~20 秒后计时归零端掉玩家。只清计时不清日志，下次从那台断开原地复活。
-        //
-        // 排在换 IP 之前：TraceTools 擦 /log 的判据是「旧 IP 是否在日志里」
-        // （HackEngine.ClearLogs 按 os.thisComputer.ip 匹配），必须在 IP 变更前完成。
+        // 排在换 IP 之前：语义上「先收拾追踪、再换身份」；且换 IP 会改掉
+        // os.thisComputer.ip，任何按旧 IP 匹配的判断都必须在它之前做完。
         TraceTools.Run(os);
 
         // 换 IP：游戏原生的「保命」动作（ISPDaemon 的 "Assign New IP"），
-        // 顺带把本轮已控目标的归属迁移到新 IP。理由与代价见 IpTools 的文档注释。
-        var ipNote = IpTools.Reset(os);
-        if (ipNote != null)
+        // 并把全图已控机器的归属迁移到新 IP。理由与代价见 IpTools 的文档注释。
+        //
+        // 排在清追踪之后：TraceTools 判「旧 IP 是否在日志里」只在擦日志时才有意义 ——
+        // 现在不擦日志了，但顺序仍然保持，因为语义上「先收拾追踪、再换身份」更清楚。
+        if (Options.ResetIP)
         {
-            os.write("[autohack] new local IP: " + ipNote + ".");
+            var ipNote = IpTools.Reset(os);
+            if (ipNote != null)
+            {
+                os.write("[autohack] new local IP: " + ipNote + ".");
+            }
         }
 
         foreach (var target in _targets)

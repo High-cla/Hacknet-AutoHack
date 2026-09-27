@@ -230,11 +230,13 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     （`:78`）算一次，那一刻读到的已是新值，**不要手动重算**：`reset()`（`:319-331`）
     不重算它，手动补的那份重启后失效。
 
-28. **收尾清追踪是恒定动作，不是选项** —— 每轮 `autohack run` 的 `HackRun.Finish`
-    无条件调 `TraceTools.Run`（止两套追踪 + 擦追踪者 /log）。它曾与「跑完断开」合成一个
-    复选框，现拆开：断开是行为选择，清追踪只是收拾烂摊子。
-    另：**清追踪必须排在换 IP 之前** —— `TraceTools.Run` 擦 /log 的判据是
-    「`os.thisComputer.ip` 是否出现在日志里」，先换 IP 就擦不到了（`HackRun.Finish` 已按此排）。
+28. **收尾清追踪是恒定动作，且不擦追踪者 /log**（用户定）—— 每轮 `autohack run` 的
+    `HackRun.Finish` 无条件调 `TraceTools.Run`：止 `traceTracker` 倒计时、清
+    `TrackersInProgress` 列表，**但不碰对方 /log**。/log 是目标机自己的操作史，擦它属于
+    改写对方状态，该由 `wipe target logs` 单独决定，反追踪不顺手替玩家做。
+    已知代价：`CompShouldStartTrackerFromLogs`（`TrackerCompleteSequence.cs:30-47`）的
+    复发源就是那些日志，故同一台机器上的追踪**可能复发**；要断源就显式开 `wipe target logs`。
+    顺序约定：`Finish` 里清追踪排在换 IP 之前 —— 先收拾追踪、再换身份。
 
 29. **换 IP 会清空全部肉鸡标记，必须同步迁移** —— 提权时游戏把玩家当时的 IP 写进目标机
     （`Computer.cs:740 adminIP = ipFrom`），判据是 `adminIP == os.thisComputer.ip`

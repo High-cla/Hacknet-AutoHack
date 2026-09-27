@@ -54,6 +54,7 @@ internal static class Loc
             ["upload marker"] = "上传标记",
             ["wipe my logs"] = "清除我的日志",
             ["native exes"] = "原生演出",
+            ["new IP after run"] = "跑完换 IP",
 
             // TOOLS
             ["TOOLS"] = "工具",

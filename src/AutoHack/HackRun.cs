@@ -394,16 +394,15 @@ internal sealed class HackRun
 
                 // 这一步不是终端指令（未连接状态下 <c>append</c> 的「当前目录」是玩家
                 // 自己的文件系统，回显出来会是一条假命令），故不发 Echo，只报状态。
-                if (HackEngine.AppendToWhitelist(target, os.thisComputer.ip))
-                {
-                    os.write("[autohack] " + target.name + " :: local IP appended to /Whitelist/list.txt");
-                }
-                else
+                var bypassNote = HackEngine.BypassWhitelist(os, target, os.thisComputer.ip);
+                if (bypassNote == null)
                 {
                     os.write("[autohack] " + target.name
-                        + " :: /Whitelist/list.txt absent or IP already listed - staying session-less");
+                        + " :: no /Whitelist folder to touch - staying session-less");
                     break;
                 }
+
+                os.write("[autohack] " + target.name + " :: " + bypassNote);
 
                 // 白名单已放行，重连应当成功；成了就恢复正常流程
                 // （清痕与断开都依赖连接，之前被 DependsOnConnection 挡掉了）。

@@ -3380,7 +3380,7 @@ Apply Login → TryLogin → login("admin","alpine") == 1 → giveAdmin
 
 ### 31.2 根因一：连接是「可失败但无返回值」的
 
-NaN
+`Computer.connect(string ipFrom)`（`Computer.cs:377-397`）：
 
 ```csharp
 if (disabled) return false;

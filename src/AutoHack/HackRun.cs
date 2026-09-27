@@ -299,6 +299,13 @@ internal sealed class HackRun
                 Phase = "CRACKING PORT " + step.Port.DisplayPort;
                 Echo(os, step.Command);
                 HackEngine.OpenPort(target, step.Port, os.thisComputer.ip);
+
+                // 状态已写好，这里只是把原版动画挂上 RAM 面板（缺省关）。
+                if (Options.ShowExes)
+                {
+                    NativeExes.Show(os, target, step.Port);
+                }
+
                 break;
 
             case HackStepKind.SolveFirewall:

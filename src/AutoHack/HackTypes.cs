@@ -42,6 +42,7 @@ internal sealed record HackOptions(
     bool SkipOwned,
     bool AllNodes,
     bool UseCredentials,
+    bool ShowExes,
     HackSpeed Speed,
     string Script)
 {
@@ -73,6 +74,8 @@ internal sealed record HackOptions(
     private static readonly string[] SlowAliases = ["slow", "normal"];
     private static readonly string[] FastAliases = ["fast", "quick"];
     private static readonly string[] InstantAliases = ["instant", "turbo", "sameframe"];
+    private static readonly string[] ShowExesAliases = ["show", "exes", "native", "anim"];
+    private static readonly string[] NoShowExesAliases = ["noshow", "no-exes", "quiet"];
 
     /// <summary>
     /// 脚本模式：用一份动作表取代内置次序。<c>script=&lt;文件名&gt;</c>，
@@ -106,6 +109,10 @@ internal sealed record HackOptions(
         // 端口破解 / 防火墙 / 跳板三套机制实际都不会再被走到，等于架空玩法。
         // 要便利性再显式 creds。
         var useCredentials = false;
+
+        // 缺省关：原生破解程序是纯演出 —— 端口状态由 HackEngine.OpenPort 同步写好，
+        // exe 只是把原版动画挂进 RAM 面板（见 NativeExes）。关掉时行为与本功能存在前相同。
+        var showExes = false;
         var speed = HackSpeed.Normal;
         string script = null;
 
@@ -134,6 +141,8 @@ internal sealed record HackOptions(
             if (RedoAliases.Contains(lower)) { skipOwned = false; continue; }
             if (CredentialAliases.Contains(lower)) { useCredentials = true; continue; }
             if (NoCredentialAliases.Contains(lower)) { useCredentials = false; continue; }
+            if (ShowExesAliases.Contains(lower)) { showExes = true; continue; }
+            if (NoShowExesAliases.Contains(lower)) { showExes = false; continue; }
             if (SlowAliases.Contains(lower)) { speed = HackSpeed.Normal; continue; }
             if (FastAliases.Contains(lower)) { speed = HackSpeed.Fast; continue; }
             if (InstantAliases.Contains(lower)) { speed = HackSpeed.Instant; continue; }
@@ -166,7 +175,7 @@ internal sealed record HackOptions(
 
         return new HackOptions(
             scope, ids, delay, clearLogs, clearOwnLogs, uploadMarker, connectFirst, disconnect, skipOwned,
-            allNodes, useCredentials, speed, script);
+            allNodes, useCredentials, showExes, speed, script);
     }
 }
 

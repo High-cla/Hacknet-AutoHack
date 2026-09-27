@@ -86,6 +86,14 @@ internal sealed class HackPanelState
     /// </summary>
     internal bool UseCredentials { get; set; } = false;
 
+    /// <summary>
+    /// 是否把原生破解程序挂进 RAM 面板当演出（缺省关）。
+    ///
+    /// 只是演出：端口状态由 <see cref="HackEngine.OpenPort"/> 同步写好，
+    /// exe 到点后自己再调一次是幂等的。关掉时行为与本功能存在前逐字节相同。
+    /// </summary>
+    internal bool ShowExes { get; set; } = false;
+
     /// <summary>推进节奏档位。缺省 Normal = 与旧版行为一致，快档需显式选。</summary>
     internal HackSpeed Speed { get; set; } = HackSpeed.Normal;
 
@@ -110,6 +118,7 @@ internal sealed class HackPanelState
         SkipOwned,
         AllNodes,
         UseCredentials,
+        ShowExes,
         Speed,
         Script);
 }
@@ -191,7 +200,7 @@ internal static class HackPanel
         SectionHeight + SegmentHeight + Gap
         + SectionHeight + SliderHeight + Gap
         + SectionHeight + SegmentHeight + Gap
-        + CheckRowHeight * 4 + Gap;
+        + CheckRowHeight * 5 + Gap;
 
     /// <summary>本帧面板占据的矩形。供 Update 阶段提前阻断下层控件点击。</summary>
     internal static Rectangle LastFrame { get; private set; }
@@ -377,6 +386,9 @@ internal static class HackPanel
 
         state.UploadMarker = Check(state.IdBase + 22, left, y, ColumnWidth, state.UploadMarker, Loc.T("upload marker"), c);
         state.ClearOwnLogs = Check(state.IdBase + 23, left + ColumnWidth + 8, y, ColumnWidth, state.ClearOwnLogs, Loc.T("wipe my logs"), c);
+        y += CheckRowHeight;
+
+        state.ShowExes = Check(state.IdBase + 24, left, y, ColumnWidth, state.ShowExes, Loc.T("native exes"), c);
         y += CheckRowHeight;
 
         next = y + Gap;

@@ -231,9 +231,9 @@ src/AutoHack/
 | 项 | 值 |
 |---|---|
 | 产物路径 | `D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll` |
-| 当前版本 | v1.24.0 |
-| 字节数 | 90112 |
-| MD5 | `88bebb87e43d8ce49125c87e5101006c` |
+| 当前版本 | v1.25.0 |
+| 字节数 | 92160 |
+| MD5 | `0fdbbe8c59b6755101528a0edb44e038` |
 
 核对流程：清理 `obj`/`bin` → 构建（须 0 警告 0 错误）→ 记 `md5sum` 与字节数，
 与上一版比对。构建成功即证明源码已编入（增量缓存已清，漏编会报错）；
@@ -244,6 +244,7 @@ MD5 只用于确认部署确实是新的那个产物。
 
 | 版本 | 字节数 | MD5 | 要点 |
 |---|---|---|---|
+| v1.25.0 | 92160 | `0fdbbe8c59b6755101528a0edb44e038` | 原生破解程序演出：`show` 开关（缺省关）把游戏自己的 `SSHCrackExe` 等挂进 RAM 面板放原版动画；端口状态仍由 `HackEngine.OpenPort` 同步保证，exe 的 `Completed()` 再开一次是幂等的。9 个程序入白名单（其余 3 个无 case、1 个要参数、1 个开错端口）（§33） |
 | v1.24.0 | 90112 | `88bebb87e43d8ce49125c87e5101006c` | `pull` 落点统一到 `/home/misc`（游戏自建的夹，不再按扩展名分流到 `/bin`/`/sys`/`/home`）；删除 `RemoteTools.Destination`，新增 `ToolFiles.Misc`（§32） |
 | v1.23.0 | 90624 | `a6f0ee9ef576f0fbd5de764447301067` | 连接被拒不再是假战果：核对 `os.connectedComp`，被拒目标整段跳过并如实报 0/0。`tracker="true"` 的机器断线即自动追踪（`deleteFile` 必留带玩家 IP 的 `FileDeleted` 行），故无条件强制清痕（§31） |
 | v1.22.0 | 89600 | `0c3d23467926cdb469c088b8e4ee1ae3` | EOS 设备：端口容量天生等于门槛（2 = 2）故永不提权 —— 那是游戏刻意的，正路是全系统一的固定密码 `alpine`。新增 `RevealAttachedDevices` 免跑 exe 补发现（原版 `eosDeviceScan.exe` 等价物），EOS 放行 login 路径（§30） |

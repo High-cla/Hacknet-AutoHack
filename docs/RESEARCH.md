@@ -3517,3 +3517,84 @@ folder.folders.Add(new Folder("misc"));
 ### 32.6 交付
 
 90112 B / `88bebb87e43d8ce49125c87e5101006c`。构建 0 警告 0 错误。
+
+## §33 v1.25.0：原生破解程序演出（`show` 开关）
+
+### 33.1 需求
+
+入侵时带上原版的破解动画（SSHCrack 的网格、FTPBounce 的弹跳等）。开关缺省**关**，
+开启后不改变战果 —— 只是演出。
+
+### 33.2 关键前提：Pathfinder 已把原生 porthack 门禁修活
+
+原版 `OS.launchExecutable` 的 porthack 分支读 `connectedComp.portsOpen` 求和
+（`OS.cs:1911-1916`），而该字段在 Pathfinder 下**恒为 0**（`portsOpen` 被整体换成
+`ConditionalWeakTable` PortTable，`Pathfinder.Port/ComputerExtensions.cs:25`）。
+
+但 Pathfinder 用 IL 改写删掉了那段求和、换成 `CountOpenPorts(connectedComp)` ——
+`FixPortHack`（`ComputerExtensions.cs:486-513`，`:509 RemoveRange(30)`，
+`:512 CountOpenPorts`）。故 `os.launchExecutable("porthack", ...)` 在 Pathfinder 下**可用**。
+
+### 33.3 exe 的最终效果与 mod 同路（幂等）
+
+| exe | `Completed()` 做什么 | 出处 |
+|---|---|---|
+| SSHCrack | `computer.openPort(22, os.thisComputer.ip)` | `SSHCrackExe.cs:223-232` |
+| FTPBounce | `Programs.getComputer(os, targetIP)?.openPort(21, ...)` | `FTPBounceExe.cs:153` |
+| SMTPoverflow | 同上，端口 25 | `SMTPoverflowExe.cs:169` |
+| HTTPExploit | 同上，端口 80 | `HTTPExploitExe.cs:161` |
+| SQLExploit | 同上，端口 1433 | `SQLExploitExe.cs:235` |
+| MedicalPort | 同上，端口 104 | `MedicalPortExe.cs:110` |
+| TorrentPort | `computer.openPort(6881, ...)` | `TorrentPortExe.cs:74` |
+| PacificPort | `computer.openPort(192, ...)` | `PacificPortExe.cs:49` |
+| RTSPPort | `computer.openPort(554, ...)` | `RTSPPortExe.cs:80` |
+
+全部落在 `Computer.openPort`，正是 mod 的 `HackEngine.OpenPort`（`HackEngine.cs:285`）
+走的同一条路。Pathfinder 的 `OpenPortPrefix` 只做 `portState.Cracked = true` 就
+`return false`（`ComputerExtensions.cs:182-197`），**幂等**，故两边不冲突、不重复计数。
+状态在 `HackEngine.OpenPort` 里已同步写好，**exe 只是演出**；exe 被中途打断不影响战果。
+
+### 33.4 三条硬约束（决定了白名单）
+
+1. **`ExeModule` 构造时把 `targetIP` 定成「当前连接目标，没连接就是本机」**
+   （`ExeModule.cs:38`：`targetIP = operatingSystem.connectedComp == null ? thisComputer.ip : connectedComp.ip`）。
+   故必须已连接目标才能放，否则动画打在自己身上。`NativeExes.Show` 用
+   `ReferenceEquals(os.connectedComp, target)` 把这一条写成前置断言。
+2. **3 个端口有破解程序却在 switch 里没有 case**（`OS.cs:2003-2154`）：
+   3724 `WoWHack.exe` / 3659 `confloodEOS.exe` / 9418 `GitTunnel.exe` —— 传进去是静默空操作。
+3. **两个排除项**：`SSLTrojan.exe`(443) 的入口直接解引用 `args.Length`（`SSLPortExe.cs:44`），
+   传 null 参数必崩；`FTPSprint.exe`(211) 的 `Completed()` 开的是 **21** 而不是 211
+   （`FTPFastExe.cs:60`）—— 会把端口开错。
+
+入表的 9 个：SSHcrack / FTPBounce / SMTPoverflow / WebServerWorm / SQL_MemCorrupt /
+KBT_PortTest / TorrentStreamInjector / PacificPortcrusher / RTSPCrack。
+
+### 33.5 数据必须一并传
+
+`launchExecutable(exeName, exeFileData, targetPort, ...)` 靠 **data** 反查 exe 类型
+（`OS.cs:2000` → `PortExploits.GetExeNameForData` 逐项比对 `crackExeData` /
+`crackExeDataLocalRNG`），只给名字匹配不上。故取 `PortExploits.crackExeData[codePort]`。
+
+### 33.6 RAM 门禁（不处理）
+
+`OS.addExe`（`OS.cs:2162-2179`）在 `ramAvaliable < exe.ramCost` 时只写一行
+"Insufficient Memory"、不挂 exe。缺省 `totalRam = 761`（`OS.cs:74`），
+而 exe 开销 190~400（SSH 242 / SMTP 356 / HTTP 208 / FTP 210 / Medical 400）——
+同时挂 2~3 个就满。演出失败不影响战果，故**不为它做预判或扩容**。
+另：游戏**没有任何原生 RAM 扩容入口**，`totalRam` 全项目只在 `OS.cs:74` 初始化，
+另两处 `:379`/`:840` 都是重置；唯一第三方参照 `SASetRAM`
+（`workshop/ZeroDayToolKit.decompiled.cs:5524`）的公式漏了 `contentStartOffset`，与游戏不一致。
+
+### 33.7 提权步不放 porthack（用户定）
+
+原生 `PortHackExe.Completed()` → `os.takeAdmin(targetIP)`（`PortHackExe.cs:120-126`）
+→ `giveAdmin` + `runCommand("connect " + ip)`（`OS.cs:1871-1879`）
+→ `Programs.connect` 第一件事就是 `navigationPath.Clear()` 并断开旧连接、写 "Disconnected"
+（`Programs.cs:235-239`）。这正是 mod 在 `HackRun.cs:315-318` 刻意避开 `os.takeAdmin` 的原因。
+故提权仍只用 `giveAdmin`。
+
+### 33.8 交付
+
+92160 B / `0fdbbe8c59b6755101528a0edb44e038`。构建 0 警告 0 错误。
+新增 `NativeExes.cs`；`HackOptions` 加 `ShowExes`（第 12 位，在 `UseCredentials` 之后）；
+面板复选框 `IdBase + 24`；命令行 `show` / `noshow`。

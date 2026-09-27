@@ -62,6 +62,7 @@ internal static class Loc
             ["anti-trace dc"] = "反追踪断开",
             ["upload marker"] = "上传标记",
             ["wipe my logs"] = "清除我的日志",
+            ["native exes"] = "原生演出",
 
             // TOOLS
             ["TOOLS"] = "工具",

@@ -21,7 +21,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    **绝不下载 Release 附件回来比对** —— 只读构建输出目录（即游戏插件目录）那份产物的 MD5。
 3. **`gh release create` 绝不自动执行** —— 等用户显式发令。`git push` 可以直接做。
 
-**二十三个最容易踩的坑**（都带行号，可直接 grep）
+**二十二个最容易踩的坑**（都带行号，可直接 grep）
 
 1. `Computer.portsOpen` 恒为 0 —— Pathfinder 用 Harmony Prefix 接管 `openPort`/`openPorts`
    并 `return false`，状态改存 `PortState.Cracked`。任何读 `portsOpen` 的判断都是错的，
@@ -143,33 +143,32 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     211 的 `Completed()` 开的是 21 而非 211（`FTPFastExe.cs:60`，开错端口）。
     数据必须一并传 —— `launchExecutable` 靠 data 反查 exe 类型（`OS.cs:2000`），只给名字匹配不上。
 
-22. **`Computer.links` 是**有向图**，只走出边会漏掉整片机器** —— `<link target=X>`
-    （`ComputerLoader.cs:344-356`）与 `<dlink target=X>`（`:357-373`）**都只往自己的 `links`
-    里加边**，`dlink` 的「d」是**延迟**解析（目标机可能后加载）而**不是双向**。原生
-    `Programs.scan`（`Programs.cs:1282`）与 `NetworkMap` 画线（`NetworkMap.cs:506-512`
-    ）也都只看 `computer2.links`。于是「**别的机器指向已发现机器**」这批入边永远走不到 ——
-    真实存档里「有入边、无出边」的机器占 **两成以上**（147 台里 32 台）。修法是**读取侧无向化**：
-    预建入边邻接表 `incoming[i]`，出边入边各展开一遍（`HackEngine.BuildIncoming` / `Expand`）。
-    **绝不往 `comp.links` 里补反向边** —— 那会写进存档的 `<links>`（`Computer.cs:926-930`），
-    污染玩家的网络图。附带警告：存档写到 **2000000 字节**即截断、XML 没收尾
-    （`RemoteSaveStorage.cs:31`），拿存档做图分析前先确认没被截断。
-    独立印证：`docs/EXTENSIONS.md` §4.2 的官方占位符表与 `PortExploits.cracks` 差集恰好是
-    `1, 8, 3659, 3724, 9418` —— 后三个正是无 case 的那三个，官方自己也没给它们占位符。
+22. **`Computer.links` 是**有向图**，且原生 `scan` 的三处行为都不该抄** ——
+    `<link target=X>`（`ComputerLoader.cs:344-356`）与 `<dlink target=X>`（`:357-373`）
+    **都只往自己的 `links` 里加边**，`dlink` 的「d」是**延迟**解析（目标机可能后加载）而**不是双向**。
+    原生 `Programs.scan`（`Programs.cs:1282`）与 `NetworkMap` 画线（`NetworkMap.cs:506-512`）
+    也都只看 `computer2.links`。于是「**别的机器指向已发现机器**」这批入边永远走不到 ——
+    真实存档里「有入边、无出边」的机器占 **两成以上**（147 台里 32 台）。
+    修法是**读取侧无向化**：预建入边邻接表 `incoming[i]`，出边入边各展开一遍
+    （`HackEngine.BuildIncoming` / `Expand`）。**绝不往 `comp.links` 里补反向边** ——
+    那会写进存档的 `<links>`（`Computer.cs:926-930`），污染玩家的网络图。
 
-23. **扫描 ≠ 入侵，别把原生 `scan` 的门禁与节流一起抄进来** —— 原生
-    `Programs.scan`（`Programs.cs:1258-1299`）有三处是它作为**终端命令**的职责，
-    不是扫描这件事本身：只走 `computer2.links` 出边（`:1282`，入边整片漏，见坑 22）、
-    逐条 `Thread.Sleep(400)`（`:1291`，够 30 台就卡游戏线程 12 秒）、
-    `hasConnectionPermission(admin: true)` 门禁（`:1279`）。本 mod 的扫描
-    （`ScanTools.Run`）三处全不抄：**直接复用 `HackEngine.ReachableComputers`** ——
+    原生 `scan` 另有两处是它作为**终端命令**的职责，不是扫描这件事本身：
+    逐条 `Thread.Sleep(400)`（`:1291`，够 30 台就卡游戏线程 12 秒）与
+    `hasConnectionPermission(admin: true)` 门禁（`:1279`）。mod 的扫描
+    （`ScanTools.Run`）三处全不抄，**直接复用 `HackEngine.ReachableComputers`** ——
     它已含无向展开与 EOS 设备补边两件事，另写一份遍历必然漏掉其中一件，
-    而漏掉的那件会以「扫不全」的形式很久以后才被发现（正是 §34 的形状）。
-    **遍历口径只能有一份。**
+    而漏掉的那件会以「扫不全」的形式很久以后才被发现。**遍历口径只能有一份。**
+
+    附带警告：存档写到 **2000000 字节**即截断、XML 没收尾（`RemoteSaveStorage.cs:31`），
+    拿存档做图分析前先确认没被截断。独立印证：`docs/EXTENSIONS.md` §4.2 的官方占位符表
+    与 `PortExploits.cracks` 差集恰好是 `1, 8, 3659, 3724, 9418` ——
+    后三个正是 `launchExecutable` 的 switch 里无 case 的那三个（见坑 21）。
 
 ## 仓库文档
 
 - [README.md](README.md): 面向使用者的说明 —— 安装、面板与命令行用法（含八个独立工具）、脚本模式、架构、验证方式。**刻意保持精简**，设计决策与取证细节一律在 docs/RESEARCH.md
-- [docs/RESEARCH.md](docs/RESEARCH.md): 源码级取证与设计决策，§1–§35，每条结论都带 `文件:行号`。**细节的唯一归属地**（README 只留给人看的结论）
+- [docs/RESEARCH.md](docs/RESEARCH.md): 源码级取证与设计决策，§1–§11，**按主题**组织（不是按版本），每条结论都带 `文件:行号`。**细节的唯一归属地**（README 只留给人看的结论）
 - [docs/EXTENSIONS.md](docs/EXTENSIONS.md): 游戏自带 `Extensions/` 官方样本的格式参考 —— 节点 XML、占位符、行为系统、任务、阵营、主题
 - [docs/HACKERSCRIPTS.md](docs/HACKERSCRIPTS.md): 自替换占位符全表 + HackerScript 动词表（以游戏实现与官方样本为准，已标出 wiki 错漏处）
 - [llms.txt](llms.txt): 本文件
@@ -203,12 +202,12 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
 
 - [Hacknet.wiki](https://hacknet.wiki/llms.txt): 游戏 Extension / 脚本格式的权威说明（站点自带 llms.txt 与 `.md` 版页面）
 - [Placeholder 参考](https://hacknet.wiki/reference/Placeholder.md): 占位符。**有错漏**（漏 4 个标识符、`BINARYSMALL` 长度写错），以 docs/HACKERSCRIPTS.md §1 为准
-- [HackerScripts 参考](https://hacknet.wiki/reference/HackerScripts.md): 游戏自带的 NPC 入侵脚本格式。**不能直接复用** —— 它没有提权动作，且 `connect` 不设 `os.connectedComp`，详见 RESEARCH §15.2
+- [HackerScripts 参考](https://hacknet.wiki/reference/HackerScripts.md): 游戏自带的 NPC 入侵脚本格式。**不能直接复用** —— 它没有提权动作，且 `connect` 不设 `os.connectedComp`，详见 RESEARCH §10.6
 - [Pathfinder 源码](https://github.com/Arkhist/Hacknet-Pathfinder): 框架 API 来源。本仓库 `upstream/` 有 clone（已被 git 忽略）
 
 ## Optional
 
-- [decompiled/game-proj/](decompiled/game-proj): **游戏本体**反编译（360 文件）。RESEARCH 里大量 `文件:行号` 引用都指向它，是全部改动的依据 —— 与「不核对 mod 产物」无关，必须保留
-- [decompiled/pathfinder/](decompiled/pathfinder): PathfinderAPI 反编译（135 文件）
-- [decompiled/](decompiled): 只保留上两条（游戏本体 + Pathfinder，均为决策证据）。已删除：各版本 mod 产物存档（`autohack-vNN/`）与冗余的单文件旧形式（`game/`）。`workshop/` 为第三方 Workshop mod 研究材料，文档零引用
-- [.cbmignore](.cbmignore): codebase-memory 索引的排除规则。它把 `.gitignore` 一并当忽略源读，故 `decompiled/` 与 `upstream/` 不进索引 —— 索引只覆盖 mod 自身源码，这是有意为之
+- [decompiled/game-proj/](decompiled/game-proj): **游戏本体**反编译（360 文件）。RESEARCH 里全部 `文件:行号` 引用都指向它，是改动的唯一依据 —— 与「不核对 mod 产物」无关（那条禁止的是反编译**本插件**的产物），**必须保留**
+- [decompiled/pathfinder/](decompiled/pathfinder): PathfinderAPI 反编译（135 文件），同上
+- [decompiled/](decompiled): 只保留上两条。已删除各版本 mod 产物存档（`autohack-vNN/`）与冗余旧形式（`game/`）。`workshop/` 是第三方 mod 研究材料，文档零引用
+- [.cbmignore](.cbmignore): codebase-memory 索引排除规则。它把 `.gitignore` 一并当忽略源读，故 `decompiled/` 与 `upstream/` 不进索引 —— 索引只覆盖 mod 自身源码，**这是有意为之**

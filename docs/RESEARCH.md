@@ -3302,9 +3302,9 @@ EOS：`portsNeededForCrack = 2`，端口表 2 个（22 有 `SSHcrack.exe`、3659
 2. 即便玩家手动扫过，`ReachableComputers`（`HackEngine.cs:479-551`）的 BFS 沿 `comp.links`
    **出边**展开 —— EOS 的 link 指向父机，**父机的 links 里没有 EOS**，从父机走不到它。
 
-### 30.7 修法 B + A（用户选定）
+### 30.7 实现：EOS 走 login 路径
 
-**B：让 EOS 被自动发现** —— 新增 `HackEngine.RevealAttachedDevices`，在 `ReachableComputers`
+**发现**：新增 `HackEngine.RevealAttachedDevices`，在 `ReachableComputers`
 的 BFS 展开处对每个已访问机器调用。
 
 等价于原版 `eosDeviceScan.exe` 的 `Completed()`（`EOSDeviceScannerExe.cs:82-124`），但**免跑 exe、
@@ -3331,37 +3331,34 @@ foreach (var id in ids.Split(Utils.commaDelim, StringSplitOptions.RemoveEmptyEnt
 （延迟到 `OS.Update` 才构造）与 `HackOverlay.cs:171`（面板按钮本就在游戏线程）。
 故放在 `ResolveTargets` → `ReachableComputers` 内是安全的。
 
-**A1：EOS 不被判 hopeless**（`HackEngine.cs:449`）：
+**准入**：EOS 不被判 hopeless（`HackEngine.cs:449`）：
 
 ```csharp
 var canLogin = HasAnyCredential(comp) && (options.UseCredentials || IsEosDevice(comp));
 if (!CanEverEscalate(comp) && !canLogin) { skippedHopeless++; ... }
 ```
 
-**A2：EOS 无条件排 Login 步**（`HackRun.cs:528`）：
+**Login 步**：EOS 无条件排入（`HackRun.cs:528`）：
 
 ```csharp
 if (options.UseCredentials || HackEngine.IsEosDevice(target)) { steps.Add(new HackStep(HackStepKind.Login, ...)); }
 ```
 
-**为什么必须成对**：A1 只让它进 `_targets`，但 `BuildSteps` 不给它生成 `Login` 步，它就会被生成
+**两处必须同时存在**：只放行准入而不排 `Login` 步，EOS 就会被生成
 `OpenPort×2 → Escalate`；`Escalate` 里 `CanEscalate` 为 false ⇒ `giveAdmin` 不执行 ⇒ 白跑一趟，
 最后 `Finish` 写 `2/2 ports, admin=no`。**这正是「无法破解」的表象。**
 
 新增 `HackEngine.IsEosDevice(Computer)` = `comp.type == Computer.EOS`（用常量，不用字面量 5）。
 
-**修完的链路**（零新执行代码，全走既有路径）：
+**链路**（零新执行代码，全走既有路径）：
 
 ```
-A1 → EOS 不再被判 hopeless，进入 _targets
-A2 → 生成 Login 步
+准入放行 → EOS 进入 _targets
+Login 步 → 生成
 Apply Login → TryLogin → login("admin","alpine") == 1 → giveAdmin
   → _loggedIn.Add(target) → IsRedundantAfterLogin 跳过 OpenPort/SolveFirewall/Escalate
   → "[autohack] <name> :: admin via login (admin:alpine) - skipping port cracks"
 ```
-
-**修法 C 未采用**：给 BFS 补 `attatchedDeviceIDs` 反向边。B 已把 EOS 推进 `visibleNodes`，
-而 `visibleNodes` 正是 BFS 种子（`HackEngine.cs:495-502`），故 C 冗余。
 
 **副作用**：普通机器行为一字不变（`UseCredentials` 仍是它们的门）。唯一偏离设计处：免了原版
 「先拿到目标机 admin 才能扫」的前置（邮件第 4 行 `needs admin access on the target machine`）

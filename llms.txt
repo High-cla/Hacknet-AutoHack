@@ -131,9 +131,11 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     （类名是 `WhitelistAuthenticatorDaemon`，文件名却叫 `WhitelistConnectionDaemon.cs`）在 `Computer.connect` 里
     查白名单，不过就 `DisconnectTarget()` 并 `return false`（`Computer.cs:383-388`）；上游 `Programs.connect` 只写
     一行 `"External Computer Refused Connection"` 再把 `os.connectedComp` 置 null（`Programs.cs:313-322`）——
-    **两者都不返回值**。而 `OpenPort`/`Escalate`/`CleanLogs` 全部直接对 `target` 对象操作，**不经过连接**，
-    于是玩家看到 Refused 却收到「入侵成功」—— 假战果。核对 `ReferenceEquals(os.connectedComp, target)` 即可。
+    **两者都不返回值**。故必须自己核对 `ReferenceEquals(os.connectedComp, target)`。
     同族的 `Programs.rm`/`probe` 也无返回值（`rm` 还带 `Thread.Sleep`，见坑 2）：调这一族就必须自己核对状态。
+    **但被拒 ≠ 拿不下**（见坑 30）：白名单只拦 `connect`，其余动作仍直接操作 `target` 对象。
+    mod 现在只跳过依赖连接的步骤（`Connect`/`CleanLogs`/`Disconnect`，见 `HackRun.DependsOnConnection`），
+    并排一步 `BypassWhitelist` 把玩家 IP 追加进目标白名单后重连。
 
 20. **`tracker="true"` 的机器断线即自动追踪，留痕 = 自杀** —— `OS.handleDisconnection`
     （`OS.cs:944-960`）在断开时检查目标 `/log`：只要有一行同时含玩家 IP 与
@@ -247,6 +249,23 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     `thisComputer.adminIP` 同步成新 IP —— 不同步玩家机就会「不是自己的管理员」。
     mod 的 `IpTools.Reset` 照抄这三步，并在改 IP **之前**把全图 `adminIP == 旧玩家IP`
     的机器改成新 IP（不迁移就每轮清空战绩）。
+
+30. **白名单机器能绕过，别整段跳过** —— 白名单只拦 `connect`；破端口 / 提权 / 投放 / 改它的文件
+    全部直接操作 `target` 对象，**都不经连接**（实证：`Pathfinder` 的 `openPort` 直接写
+    `PortState.Cracked`，`ComputerExtensions.cs:169-180`；`giveAdmin` 直接写 `adminIP`，
+    `Computer.cs:738-749`；`deleteFile` 门禁判 `ipFrom.Equals(adminIP)`，`Computer.cs:508-518`）。
+    故先拿下这台机器（破端口 + 提权），再把自己的 IP 追加进它的 `/Whitelist/list.txt` 并重连
+    —— 这是**游戏设计的正路**：官方任务 `Content/DLC/Missions/Airline2/PAE2_Whitelist.xml` 里那台的
+    `list_add_manual.txt` 明写「navigate to the folder containing your whitelist...
+    append list.txt <你的IP>」；游戏比对逻辑读的正是该文件逐行 trim 比对玩家 IP
+    （`Computer.cs:146-158`）。追加必须**幂等**（已在名单就别写），否则每轮入侵都会让文件增长。
+    落地：`HackEngine.HasWhitelist` / `HackEngine.AppendToWhitelist` +
+    `HackStepKind.BypassWhitelist`（排在 `Escalate` 之后 —— 改文件前得先拿下它）。
+    另：靠 `login` 提权的机器 `IsRedundantAfterLogin` 会跳过 `Escalate`，但 `TryLogin` 只认
+    返回 1 的 admin 登录（内部必 `giveAdmin`），故 `adminIP` 一定已写入，绕过步骤不受影响。
+    **未连接时 `probe` / 破解程序 / `solve` / `porthack` 不能回显** —— 它们的作用域是当前连接，
+    未连接时敲同一条命令得到的是另一个效果（`Programs.probe` 的目标是
+    `os.connectedComp ?? os.thisComputer`，`Programs.cs:1387`）。
 
 ## 仓库文档
 

@@ -144,6 +144,14 @@ autohack -h                                     # 帮助
 
 注意 `pull` 拉回来的 `.exe` **不能直接跑**：游戏只在 `/bin` 里解析可执行程序（`ProgramRunner.cs:689` 写死 `searchForFolder("bin")`），要用得先 `mv` 到 `/bin`。
 
+### 白名单服务器
+
+带 `WhitelistAuthenticatorDaemon` 的机器会拒绝你的 `connect`。**但它拦不住入侵** —— 破端口、提权、投放都直接改目标机本身，不经连接。
+
+所以本插件照常拿下它，然后把你的 IP 追加进它的 `/Whitelist/list.txt`，再重连一次恢复会话（后续清痕与断开需要连接）。这正是游戏设计的正路：官方任务 `PAE2_Whitelist.xml` 里那台的 `list_add_manual.txt` 就写着「`append list.txt <你的IP>`」。
+
+终端回显会说清楚走到了哪一步：`appended to /Whitelist/list.txt` → `reconnected - whitelist bypassed`。已列过的 IP 不会重复追加。
+
 #### DEC 解密：反推而非暴力
 
 游戏的 `FileEncrypter.Encrypt` 是逐字符仿射（`FileEncrypter.cs:40`）：

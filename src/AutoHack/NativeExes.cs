@@ -20,9 +20,15 @@ using Hacknet;
 ///    （ExeModule.cs:38）—— 没连着目标就放，动画会打在自己身上。故必须已连接。
 /// 2. 有 3 个端口虽有破解程序，却在 <c>OS.launchExecutable</c> 的 switch 里**没有 case**
 ///    （OS.cs:2003-2154）：3724 WoWHack / 3659 confloodEOS / 9418 GitTunnel —— 传进去是静默空操作。
-/// 3. <c>SSLTrojan.exe</c>(443) 的入口直接解引用 <c>args.Length</c>（SSLPortExe.cs:44），
-///    传 null 参数必崩；<c>FTPSprint.exe</c>(211) 的 <c>Completed()</c> 开的是 21 而不是 211
-///    （FTPFastExe.cs:60）—— 会把端口开错。两者都在白名单外。
+/// 3. 两个参数不匹配的：<c>SSLTrojan.exe</c>(443) 要 4 个参数
+///    （<c>ssltrojan &lt;隧道端口&gt; &lt;-s|-f|-w|-r&gt; &lt;旁路端口&gt;</c>，SSLPortExe.cs:44 的
+///    <c>args.Length &lt; 4</c>），且目标上那个旁路端口必须**已开**（:106 的 <c>if (!flag)</c>）——
+///    端口开放顺序不可控，传 null 又必崩；<c>FTPSprint.exe</c>(211) 的 <c>Completed()</c> 开的
+///    是 21 而不是 211（FTPFastExe.cs:60）—— 会把端口开错。两者都在白名单外。
+///
+/// 白名单与 <c>docs/EXTENSIONS.md</c> §4.2 的官方占位符表交叉验证一致：
+/// 该表端口集与 <c>PortExploits.cracks</c> 的差集是 <c>1, 8, 3659, 3724, 9418</c> ——
+/// 后三个正是约束 2 里无 case 的那三个（官方自己也没给它们占位符）。详见 RESEARCH §33.9。
 ///
 /// 另需注意 <c>OS.addExe</c> 的 RAM 门禁（OS.cs:2169）：内存不够时只写一行
 /// "Insufficient Memory"、不挂 exe。演出失败不影响战果，故不为此预判或扩容。

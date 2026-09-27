@@ -3598,3 +3598,30 @@ KBT_PortTest / TorrentStreamInjector / PacificPortcrusher / RTSPCrack。
 92160 B / `0fdbbe8c59b6755101528a0edb44e038`。构建 0 警告 0 错误。
 新增 `NativeExes.cs`；`HackOptions` 加 `ShowExes`（第 12 位，在 `UseCredentials` 之后）；
 面板复选框 `IdBase + 24`；命令行 `show` / `noshow`。
+
+### 33.9 与 EXTENSIONS.md §4.2 的交叉验证
+
+`docs/EXTENSIONS.md` §4.2 的「程序占位符」表（`:317-343`）是官方样本反查出来的
+`#XXX_EXE#` 全集，与本节的白名单**来自完全不同的方向**（一个查官方 XML 样本，
+一个查 `OS.launchExecutable` 的 IL switch），结论互相印证。
+
+把该表的端口号与 `PortExploits.cracks` 的键做差集：
+
+| 集合 | 数量 | 端口 |
+|---|---|---|
+| `PortExploits.cracks`（`PortExploits.cs:54-282`） | 37 | …1, 4, 8, …, 3659, 3724, 9418… |
+| EXTENSIONS.md §4.2 占位符表 | 32 | 全是 `cracks` 的子集，无一超出 |
+| **差集** | **5** | `1`, `8`, `3659`, `3724`, `9418` |
+
+差集里的 **3659 / 3724 / 9418 正是 §33.4 判定「switch 里没有 case」的那三个**。
+官方自己也没给它们提供 `#XXX_EXE#` 占位符 —— 因为官方同样放不出来。
+这独立证实了「有破解程序 ≠ 能当 exe 跑」。
+
+余下两个差集项：`1` = `Tutorial.exe`、`8` = `Notes.exe`，两者在
+`ExeProgramExists`/`GetFileIndexOfExeProgram` 里是**硬编码返回 true 的特例**
+（`ProgramRunner.cs:633-639`、`:664-669`），不经 `cracks` 表分发，故无占位符 ——
+它们不是破解程序，与本功能无关。
+
+`EXTENSIONS.md:319` 另有一条对本仓库的既有结论：「全部取
+`PortExploits.crackExeData[port]` —— 这是 ExeTools 数据源正确的最终佐证」，
+与 §33.5「数据必须一并传」同源。

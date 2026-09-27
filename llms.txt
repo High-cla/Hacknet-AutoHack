@@ -142,6 +142,8 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     （`OS.cs:2003-2154`，静默空操作）；443 的入口解引用 `args.Length`（`SSLPortExe.cs:44`，传 null 必崩）；
     211 的 `Completed()` 开的是 21 而非 211（`FTPFastExe.cs:60`，开错端口）。
     数据必须一并传 —— `launchExecutable` 靠 data 反查 exe 类型（`OS.cs:2000`），只给名字匹配不上。
+    独立印证：`docs/EXTENSIONS.md` §4.2 的官方占位符表与 `PortExploits.cracks` 差集恰好是
+    `1, 8, 3659, 3724, 9418` —— 后三个正是无 case 的那三个，官方自己也没给它们占位符。
 
 ## 仓库文档
 

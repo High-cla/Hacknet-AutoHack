@@ -18,6 +18,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
 2. **改动后只看产物 MD5，不做反编译核对**（用户定的规矩）。记 `md5sum` + 字节数，
    与上一版比对。构建成功本身即证明源码已编入（缓存已清，漏编会报错）；
    MD5 只回答「部署是否新鲜」。副产品判据：改源码 MD5 必变，只改注释/文档 MD5 不变（注释不进 IL）。
+   **绝不下载 Release 附件回来比对** —— 只读构建输出目录（即游戏插件目录）那份产物的 MD5。
 3. **`gh release create` 绝不自动执行** —— 等用户显式发令。`git push` 可以直接做。
 
 **十八个最容易踩的坑**（都带行号，可直接 grep）

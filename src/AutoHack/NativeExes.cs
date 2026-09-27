@@ -28,7 +28,7 @@ using Hacknet;
 ///
 /// 白名单与 <c>docs/EXTENSIONS.md</c> §4.2 的官方占位符表交叉验证一致：
 /// 该表端口集与 <c>PortExploits.cracks</c> 的差集是 <c>1, 8, 3659, 3724, 9418</c> ——
-/// 后三个正是约束 2 里无 case 的那三个（官方自己也没给它们占位符）。详见 RESEARCH §4 差集表（docs/RESEARCH.md:936-946）。
+/// 后三个正是约束 2 里无 case 的那三个（官方自己也没给它们占位符）。
 ///
 /// 另需注意 <c>OS.addExe</c> 的 RAM 门禁（OS.cs:2169）：内存不够时只写一行
 /// "Insufficient Memory"、不挂 exe。演出失败不影响战果，故不为此预判或扩容。

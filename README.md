@@ -112,7 +112,7 @@ autohack -h                                     # 帮助
 
 | 命令 | 作用 |
 |---|---|
-| `autohack scan` | 把**当前节点所在的整张连通分量**标到地图上（无向闭包，含 EOS 设备）。不睡、不设 admin 门禁，与面板 SCAN 按钮同一实现（§5） |
+| `autohack scan` | 把**当前节点所在的整张连通分量**标到地图上（无向闭包，含 EOS 设备）。不睡、不设 admin 门禁，与面板 SCAN 按钮同一实现 |
 | `autohack dec [allnodes]` | 解开目标上的 `#DEC_ENC` 加密文件，逐层解到明文，写入玩家 `/home/MemDumps` |
 | `autohack mem [allnodes]` | 查看本机内存转储（紧凑格式，截断显示）、导出到 `/home/MemDumps`、扫描节点上的 `.mem` 并解其内嵌 DEC |
 | `autohack exes` | 把游戏能生成的破解程序全部补进玩家 `/bin`（幂等） |
@@ -277,11 +277,11 @@ src/AutoHack/
 
 ### 第二个插件：HacknetSaveFix
 
-`src/SaveFix/` 与 AutoHack **零耦合**，可单独安装/卸载，修的是**游戏本体**的存档缺陷：绕过主菜单进入 OS 的入口（HacknetHotReplace 直连、经扩展直接起 OS 等）会让 `OS.SaveUserAccountName` 停在 null（`OS.cs:148` 缺省即 null，只在 `MainMenu.cs:103/150/235/315` 被赋值），保存时把它当文件名传下去（`OS.cs:1522`），`SaveFileManager.GetSaveFileNameForUsername` 拿到 null（`:238`），`FileSanitiser.purifyStringForDisplay` 对 null 返回 null（`FileSanitiser.cs:9-12`），紧接着的 `.Replace` 打在 null 上 → NRE；而 `WriteSaveData` 把异常吞成一行日志（`SaveFileManager.cs:240-243`），**游戏不崩但存档静默失败**。修法是给崩溃点打一个 Harmony 前缀，用游戏自己在 `OS.cs:372` 用的同一套回落，不另立规则，只在真兜底时打一条 `LogWarning`。完整症状、根因链、逐行取证见 [docs/RESEARCH.md](docs/RESEARCH.md) §11。
+`src/SaveFix/` 与 AutoHack **零耦合**，可单独安装/卸载，修的是**游戏本体**的存档缺陷：绕过主菜单进入 OS 的入口（HacknetHotReplace 直连、经扩展直接起 OS 等）会让 `OS.SaveUserAccountName` 停在 null（`OS.cs:148` 缺省即 null，只在 `MainMenu.cs:103/150/235/315` 被赋值），保存时把它当文件名传下去（`OS.cs:1522`），`SaveFileManager.GetSaveFileNameForUsername` 拿到 null（`:238`），`FileSanitiser.purifyStringForDisplay` 对 null 返回 null（`FileSanitiser.cs:9-12`），紧接着的 `.Replace` 打在 null 上 → NRE；而 `WriteSaveData` 把异常吞成一行日志（`SaveFileManager.cs:240-243`），**游戏不崩但存档静默失败**。修法是给崩溃点打一个 Harmony 前缀，用游戏自己在 `OS.cs:372` 用的同一套回落，不另立规则，只在真兜底时打一条 `LogWarning`。
 
 ## 相关开发资料
 
-- `docs/RESEARCH.md` — 完整调研：**按主题**组织（构建边界 / 扩展机制 / 原生 API / 破解端口 / 网络图 / 追踪 / 文件与清痕 / 执行模型 / 面板 / 工具脚本），§1–§11，每条结论带 `文件:行号`
+- `docs/API.md` — **Pathfinder 框架 + Hacknet 游戏本体的 public API 签名索引**，每条带 `文件:行号` 指向 `decompiled/`。由 `node tools/api-index.ts` 生成，勿手改
 - `docs/EXTENSIONS.md` — 游戏自带 `Extensions/` 官方样本的格式参考：节点 XML、占位符、行为系统、任务、阵营、主题
 - `docs/HACKERSCRIPTS.md` — 自替换占位符全表 + HackerScript 动词表，以游戏实现与官方样本为准，已标出 wiki 的错漏处
 

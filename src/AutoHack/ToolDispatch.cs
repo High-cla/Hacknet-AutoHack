@@ -57,7 +57,7 @@ internal static class ToolDispatch
     /// 用了区分大小写的 <c>Array.IndexOf</c>」—— 那是误诊。真凶是动词读错了参数位
     /// （<c>args[0]</c> 恒为命令名 <c>"autohack"</c>，动词在 <c>args[1]</c>），
     /// 已由调用方修正。归一化修的是另一个真问题，两者曾叠成同一个症状
-    /// 「全都掉进开关面板分支」—— 详见 RESEARCH §6.7b。
+    /// 「全都掉进开关面板分支」。
     /// </summary>
     private static string Canonical(string verb) => verb?.ToLowerInvariant();
 

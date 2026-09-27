@@ -36,7 +36,7 @@ internal static class ToolFiles
     /// 拉取不再按扩展名分流到 /bin、/sys、/home/dl_logs（那是 <c>Programs.scp</c> 的规则，
     /// Programs.cs:637-657），因为分流会让一次下载散落在三四个夹里，
     /// 而 <c>dl_logs</c> 还得现建 —— 游戏没有任何删除文件夹的入口，
-    /// mod 建出来的夹玩家永远清不掉（见 <c>docs/RESEARCH.md</c> §7.8）。
+    /// mod 建出来的夹玩家永远清不掉。
     /// </summary>
     internal static Folder Misc(OS os)
         => os.thisComputer.getFolderFromPath("home/misc", createFoldersThatDontExist: true);

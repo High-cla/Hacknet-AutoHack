@@ -222,7 +222,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     **从未生效过**。裸命令（`verb == null`）仍按原设计开面板。
     同名误诊：v1.31.0 曾归因于「动词区分大小写」——大小写是另一个真问题
     （`Canonical` 归一时 **`Handles` 与 `Dispatch` 必须用同一个值**），
-    两者叠成了同一个症状「全都开面板」。详见 RESEARCH §6.7b。
+    两者叠成了同一个症状「全都开面板」。
 27. **`CrashModule.BOOT_TIME` 是 static 字段，值在静态初始化器里固化**
     （`CrashModule.cs:15`）—— 之后再改 `Settings.FastBootText` **无效**（且该设置根本不落
     `Settings.txt`），只能覆写字段本身。`bootTextDelay` 是实例字段、只在 `LoadContent()`
@@ -231,8 +231,8 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
 
 ## 仓库文档
 
-- [README.md](README.md): 面向使用者的说明 —— 顶层五节：安装 / 使用 / 构建 / 架构 / 相关开发资料（「使用」含面板、命令行、追踪、十个独立工具、脚本模式；「架构」含文件职责图与第二个插件 HacknetSaveFix；「构建」含产物核对）。**刻意保持精简**，设计决策与取证细节一律在 docs/RESEARCH.md
-- [docs/RESEARCH.md](docs/RESEARCH.md): 源码级取证与设计决策，§1–§11，**按主题**组织（不是按版本），每条结论都带 `文件:行号`。**细节的唯一归属地**（README 只留给人看的结论）
+- [README.md](README.md): 面向使用者的说明 —— 顶层五节：安装 / 使用 / 构建 / 架构 / 相关开发资料（「使用」含面板、命令行、追踪、十个独立工具、脚本模式；「架构」含文件职责图与第二个插件 HacknetSaveFix；「构建」含产物核对）。**刻意保持精简**，设计决策与取证细节见源码注释、docs/API.md 与 git 历史
+- [docs/API.md](docs/API.md): **Pathfinder 框架 + Hacknet 游戏本体的 public API 签名索引**，每条带 `文件:行号` 指向 `decompiled/`。由 `node tools/api-index.ts` 生成，**勿手改**；游戏与框架都不带 XML 注释，故只到签名级，语义按行号读 `decompiled/`
 - [docs/EXTENSIONS.md](docs/EXTENSIONS.md): 游戏自带 `Extensions/` 官方样本的格式参考 —— 节点 XML、占位符、行为系统、任务、阵营、主题
 - [docs/HACKERSCRIPTS.md](docs/HACKERSCRIPTS.md): 自替换占位符全表 + HackerScript 动词表（以游戏实现与官方样本为准，已标出 wiki 错漏处）
 - [llms.txt](llms.txt): 本文件
@@ -266,12 +266,12 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
 
 - [Hacknet.wiki](https://hacknet.wiki/llms.txt): 游戏 Extension / 脚本格式的权威说明（站点自带 llms.txt 与 `.md` 版页面）
 - [Placeholder 参考](https://hacknet.wiki/reference/Placeholder.md): 占位符。**有错漏**（漏 4 个标识符、`BINARYSMALL` 长度写错），以 docs/HACKERSCRIPTS.md §1 为准
-- [HackerScripts 参考](https://hacknet.wiki/reference/HackerScripts.md): 游戏自带的 NPC 入侵脚本格式。**不能直接复用** —— 它没有提权动作，且 `connect` 不设 `os.connectedComp`，详见 RESEARCH §10.6
+- [HackerScripts 参考](https://hacknet.wiki/reference/HackerScripts.md): 游戏自带的 NPC 入侵脚本格式。**不能直接复用** —— 它没有提权动作，且 `connect` 不设 `os.connectedComp`
 - [Pathfinder 源码](https://github.com/Arkhist/Hacknet-Pathfinder): 框架 API 来源。本仓库 `upstream/` 有 clone（已被 git 忽略）
 
 ## Optional
 
-- [decompiled/game-proj/](decompiled/game-proj): **游戏本体**反编译（360 文件）。RESEARCH 里全部 `文件:行号` 引用都指向它，是改动的唯一依据 —— 与「不核对 mod 产物」无关（那条禁止的是反编译**本插件**的产物），**必须保留**
+- [decompiled/game-proj/](decompiled/game-proj): **游戏本体**反编译（360 文件）。文档与源码注释里全部 `文件:行号` 引用都指向它，是改动的唯一依据 —— 与「不核对 mod 产物」无关（那条禁止的是反编译**本插件**的产物），**必须保留**
 - [decompiled/pathfinder/](decompiled/pathfinder): PathfinderAPI 反编译（135 文件），同上
 - [decompiled/](decompiled): 只保留上两条。已删除各版本 mod 产物存档（`autohack-vNN/`）与冗余旧形式（`game/`）。`workshop/` 是第三方 mod 研究材料，文档零引用
 - [.cbmignore](.cbmignore): codebase-memory 索引排除规则。它把 `.gitignore` 一并当忽略源读，故 `decompiled/` 与 `upstream/` 不进索引 —— 索引只覆盖 mod 自身源码，**这是有意为之**

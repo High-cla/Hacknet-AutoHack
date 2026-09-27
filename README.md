@@ -117,7 +117,7 @@ autohack -h                                     # 帮助
 | `autohack mem [allnodes]` | 查看本机内存转储（紧凑格式，截断显示）、导出到 `/home/MemDumps`、扫描节点上的 `.mem` 并解其内嵌 DEC |
 | `autohack exes` | 把游戏能生成的破解程序全部补进玩家 `/bin`（幂等） |
 | `autohack unbreakable` | 加固玩家自己这台机器（**不可逆**） |
-| `autohack pull` | 把**当前目录**下全部文件下载到本机 `/home/misc`（**一个夹**，不分流） |
+| `autohack pull` | 把**当前目录**下全部文件下载到本机 `/home/stash`（**一个夹**，不分流） |
 | `autohack purge` | 删除**当前目录**下全部文件（同游戏 `rm`；与清痕**同一实现**；**只删文件，不删文件夹**） |
 | `autohack drop` | 断开并把当前连接的节点从网络图上摘掉 |
 | `autohack trace` | **反追踪**：同时止住两套追踪 —— 倒计时 + 脱机追踪，**并擦掉后者的 `/log`**（不擦会复发，见「追踪」） |
@@ -129,7 +129,7 @@ autohack -h                                     # 帮助
 
 任务收尾有三条独立通道，`skip` 按序覆盖：普通任务走 `ActiveMission.finish()`；DLC 合同走 `DLCHubServer.PlayerAttemptCompleteMission`（合同另有 `ClaimableMission` 管归档与序列化，只调 `finish()` 会继续挂在面板上）；**Kaguya Trials（DLC 引导）走 `DLCIntroExe.MissionWasCompleted()`** —— 该引导自持任务实例、且进行中 `os.currentMission` 为 null，故它必须最先判，否则会被「无任务」提前返回吃掉。
 
-**两个远程动作都不碰文件夹**：`pull` 全部落到 `/home/misc` —— 这个夹**游戏自己就建**（`OS.cs:386-388` 给玩家机建 home 时一并加了 `stash` 与 `misc`，存档里也持久化），mod 只兜底；`purge` 只清文件，**不删文件夹**。原因是游戏自身**没有任何删除文件夹的入口**（`Programs` 里没有 rmdir，官方 Action 也只有 `<DeleteFile>`），mod 一旦建出文件夹，玩家就永远清不掉。`purge` 的回显会把「还剩几个子文件夹」一并报出，免得对着一个空夹反复试。
+**两个远程动作都不碰文件夹**：`pull` 全部落到 `/home/stash` —— 这个夹**游戏自己就建**（`OS.cs:386-388` 给玩家机建 home 时一并加了 `stash` 与 `misc`，存档里也持久化），mod 只兜底；`purge` 只清文件，**不删文件夹**。原因是游戏自身**没有任何删除文件夹的入口**（`Programs` 里没有 rmdir，官方 Action 也只有 `<DeleteFile>`），mod 一旦建出文件夹，玩家就永远清不掉。`purge` 的回显会把「还剩几个子文件夹」一并报出，免得对着一个空夹反复试。
 
 注意 `pull` 拉回来的 `.exe` **不能直接跑**：游戏只在 `/bin` 里解析可执行程序（`ProgramRunner.cs:689` 写死 `searchForFolder("bin")`），要用得先 `mv` 到 `/bin`。
 

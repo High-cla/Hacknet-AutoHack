@@ -92,9 +92,9 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
 
 16. **游戏没有任何删除文件夹的入口** —— `Programs` 里没有 rmdir，官方 Action 也只有
     `<DeleteFile>`（EXTENSIONS.md §5.2）。故 mod **绝不新建文件夹**：`pull` 全部落到
-    `/home/misc`（**游戏自建**，`OS.cs:386-388` 建 home 时一并加 `stash` + `misc`，存档持久化；
+    `/home/stash`（**游戏自建**，`OS.cs:386-388` 建 home 时一并加 `stash` + `misc`，存档持久化；
     mod 只兜底），`purge` 只清文件、不删夹。一旦建出来玩家永远清不掉。
-    落进 `misc` 的 `.exe` **不能直接跑** —— 游戏只在 `/bin` 里解析程序（`ProgramRunner.cs:689`）。
+    落进 `stash` 的 `.exe` **不能直接跑** —— 游戏只在 `/bin` 里解析程序（`ProgramRunner.cs:689`）。
     另：`deleteFile` 会**抛**而不只是返回 false —— 它内部对每个非 `@` 文件调 `log()`，
     而 `log()` 直接 `files.root.searchForFolder("log").files.Insert(...)`（Computer.cs:338-354），
     目标机没有 `log` 夹时 NRE（官方 Extension 的 11 个节点全都没有）。

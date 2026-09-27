@@ -123,7 +123,7 @@ internal static class RemoteTools
         // 但「遍历中不改动被遍历的 List」是本仓库的既有约束，不靠巧合成立。
         var sources = new List<FileEntry>(dir.files);
 
-        var misc = ToolFiles.Misc(os);
+        var stash = ToolFiles.Stash(os);
         var copied = 0;
         var denied = 0;
 
@@ -142,15 +142,15 @@ internal static class RemoteTools
                 continue;
             }
 
-            // 落点固定 home/misc，不按扩展名分流。重名规则复用 ToolFiles.Write
+            // 落点固定 home/stash，不按扩展名分流。重名规则复用 ToolFiles.Write
             // （stem 即完整文件名、扩展名留空）。
-            ToolFiles.Write(misc, file.name, string.Empty, file.data);
+            ToolFiles.Write(stash, file.name, string.Empty, file.data);
             copied++;
         }
 
         var tail = denied > 0 ? ", " + denied + " denied (needs admin access)" : string.Empty;
         os.write("[autohack] pull: " + copied + " file(s) from " + comp.name + " :: " + where
-                 + " -> local /home/misc" + tail + ".");
+                 + " -> local /home/stash" + tail + ".");
     }
 
     /// <summary>

@@ -3,7 +3,7 @@
 > Hacknet 的 BepInEx / Pathfinder 插件：用游戏自身的原生机制一键入侵全网，带控制面板与脚本驱动。
 > 本文件面向要理解或修改本仓库的编码 agent。规范见 https://llmstxt.org
 
-当前 v1.32.4。构建产物直投游戏插件目录，无需手动拷贝：
+当前 v1.32.5。构建产物直投游戏插件目录，无需手动拷贝：
 
 ```
 D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
@@ -165,9 +165,18 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     原生 `scan` 另有两处是它作为**终端命令**的职责，不是扫描这件事本身：
     逐条 `Thread.Sleep(400)`（`:1291`，够 30 台就卡游戏线程 12 秒）与
     `hasConnectionPermission(admin: true)` 门禁（`:1279`）。mod 的扫描
-    （`ScanTools.Run`）三处全不抄，**直接复用 `HackEngine.ReachableComputers`** ——
+    （`ScanTools.Run`）三处全不抄，复用 `HackEngine` 里那一份 BFS ——
     它已含无向展开与 EOS 设备补边两件事，另写一份遍历必然漏掉其中一件，
-    而漏掉的那件会以「扫不全」的形式很久以后才被发现。**遍历口径只能有一份。**
+    而漏掉的那件会以「扫不全」的形式很久以后才被发现。**遍历实现只能有一份。**
+    但**种子口径必须显式区分**，这两个不是同一件事（2026-09 踩过）：
+    - `ReachableComputers(os)`：**多源**，种子 = 玩家机 + 全部 `visibleNodes`。
+      它是 `autohack run` 的缺省目标池，故意宽 —— 玩家机的 links 常年为空
+      （实测存档 169 台里 118 台 links 为空），单源会退化成「只打当前这一台」。
+    - `ReachableFrom(os, origin)`：**单源**，只从一台出发。这是 `autohack scan` 的口径。
+    把多源那个接到 scan 上过：取出的**不是任何一张连通分量**，而是「所有已发现分量的
+    并集」。同一存档实测 —— 玩家机未连接、自身分量只有 1 台，多源给出 57 台，
+    多出的 56 台横跨另外 100 多个互不相连的分量。表现为「扫描把没连到当前节点的
+    服务器也标出来了」。**回显自称 "this component" 的功能，就必须用单源。**
 
     附带警告：存档写到 **2000000 字节**即截断、XML 没收尾（`RemoteSaveStorage.cs:31`），
     拿存档做图分析前先确认没被截断。独立印证：`docs/EXTENSIONS.md` §4.2 的官方占位符表

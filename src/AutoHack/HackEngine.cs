@@ -539,7 +539,25 @@ internal static class HackEngine
     /// （NetworkMap.cs:415），不做自绘的「伪发现」。入边展开与出边同等对待 ——
     /// 同一张连通分量里的机器，不该因为边的方向而一半被扫、一半被漏。
     /// </summary>
-    internal static Computer[] ReachableComputers(OS os)
+    internal static Computer[] ReachableComputers(OS os) => Closure(os, origin: null);
+
+    /// <summary>
+    /// **单源**口径：只从 <paramref name="origin"/> 出发取无向连通分量。
+    ///
+    /// `autohack scan` 用这个 —— 它的承诺是「当前节点所在的那一张分量」。
+    /// 此前 scan 复用的是 <see cref="ReachableComputers"/>（多源播种：玩家机 + 全部
+    /// `visibleNodes`），而多源取出的**不是任何一个分量**，是「所有已发现分量的并集」。
+    /// 实测同一存档：玩家机当时未连接，它自己所在的分量只有 1 台（links 为空），
+    /// 多源口径却给出 57 台 —— 多出的 56 台横跨另外 100 多个互不相连的分量
+    /// （太平洋、Kaguya、CSEC 全在内），正是「扫出没有连到当前节点的服务器」。
+    ///
+    /// 之所以不能直接把 <see cref="ReachableComputers"/> 改成单源：它同时是
+    /// `autohack run` 的缺省目标池（见 ResolveTargets），收窄它等于让「沿连线
+    /// 全网入侵」退化成「只打当前这一台」。故两个口径并存，各自显式取用。
+    /// </summary>
+    internal static Computer[] ReachableFrom(OS os, Computer origin) => Closure(os, origin);
+
+    private static Computer[] Closure(OS os, Computer origin)
     {
         var map = os?.netMap;
         if (map?.nodes == null || map.nodes.Count == 0)
@@ -562,12 +580,21 @@ internal static class HackEngine
         var discovered = map.visibleNodes == null
             ? new HashSet<int>()
             : new HashSet<int>(map.visibleNodes);
-        Seed(map, seen, frontier, os.thisComputer == null ? -1 : map.nodes.IndexOf(os.thisComputer));
-        if (map.visibleNodes != null)
+        if (origin != null)
         {
-            foreach (var index in map.visibleNodes)
+            // 单源：只要这一台。它不在本图上（换过地图）时 IndexOf 返回 -1，
+            // Seed 忽略越界下标，闭包为空 —— 与「找不到就什么都不扫」一致。
+            Seed(map, seen, frontier, map.nodes.IndexOf(origin));
+        }
+        else
+        {
+            Seed(map, seen, frontier, os.thisComputer == null ? -1 : map.nodes.IndexOf(os.thisComputer));
+            if (map.visibleNodes != null)
             {
-                Seed(map, seen, frontier, index);
+                foreach (var index in map.visibleNodes)
+                {
+                    Seed(map, seen, frontier, index);
+                }
             }
         }
 

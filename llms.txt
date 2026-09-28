@@ -3,7 +3,7 @@
 > Hacknet 的 BepInEx / Pathfinder 插件：用游戏自身的原生机制一键入侵全网，带控制面板与脚本驱动。
 > 本文件面向要理解或修改本仓库的编码 agent。规范见 https://llmstxt.org
 
-当前 v1.32.6。构建产物直投游戏插件目录，无需手动拷贝：
+当前 v1.32.7。构建产物直投游戏插件目录，无需手动拷贝：
 
 ```
 D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
@@ -21,7 +21,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    **绝不下载 Release 附件回来比对** —— 需要确认部署新鲜度时只看构建输出目录那份。
 3. **`gh release create` 绝不自动执行** —— 等用户显式发令。`git push` 可以直接做。
 
-**三十五条最容易踩的坑 / 最该知道的机制**（都带行号，可直接 grep）
+**三十六条最容易踩的坑 / 最该知道的机制**（都带行号，可直接 grep）
 
 1. `Computer.portsOpen` 恒为 0 —— Pathfinder 用 Harmony Prefix 接管 `openPort`/`openPorts`
    并 `return false`，状态改存 `PortState.Cracked`。任何读 `portsOpen` 的判断都是错的，
@@ -384,6 +384,11 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     DemoMission04、HA_PlayerMission），而它是**玩家自己机器的主题文件**（坑 27 / CrashModule.cs:285-288）。
     在 `sys` 目录敲 purge 会把 `x-server.sys` 连同 `os-config.sys`、`bootcfg.dll` 一起清掉。
 
+36. **端口「破解状态」不进存档；`unbreakable` 只换端口号、不把端口打开** —— Pathfinder 存端口
+    只写 `Original`/`Number`/`Display` 三个字段（SaveWriter.cs:184），读回时用
+    `CreateState(..., cracked:false)`（SaveLoader.cs:384），所以**读档后端口必然是未破解**。
+    运行时看到的 `: OPEN` 只活在内存里，读档即复原。`unbreakable` 因此只改 `PortState.PortNumber`
+    （显示端口号，49152-65535 随机、互不重复），不碰 `Cracked` —— 加固不是「把 15 个端口全开」。
 ## README 已精简掉的内容（原样保留于此）
 
 README 在 v1.32.6 之后被刻意精简过一轮（删了 94 行），只留使用者需要的东西。

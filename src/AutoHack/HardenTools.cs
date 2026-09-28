@@ -13,6 +13,9 @@ using Pathfinder.Port;
 /// Pathfinder 用 Harmony Prefix 把 <c>Computer.openPort/openPorts/closePort/isPortOpen</c>
 /// 全部接管了（ComputerExtensions.cs:184-232），原版列表因此永不更新，
 /// 写它等于没写。
+///
+/// 端口号一并换成随机非标准值：加固后的机器不该继续对外亮着 22/21/80 这些
+/// 一看就知道对应哪个服务的端口号。
 /// </summary>
 internal static class HardenTools
 {
@@ -21,6 +24,16 @@ internal static class HardenTools
 
     /// <summary>防火墙解法长度（12 位字母数字，与参考实现一致）。</summary>
     private const int SolutionLength = 12;
+
+    /// <summary>随机端口号下界：IANA 动态/私有段起点。高于所有原版协议端口号
+    /// （OGPortToProto 里最大 9418），因此不会与协议自身撞号。</summary>
+    private const int RandomPortLow = 49152;
+
+    /// <summary>随机端口号上界（含）。</summary>
+    private const int RandomPortHigh = 65535;
+
+    /// <summary>候选端口总数（16384），线性探测时的模数。</summary>
+    private const int RandomPortCount = RandomPortHigh - RandomPortLow + 1;
 
     internal static void Run(OS os)
     {
@@ -41,10 +54,11 @@ internal static class HardenTools
         comp.addProxy(Inviolable);
 
         var firewallNote = HardenFirewall(comp);
-        var opened = HardenPorts(comp);
+        var remap = HardenPorts(comp);
 
         os.write("[autohack] unbreakable: AFTER - " + Snapshot(comp) + " ports=" + comp.CountOpenPorts() + ".");
-        os.write("[autohack] unbreakable: firewall " + firewallNote + ", " + opened + " port(s) opened. This is irreversible.");
+        os.write("[autohack] unbreakable: ports moved to non-standard numbers - " + remap + ".");
+        os.write("[autohack] unbreakable: firewall " + firewallNote + ". This is irreversible.");
     }
 
     /// <summary>有防火墙就换掉解法；没有就不新建（加固不负责凭空造一个出来）。</summary>
@@ -68,32 +82,67 @@ internal static class HardenTools
         return "solution set to " + comp.firewall.solution;
     }
 
-    /// <summary>把原版 15 个协议端口全部置为已开，返回实际打开的数量。</summary>
-    private static int HardenPorts(Computer comp)
+    /// <summary>
+    /// 给原版 15 个协议端口各换一个随机非标准端口号，返回「协议=新端口号」清单。
+    ///
+    /// 只动 <see cref="PortState.PortNumber"/>（显示端口号）：probe 显示、porthack 反查、
+    /// 存档都走这个字段（ComputerExtensions.cs:262/270 双向映射，SaveWriter.cs:184 存 Number）。
+    ///
+    /// 破解状态一概不碰 —— 加固不是「把端口全打开」，机器应当保持未破解。
+    /// （Cracked 本身也不进存档：SaveWriter.cs:184 只写 Original/Number/Display。）
+    /// </summary>
+    private static string HardenPorts(Computer comp)
     {
-        var opened = 0;
+        var used = new HashSet<int>();
+        foreach (var state in comp.GetAllPortStates())
+        {
+            used.Add(state.PortNumber);
+        }
+
+        var remap = new List<string>();
 
         foreach (var record in OriginalPorts())
         {
             var state = comp.GetPortState(record.Protocol);
 
-            // 玩家机可能还没建立端口表（存档里没有 ports 段时），先补上再开。
+            // 玩家机可能还没建立端口表（存档里没有 ports 段时），先补上。
             if (state == null)
             {
-                state = record.CreateState(comp, null, record.DefaultPortNumber);
+                state = record.CreateState(comp);
                 comp.AddPort(state);
             }
 
-            if (state.Cracked)
-            {
-                continue;
-            }
-
-            state.SetCracked(true, comp.ip);
-            opened++;
+            // 只换端口号：破解状态一律不动（保持未破解）。
+            var port = TakeRandomPort(used, record.DefaultPortNumber);
+            state.PortNumber = port;
+            remap.Add(record.Protocol + "=" + port);
         }
 
-        return opened;
+        return string.Join(" ", remap);
+    }
+
+    /// <summary>
+    /// 取一个未被占用的随机端口号，并登记进 used。
+    ///
+    /// 用「随机起点 + 线性探测」而不是「随机重试」：候选 16384 个、需求 15 个，
+    /// 正常第一次就命中，而线性探测保证撞了必然换到下一个，不会无界重试。
+    /// 显示端口号重复会让 display→code 反查歧义（ComputerExtensions.cs:262 取 FirstOrDefault）。
+    /// </summary>
+    /// <param name="fallback">整段候选都被占用时的退路，正常永远用不到。</param>
+    private static int TakeRandomPort(HashSet<int> used, int fallback)
+    {
+        var start = Utils.random.Next(RandomPortCount);
+
+        for (var i = 0; i < RandomPortCount; i++)
+        {
+            var port = RandomPortLow + (start + i) % RandomPortCount;
+            if (used.Add(port))
+            {
+                return port;
+            }
+        }
+
+        return fallback;
     }
 
     /// <summary>

@@ -21,7 +21,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    **绝不下载 Release 附件回来比对** —— 只读构建输出目录（即游戏插件目录）那份产物的 MD5。
 3. **`gh release create` 绝不自动执行** —— 等用户显式发令。`git push` 可以直接做。
 
-**三十四条最容易踩的坑 / 最该知道的机制**（都带行号，可直接 grep）
+**三十五条最容易踩的坑 / 最该知道的机制**（都带行号，可直接 grep）
 
 1. `Computer.portsOpen` 恒为 0 —— Pathfinder 用 Harmony Prefix 接管 `openPort`/`openPorts`
    并 `return false`，状态改存 `PortState.Cracked`。任何读 `portsOpen` 的判断都是错的，
@@ -348,9 +348,45 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     换 IP 本身是好的保命机制（见坑 29），要每轮自动换就显式开 `newip` 或勾复选框；
     只换这一次用面板 `NEW IP` 按钮或 `autohack ip`（两者同一实现）。
 
+35. **任务判定面审计：17 种 goal 里，mod 会碰到其中 3 种** —— 逐个读
+    `Hacknet.Mission/*.cs` 的 `isComplete` 得到下表。**判据几乎都是「纯读某个状态」**，
+    所以 mod 只要不去动那个状态，就不会破坏它；风险集中在「文件类」三种。
+
+    | goal | 判据 | mod 的关系 |
+    |---|---|---|
+    | `FileDownload` | `root.folders[i].containsFileWithData(data)` | **pull 的落点够不着**（见下） |
+    | `clearfolder` | `container.files.Count == 0` | purge 能完成它，但必须站对目录 |
+    | `FileDeletion` / `FileChange` | 文件消失 / 内容含关键字 | 只有删到 / 改到任务目标才有影响 |
+    | `getAdmin` | `target.adminIP == os.thisComputer.ip` | 换 IP 会**打断**（见坑 34） |
+    | `getString` / `getAdminPasswordString` | 终端历史 `additionalDetails` 含关键字 | 不影响 |
+    | `FileUpload` / `SendEmail` / `Delay` / `CheckFlagSet` / `AddDegree` / `WipeDegrees` / `DeathRow*` / `DatabaseEntryChange` | 各自的状态 | 不影响 |
+
+    **① pull 落 `/home/stash`，`FileDownload` 类任务因此永远无法用 pull 完成。**
+    `FileDownloadMission` 只遍历 `root.folders`（`os.thisComputer.files.root` 的**一级**子目录），
+    而 `Folder.containsFileWithData`（Folder.cs:52-62）**只查该目录的直接文件、不递归** ——
+    故判据实际是「文件落在 `home`/`bin`/`sys`/`misc`/`stash` 之一」。
+    游戏自己的 `scp` 落点正是这套一级目录（`.exe`→`bin`、`.sys`→`sys`、
+    `@`→`home/dl_logs`、其余→`home`，Programs.cs:637-657），所以原生能过。
+    mod 的 `pull` 落在 `home/stash`（ToolFiles.Stash），**深了一层，判定看不到**。
+    这是刻意的取舍（拉回的东西一眼可辨），代价就是不能用于任务 —— 要过这类任务请手敲
+    `scp <file>`（落 `home`）。受影响的有 12 处官方任务：SSHCrackMission、BitMission2、
+    BitAdv_Intro06、lelzSec/CompletedPathMission、04HubSet06、DemoMission03（3 个 exe）等。
+
+    **② `clearfolder` 要求目录**一个文件都不剩**，purge 只作用于「当前目录」。**
+    `FileDeleteAllMission.isComplete` 是 `container.files.Count == 0`（FileDeleteAllMission.cs:22-25）。
+    8 处官方任务用它：KaguyaTrialMission1（`dKaguya1` 的 sys）、Ending_Save_Mission
+    （`dKagGate` 的 sys + bin）、DSet2Mission3（两台机的 `LOIC`）、Set/3 的 Cleanup 与
+    ItFollows（`home`）。**站错目录时 purge 会删掉任务不需要的目录，而目标目录仍然非空**
+    —— 玩家以为干完了，实际零推进，还可能误删别的东西。purge 的回显里有当前目录，
+    先 `cd` 对再敲。
+
+    **③ `x-server.sys` 是双重身份。** 3 处任务要求删除它（ThemeHackNaixBranch、
+    DemoMission04、HA_PlayerMission），而它是**玩家自己机器的主题文件**（坑 27 / CrashModule.cs:285-288）。
+    在 `sys` 目录敲 purge 会把 `x-server.sys` 连同 `os-config.sys`、`bootcfg.dll` 一起清掉。
+
 ## 仓库文档
 
-- [README.md](README.md): 面向使用者的说明 —— 顶层五节：安装 / 使用 / 构建 / 架构 / 相关开发资料（「使用」含面板、命令行、追踪、十个独立工具、脚本模式；「架构」含文件职责图与第二个插件 HacknetSaveFix；「构建」含产物核对）。**刻意保持精简**，设计决策与取证细节见源码注释、docs/API.md 与 git 历史
+- [README.md](README.md): 面向使用者的说明 —— 顶层五节：安装 / 使用 / 构建 / 架构 / 相关开发资料（「使用」含面板、命令行、追踪、十一个独立工具、脚本模式；「架构」含文件职责图与第二个插件 HacknetSaveFix；「构建」含产物核对）。**刻意保持精简**，设计决策与取证细节见源码注释、docs/API.md 与 git 历史
 - [docs/API.md](docs/API.md): **Pathfinder 框架 + Hacknet 游戏本体的 public API 签名索引**，每条带 `文件:行号` 指向 `decompiled/`。由 `node tools/api-index.ts` 生成，**勿手改**；游戏与框架都不带 XML 注释，故只到签名级，语义按行号读 `decompiled/`
 - [docs/EXTENSIONS.md](docs/EXTENSIONS.md): 游戏自带 `Extensions/` 官方样本的格式参考 —— 节点 XML、占位符、行为系统、任务、阵营、主题
 - [docs/HACKERSCRIPTS.md](docs/HACKERSCRIPTS.md): 自替换占位符全表 + HackerScript 动词表（以游戏实现与官方样本为准，已标出 wiki 错漏处）
@@ -358,7 +394,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
 
 ## 源码
 
-- [src/AutoHack/ToolDispatch.cs](src/AutoHack/ToolDispatch.cs): 十个工具的唯一入口（命令与面板共用）；`RemoteTools.cs` 是其中三个远程动作的实现，`ScanTools.cs` 是 `scan`，`TraceTools.cs` 是 `trace`
+- [src/AutoHack/ToolDispatch.cs](src/AutoHack/ToolDispatch.cs): 十一个工具的唯一入口（命令与面板共用）；`RemoteTools.cs` 是其中三个远程动作的实现，`ScanTools.cs` 是 `scan`，`TraceTools.cs` 是 `trace`，`IpTools.cs` 是 `ip`
 - [src/AutoHack/DecTools.cs](src/AutoHack/DecTools.cs): DEC 解密 —— 反推 passcode + 多层递归 + 批量落盘
 - [src/AutoHack/MemTools.cs](src/AutoHack/MemTools.cs): 内存转储 —— 查看 / 导出 / 扫描内嵌 DEC
 - [src/AutoHack/ExeTools.cs](src/AutoHack/ExeTools.cs): 程序补全 —— 幂等填充 `/bin`

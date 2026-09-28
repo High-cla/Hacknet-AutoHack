@@ -27,7 +27,7 @@ autohack                                        # 开关控制面板
 autohack run [here] [delay=秒] [stay] [redo] [nologs] [nomark] [direct]   # 不开面板，直接执行
 autohack run script=stealth                     # 用脚本决定入侵次序（见下）
 autohack scan|dec|mem|exes|unbreakable [allnodes]  # 独立工具（见「工具」）
-autohack pull|purge|drop|trace                  # 对当前连接节点动手 / 掐掉追踪
+autohack pull|purge|drop|trace|ip               # 对当前连接节点动手 / 掐追踪 / 换本机 IP
 autohack skip                                   # 完成当前任务并接下一个（含 DLC 合同与 Kaguya Trials）
 autohack -h                                     # 帮助
 ```
@@ -137,8 +137,8 @@ autohack -h                                     # 帮助
 | `autohack mem [allnodes]` | 查看本机内存转储（紧凑格式，截断显示）、导出到 `/home/MemDumps`、扫描节点上的 `.mem` 并解其内嵌 DEC |
 | `autohack exes` | 把游戏能生成的破解程序全部补进玩家 `/bin`（幂等） |
 | `autohack unbreakable` | 加固玩家自己这台机器（**不可逆**） |
-| `autohack pull` | 把**当前目录**下全部文件下载到本机 `/home/stash`（**一个夹**，不分流） |
-| `autohack purge` | 删除**当前目录**下全部文件（同游戏 `rm`；与清痕**同一实现**；**只删文件，不删文件夹**） |
+| `autohack pull` | 把**当前目录**下全部文件下载到本机 `/home/stash`（**一个夹**，不分流）。**注意**：`FileDownload` 类任务的判定不递归子目录（`Folder.containsFileWithData` 只查一级），故 `pull` 拉回的文件**不能**用于过这类任务 —— 要过请手敲 `scp <file>`（落 `/home`） |
+| `autohack purge` | 删除**当前目录**下全部文件（同游戏 `rm`；与清痕**同一实现**；**只删文件，不删文件夹**）。`clearfolder` 类任务要求目标目录一个文件不剩，**先 `cd` 对再敲** —— 站错目录会删掉任务不需要的东西而目标目录仍非空 |
 | `autohack drop` | 断开并把当前连接的节点从网络图上摘掉 |
 | `autohack ip` | 给本机换一个新 IP（原生 `Assign New IP` 三步 + 全图已控机器归属迁移 + 重建 Pathfinder 查找表），与面板 `NEW IP` 按钮同一实现 |
 | `autohack trace` | **反追踪**：同时止住两套追踪（倒计时 + 脱机追踪），**不碰对方 `/log`**（见「追踪」） |

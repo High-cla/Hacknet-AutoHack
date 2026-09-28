@@ -64,6 +64,21 @@ internal static class IpTools
     /// </summary>
     /// <param name="os">游戏状态。</param>
     /// <returns>回显用的结果描述；未执行则返回 null（调用方不输出）。</returns>
+    /// <summary>
+    /// 工具的入口：换一次 IP 并把结果写出来。
+    ///
+    /// 与 <c>autohack run</c> 收尾的自动换 IP 共用 <see cref="Reset"/> 这一份实现，
+    /// 回显也收在这里 —— 两个入口各写一句措辞就会漂移。
+    /// 失败时**必须**出声：面板按钮单击没有回显，玩家只会觉得「按了没反应」。
+    /// </summary>
+    internal static void Run(OS os)
+    {
+        var note = Reset(os);
+        os.write(note == null
+            ? "[autohack] new local IP: no local machine to re-address."
+            : "[autohack] new local IP: " + note + ".");
+    }
+
     internal static string Reset(OS os)
     {
         var self = os?.thisComputer;

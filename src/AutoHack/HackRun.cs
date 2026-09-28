@@ -602,11 +602,7 @@ internal sealed class HackRun
         // 现在不擦日志了，但顺序仍然保持，因为语义上「先收拾追踪、再换身份」更清楚。
         if (Options.ResetIP)
         {
-            var ipNote = IpTools.Reset(os);
-            if (ipNote != null)
-            {
-                os.write("[autohack] new local IP: " + ipNote + ".");
-            }
+            IpTools.Run(os);
         }
 
         foreach (var target in _targets)

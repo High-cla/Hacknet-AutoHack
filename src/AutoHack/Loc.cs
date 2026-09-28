@@ -66,6 +66,7 @@ internal static class Loc
             ["PULL FILES"] = "拉取文件",
             ["PURGE FILES"] = "清除文件",
             ["DROP NODE"] = "摘除节点",
+            ["NEW IP"] = "换 IP",
 
             // 运行态
             ["ENGAGING"] = "执行中",

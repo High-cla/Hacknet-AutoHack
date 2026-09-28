@@ -123,9 +123,13 @@ internal sealed record HackOptions(
         // 缺省开是为了让脚本跑起来有可看的演出；要安静跑用 noshow。
         var showExes = true;
 
-        // 缺省开：收尾换 IP 是游戏原生的「保命」动作（ISP 服务器的 Assign New IP），
-        // 自动做是为了让玩家不必在追踪危机里手忙脚乱。要固定 IP（如任务要求）可取消勾选。
-        var resetIP = true;
+        // 缺省**关**（v1.32.6 起，此前为开）。换 IP 是游戏原生的「保命」动作
+        // （ISP 服务器的 Assign New IP），但它会**打断任何要求 IP 不变的任务链**：
+        // lelzSec 那条明写「Your IP's been whitelisted (so dont go changing it for now)」
+        // （lelzSec/MessageBoardIntro.xml），白名单记的是当时的 IP，换掉即失效。
+        // 缺省开时这类任务会莫名其妙进不去，而玩家很难把两件事联系起来。
+        // 要换用 newip 显式开启，或直接用面板的 NEW IP 按钮换一次。
+        var resetIP = false;
         var speed = HackSpeed.Normal;
         string script = null;
 

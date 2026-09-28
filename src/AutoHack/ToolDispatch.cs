@@ -23,8 +23,9 @@ internal static class ToolDispatch
     internal const string Drop = "drop";
     internal const string Skip = "skip";
     internal const string Trace = "trace";
+    internal const string Ip = "ip";
 
-    private static readonly string[] Verbs = { Scan, Dec, Mem, Exes, Unbreakable, Pull, Purge, Drop, Trace, Skip };
+    private static readonly string[] Verbs = { Scan, Dec, Mem, Exes, Unbreakable, Pull, Purge, Drop, Trace, Skip, Ip };
 
     /// <summary>help 文本来源：子命令与其说明只写一次，命令入口与文档都读这里。</summary>
     internal static readonly (string Verb, string Help)[] Help =
@@ -39,6 +40,7 @@ internal static class ToolDispatch
         (Drop, "disconnect and remove the connected node from the map"),
         (Trace, "anti-trace: stop the countdown and every pending tracker"),
         (Skip, "complete the active mission and take the next one"),
+        (Ip, "assign this machine a new IP (keeps owned-node tags in sync)"),
     };
 
     /// <summary>help 里动词列的宽度，供调用方排版。</summary>
@@ -125,6 +127,10 @@ internal static class ToolDispatch
 
             case Skip:
                 MissionTools.Run(os);
+                break;
+
+            case Ip:
+                IpTools.Run(os);
                 break;
         }
     }

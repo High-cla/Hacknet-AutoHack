@@ -3,7 +3,7 @@
 > Hacknet 的 BepInEx / Pathfinder 插件：用游戏自身的原生机制一键入侵全网，带控制面板与脚本驱动。
 > 本文件面向要理解或修改本仓库的编码 agent。规范见 https://llmstxt.org
 
-当前 v1.32.5。构建产物直投游戏插件目录，无需手动拷贝：
+当前 v1.32.6。构建产物直投游戏插件目录，无需手动拷贝：
 
 ```
 D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
@@ -21,7 +21,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    **绝不下载 Release 附件回来比对** —— 只读构建输出目录（即游戏插件目录）那份产物的 MD5。
 3. **`gh release create` 绝不自动执行** —— 等用户显式发令。`git push` 可以直接做。
 
-**二十七条最容易踩的坑 / 最该知道的机制**（都带行号，可直接 grep）
+**三十四条最容易踩的坑 / 最该知道的机制**（都带行号，可直接 grep）
 
 1. `Computer.portsOpen` 恒为 0 —— Pathfinder 用 Harmony Prefix 接管 `openPort`/`openPorts`
    并 `return false`，状态改存 `PortState.Cracked`。任何读 `portsOpen` 的判断都是错的，
@@ -325,6 +325,29 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     mod 侧的落地见 `PanelSettings.cs`；落盘触发点用 `HackPanelState.Settings` 快照
     比对（`record struct`，新增字段自动进比较），不逐个控件埋保存调用。
 
+33. **`replace` 大小写敏感且失败静默，任务会因此永远不判完成** ——
+    `Programs.replace2`（Programs.cs:795）用 `fileEntry.data.Replace(old, new)` 改文件，
+    而 `string.Replace` 是 **Ordinal**（区分大小写）；找不到目标串时**静默空操作** ——
+    不报错、不回显、文件一字未动。玩家看到的是「命令敲了、也有回显，但什么都没变」。
+    实测踩点（2026-09）：lelzSec 入门任务判据是
+    `<goal type="FileChange" target="nortronWebServer" file="index.html" path="web"
+    keyword="dicks"/>`（lelzSec/IntroTestMission.xml:4），而该页原文是
+    `Nortron Security Services` —— 大写 `Security`。玩家敲
+    `replace index.html security dicks`（小写 s）⇒ 恒不命中，任务永不判完成。
+    **判定侧反而不区分大小写**（`FileChangeMission.isComplete` 把两边 `ToLower()` 后
+    `Contains`，FileChangeMission.cs:47-58）—— 即「写进去就算过，但写进去这一步卡在大小写上」。
+    mod 侧已补 `ReplaceFeedback.cs`：Postfix 比对调用前后 `data` 是否真的变了，
+    没变就回显「大小写不匹配，原文里其实是 X」。**只加回显，不改替换语义** ——
+    大小写敏感是原生行为，改成不敏感会波及其他任务。
+
+34. **换 IP 会打断要求「IP 不变」的任务链** —— `new IP after run` 缺省已在 v1.32.6
+    翻转为**关**，原因就是这条：lelzSec 的 `MessageBoardIntro.xml` 邮件明写
+    「Your IP's been whitelisted (**so dont go changing it for now**)」，
+    白名单（`/Whitelist/list.txt`）记的是**当时的玩家 IP**，换掉即失效，
+    表现为「按提示去连却进不去」，而玩家几乎不可能把两件事联系起来。
+    换 IP 本身是好的保命机制（见坑 29），要每轮自动换就显式开 `newip` 或勾复选框；
+    只换这一次用面板 `NEW IP` 按钮或 `autohack ip`（两者同一实现）。
+
 ## 仓库文档
 
 - [README.md](README.md): 面向使用者的说明 —— 顶层五节：安装 / 使用 / 构建 / 架构 / 相关开发资料（「使用」含面板、命令行、追踪、十个独立工具、脚本模式；「架构」含文件职责图与第二个插件 HacknetSaveFix；「构建」含产物核对）。**刻意保持精简**，设计决策与取证细节见源码注释、docs/API.md 与 git 历史
@@ -344,6 +367,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
 - [src/AutoHack/HackEngine.cs](src/AutoHack/HackEngine.cs): 决策层 —— 目标解析、端口表、提权门槛、清痕、白名单绕过
 - [src/AutoHack/RefusedWhitelist.cs](src/AutoHack/RefusedWhitelist.cs): 记下「刚被白名单拒的那台」，供 `here` 在池空时回落（见坑 31）
 - [src/AutoHack/PanelSettings.cs](src/AutoHack/PanelSettings.cs): 面板设置的落盘层（ConfigFile 读写，无 UI；见坑 32）
+- [src/AutoHack/ReplaceFeedback.cs](src/AutoHack/ReplaceFeedback.cs): 给原生 `replace` 补「失败要说出来」（见坑 33）
 - [src/AutoHack/ScanTools.cs](src/AutoHack/ScanTools.cs): 地图扫描 —— 标出当前节点所在连通分量
 - [src/AutoHack/HackRun.cs](src/AutoHack/HackRun.cs): 执行层 —— 动作序列、逐帧推进、指令回显
 - [src/AutoHack/HackScript.cs](src/AutoHack/HackScript.cs): 入侵脚本的解析与校验（`script=` 模式）；路径解析交给框架 `StringExtensions.ContentFilePath`，不自己拼内容目录前缀

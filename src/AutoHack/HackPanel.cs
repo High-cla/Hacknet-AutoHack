@@ -112,7 +112,7 @@ internal sealed class HackPanelState
     /// 缺省开是因为它同时具备保命与清痕双重作用：追踪者判定看的是日志里的玩家 IP，
     /// 换掉 IP 等于让已有记录失去指向。要固定 IP（如某些任务要求特定地址）可取消勾选。
     /// </summary>
-    internal bool ResetIP { get; set; } = true;
+    internal bool ResetIP { get; set; } = false;
 
     /// <summary>
     /// 入侵脚本文件名；null = 内置次序。
@@ -242,6 +242,10 @@ internal static class HackPanel
         // purge 退到玩家自己的机器（与终端 rm 的作用域规则一致，回显里会写明）。
         // 前两个看的是「当前目录」，取自 Programs.getCurrentFolder(os) ——
         // 与游戏自己的 ls/rm/scp 同一个权威来源，不再自行下钻 navigationPath。
+        // 换 IP 与三个远程动作不同：它作用于**本机**，且与「当前节点」无关 ——
+        // 不依赖连接，未连接时照样能换。放在远程动作之前，避免被读成远程操作。
+        (ToolDispatch.Ip, "NEW IP", false),
+
         (ToolDispatch.Pull, "PULL FILES", false),
         (ToolDispatch.Purge, "PURGE FILES", true),
         (ToolDispatch.Drop, "DROP NODE", true),

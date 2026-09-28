@@ -849,7 +849,7 @@ internal static class HackEngine
     /// <summary>
     /// 抹除目标的 /log 目录，等价于原版终端 <c>rm log/*</c>；返回被删除的文件名，供回显与计数。
     ///
-    /// 动作全部交给 <see cref="RemoveFiles"/> —— 清痕与面板 <c>purge</c> 是同一个
+    /// 动作全部交给 <see cref="RemoveFiles"/> —— 痕迹清理与面板 <c>purge</c> 是同一个
     /// 「删光一个目录」的动作，只该有一份实现。
     ///
     /// 「删除动作本身不留新痕迹」的来源：/log 里的文件名形如
@@ -1016,11 +1016,33 @@ internal static class HackEngine
         return false;
     }
 
-    internal static IReadOnlyList<string> ClearLogs(Computer comp, string ipFrom)
+    /// <summary>
+    /// 抹掉<b>玩家自己留下的</b>痕迹 —— /log 里含玩家 IP 的那些条目。
+    ///
+    /// <b>为什么按 IP 过滤，而不是清空整个 /log。</b>/log 是那台机器自己的操作史
+    /// （谁连过它、它读过什么文件），整目录删掉属于改写对方状态。玩家真正要的是
+    /// 「别让痕迹指向我」，而指向我的判据就是条目里的那个 IP。
+    ///
+    /// <b>这个口径恰好与游戏的追踪判据同构。</b>
+    /// <c>TrackerCompleteSequence.CompShouldStartTrackerFromLogs</c>
+    /// （TrackerCompleteSequence.cs:30-47）扫的正是「<c>data.Contains(玩家IP)</c>
+    /// 且含 <c>FileCopied</c>/<c>FileDeleted</c>/<c>FileMoved</c>」，命中即排一个脱机追踪。
+    /// 故按 IP 过滤<b>既不误伤对方历史，又刚好让追踪判据失配</b>。
+    ///
+    /// <b>刻意不删其他条目。</b>断开时目标机 /log 会写入
+    /// <c>"&lt;玩家IP&gt; Disconnected"</c>（Computer.cs:722-727）—— 它同样含玩家 IP，
+    /// 会被一起清掉；而 <c>"admin logged in"</c> 这类不含玩家 IP 的条目一律保留，
+    /// 那些是目标机自己的历史，不是我们的痕迹。
+    ///
+    /// 玩家机自己传 <c>os.thisComputer</c> 进来时语义相同：/log 里凡提到自己 IP 的
+    /// 条目（<c>"&lt;目标IP&gt; Disconnected"</c> 等）都算自己的痕迹。
+    /// </summary>
+    /// <returns>被删掉的条目名快照，供回显与计数。</returns>
+    internal static IReadOnlyList<string> WipeTraces(Computer comp, string ipFrom)
     {
         var root = comp?.files?.root;
         var logFolder = root?.searchForFolder(LogFolderName);
-        if (root == null || logFolder == null)
+        if (root == null || logFolder == null || string.IsNullOrEmpty(ipFrom))
         {
             return Array.Empty<string>();
         }
@@ -1030,11 +1052,59 @@ internal static class HackEngine
         // 正是从 root.folders 里取出来的，故必然命中其真实下标。
         var folderPath = new List<int> { root.folders.IndexOf(logFolder) };
 
-        return RemoveFiles(comp, ipFrom, logFolder, folderPath);
+        // 先快照待删名单，再交给 RemoveFiles 逐条点名删 —— 逐条走
+        // Computer.deleteFile(ipFrom, <名>, path)，保住游戏的权限门禁与联机同步
+        // （cDelete，Computer.cs:563-570）。不传 "*"：那个分支会把目标机自己的
+        // 历史一起删掉，正是本版要避免的。
+        var doomed = new List<string>();
+        foreach (var file in logFolder.files)
+        {
+            if (file != null && Mentions(file.data, ipFrom))
+            {
+                doomed.Add(file.name);
+            }
+        }
+
+        return RemoveFiles(comp, ipFrom, logFolder, folderPath, doomed);
     }
 
     /// <summary>
-    /// 删光一个目录下的全部文件 —— 清痕（<see cref="ClearLogs"/>）与显式删除
+    /// 该日志条目是否提到这个 IP。
+    ///
+    /// <b>比游戏自己的判据严一格。</b><c>TrackerCompleteSequence.cs:41</c> 用的是裸
+    /// <c>data.Contains(targetIP)</c>，会把 <c>"156.151.1.12"</c> 认成提到
+    /// <c>"156.151.1.1"</c>。游戏那样写只是<b>触发</b>一次追踪（误判代价是白紧张一场），
+    /// 而这里是要<b>删</b>东西 —— 误判会删掉一条根本不属于我们的记录，正是本版要避免的
+    /// 「改写对方状态」。实测存档 167 个 IP 里就存在一对这种前缀关系
+    /// （<c>156.151.1.1</c> / <c>156.151.1.12</c>），不是假想。
+    ///
+    /// 故命中处的前后各留一个字符做边界：两侧都不是数字或点才算真命中。
+    /// </summary>
+    private static bool Mentions(string data, string ip)
+    {
+        if (string.IsNullOrEmpty(data) || string.IsNullOrEmpty(ip))
+        {
+            return false;
+        }
+
+        for (var at = data.IndexOf(ip, StringComparison.OrdinalIgnoreCase); at >= 0;
+             at = data.IndexOf(ip, at + 1, StringComparison.OrdinalIgnoreCase))
+        {
+            if (!IsIpChar(data, at - 1) && !IsIpChar(data, at + ip.Length))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>该位置是否是 IP 的组成部分（数字或点）。越界视为否。</summary>
+    private static bool IsIpChar(string data, int index)
+        => index >= 0 && index < data.Length && (char.IsDigit(data[index]) || data[index] == '.');
+
+    /// <summary>
+    /// 删光一个目录下的文件 —— 痕迹清理（<see cref="WipeTraces"/>，传名单）与显式删除
     /// （面板 <c>purge</c>）共用的唯一通道。
     ///
     /// 为什么要共用：两者原本各写一份，一份带兜底、一份不带，于是同一个动作在两条
@@ -1057,7 +1127,13 @@ internal static class HackEngine
     /// </list>
     /// </summary>
     /// <returns>被删除的文件名快照（与 <c>"*"</c> 分支同一过滤条件），供回显与计数。</returns>
-    internal static IReadOnlyList<string> RemoveFiles(Computer comp, string ipFrom, Folder folder, List<int> folderPath)
+    /// <param name="only">
+    /// 只删这些名字；<c>null</c> = 全删（面板 <c>purge</c> 用的就是这个口径）。
+    /// 传名单时逐条点名走 <c>deleteFile</c>，保住权限门禁与联机同步；
+    /// 传 <c>null</c> 时走 <c>"*"</c> 分支 —— 它先快照再逐个递归，遍历中删除不会漏项。
+    /// </param>
+    internal static IReadOnlyList<string> RemoveFiles(
+        Computer comp, string ipFrom, Folder folder, List<int> folderPath, IReadOnlyCollection<string> only = null)
     {
         if (comp == null || folder == null || folder.files.Count == 0)
         {
@@ -1068,10 +1144,20 @@ internal static class HackEngine
         var removed = new List<string>(folder.files.Count);
         foreach (var file in folder.files)
         {
-            if (!string.IsNullOrWhiteSpace(file?.name))
+            if (string.IsNullOrWhiteSpace(file?.name))
+            {
+                continue;
+            }
+
+            if (only == null || only.Contains(file.name))
             {
                 removed.Add(file.name);
             }
+        }
+
+        if (removed.Count == 0)
+        {
+            return Array.Empty<string>();
         }
 
         // 游戏原语不只「返回 false」，它还会**抛异常**：deleteFile 对每个非 '@' 开头的
@@ -1081,7 +1167,17 @@ internal static class HackEngine
         // 故兜住它：原语是「尽量走」，下沉才是硬承诺。
         try
         {
-            comp.deleteFile(ipFrom, "*", folderPath);
+            if (only == null)
+            {
+                comp.deleteFile(ipFrom, "*", folderPath);
+            }
+            else
+            {
+                foreach (var name in removed)
+                {
+                    comp.deleteFile(ipFrom, name, folderPath);
+                }
+            }
         }
         catch (Exception ex) when (ex is NullReferenceException or ArgumentOutOfRangeException
                                        or IndexOutOfRangeException or ArgumentException)
@@ -1090,9 +1186,25 @@ internal static class HackEngine
             // 代价是多人同步消息可能少发一次 —— 比「什么都不删」可接受。
         }
 
-        if (folder.files.Count > 0)
+        // 无条件复核，两条路径同一终态：原语的返回值不可信（权限拒绝时静默 false；
+        // folderPath 解析偏了会去删别的文件夹并照样返回 true），删除是硬承诺。
+        if (only == null)
         {
             folder.files.Clear();
+        }
+        else
+        {
+            foreach (var name in removed)
+            {
+                for (var i = 0; i < folder.files.Count; i++)
+                {
+                    if (string.Equals(folder.files[i]?.name, name, StringComparison.Ordinal))
+                    {
+                        folder.files.RemoveAt(i);
+                        i--;
+                    }
+                }
+            }
         }
 
         return removed;

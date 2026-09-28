@@ -34,8 +34,14 @@ internal sealed record HackOptions(
     HackScope Scope,
     IReadOnlyList<string> Targets,
     float PortDelay,
-    bool ClearLogs,
-    bool ClearOwnLogs,
+    /// <summary>
+    /// 抹掉<b>玩家自己留下的</b>痕迹 —— 目标机与玩家机 /log 里含玩家 IP 的条目。
+    /// <b>缺省开</b>：留下痕迹会让带 <c>tracker="true"</c> 的机器在断开时自动排一个
+    /// 脱机追踪（<c>TrackerCompleteSequence.cs:30-47</c>），那是「留痕 = 自杀」。
+    /// 要留着痕迹传 <c>keep</c> / <c>nologs</c>。
+    /// 口径与实现见 <see cref="HackEngine.WipeTraces"/>。
+    /// </summary>
+    bool WipeTraces,
     bool UploadMarker,
     bool ConnectFirst,
     bool Disconnect,
@@ -47,23 +53,6 @@ internal sealed record HackOptions(
     bool ShowExes,
     bool ResetIP,
     HackSpeed Speed,
-
-    /// <summary>
-    /// 强行提权：忽略 porthack 的两道原生门禁（端口数 > <c>portsNeededForCrack</c>、
-    /// 防火墙已解），直接给目标写 <c>adminIP</c>。
-    ///
-    /// <b>为游戏自带的防护机而设。</b>实测存档有 9 台 EnTech 中继服务器，
-    /// <c>portsToCrack="9999998"</c>、<c>traceTime=500</c>、<c>proxyTime=30</c> ——
-    /// 门槛 9999998 永远越不过（porthack 要求已攻破端口数<b>严格大于</b>它，
-    /// <c>OS.cs:1916</c>），而 <c>DisplayModule</c> 在门槛 &gt; 100 时直接走
-    /// INVIOLABILITY ERROR 分支（<c>DisplayModule.cs:429/:625/:724</c>）。
-    /// 这类机器按常规路径<b>永远拿不下</b>，此开关是唯一出路。
-    ///
-    /// 面板 <c>force escalate</c> 复选框 / 命令行 <c>inviolable</c>。
-    /// **缺省开**（v1.33.1 起）：默认关等于「明明有办法拿下却装作没有」，
-    /// 与「攻破一切机器」的定位冲突。要恢复原生门禁语义传 <c>noinviolable</c>。
-    /// </summary>
-    bool ForceEscalate,
     string Script)
 {
     // 这里曾有 WantsAntiTrace（从 Disconnect 派生的「收尾是否清追踪」）。
@@ -84,10 +73,14 @@ internal sealed record HackOptions(
 
     private static readonly string[] ConnectedAliases = ["here", "local", "current", "connected"];
     private static readonly string[] NetworkAliases = ["all", "net", "network", "scan"];
-    private static readonly string[] KeepLogsAliases = ["nologs", "keep-logs", "keep"];
-    private static readonly string[] WipeLogsAliases = ["logs", "wipelogs", "wipe-logs"];
-    private static readonly string[] OwnLogsAliases = ["ownlogs", "my-logs", "selflogs", "clean-own"];
-    private static readonly string[] NoOwnLogsAliases = ["noownlogs", "keep-own", "keep-my-logs"];
+    /// <summary>留着痕迹不抹（见 <see cref="WipeTraces"/>）。两代反义别名都收在这里 ——
+    /// 合并「清目标」与「清自己」两个开关后，旧词必须继续可用。</summary>
+    private static readonly string[] KeepTraceAliases =
+        ["nologs", "keep-logs", "keep", "noownlogs", "keep-own", "keep-my-logs"];
+
+    /// <summary>抹掉自己的痕迹（缺省行为，写出来只为显式）。</summary>
+    private static readonly string[] WipeTraceAliases =
+        ["logs", "wipelogs", "wipe-logs", "ownlogs", "my-logs", "selflogs", "clean-own"];
     private static readonly string[] NoMarkerAliases = ["nomark", "no-upload"];
     private static readonly string[] MarkerAliases = ["mark", "upload", "marker"];
     private static readonly string[] AllNodesAliases = ["allnodes", "all-nodes", "full", "wide"];
@@ -107,13 +100,6 @@ internal sealed record HackOptions(
     /// <summary>把已控机器也纳入全网扫描（见 <see cref="HackOptions.SkipOwned"/>）。</summary>
     private static readonly string[] RedoAliases = ["redo", "force"];
 
-    /// <summary>强行提权（见 <see cref="HackOptions.ForceEscalate"/>）。
-    /// <c>inviolable</c> 是玩家在游戏里看得见的那个词 —— 防护机的面板上写的正是
-    /// INVIOLABILITY ERROR。</summary>
-    private static readonly string[] ForceEscalateAliases = ["inviolable", "forcecrack", "powerhack"];
-
-    private static readonly string[] NoForceEscalateAliases = ["noinviolable", "noforcecrack"];
-
     /// <summary>
     /// 脚本模式：用一份动作表取代内置次序。<c>script=&lt;文件名&gt;</c>，
     /// 文件按游戏的加载前缀解析（扩展目录或 Content/），详见 <see cref="HackScript"/>。
@@ -126,13 +112,15 @@ internal sealed record HackOptions(
         var scope = HackScope.Network;
         var delay = DefaultPortDelay;
 
-        // 缺省关（v1.16.0 起）：清痕会改写目标机的状态，属于「玩家明确要求才做」的
-        // 动作。默认开会让「只想打下来看看」的玩家在不知情时抹掉对方的 /log。
-        var clearLogs = false;
-
-        // 玩家自己 /log 的清理，独立于目标清痕，同样缺省关：
-        // 那是玩家自己的操作史（谁连过他、他读过什么），更不该被顺手抹掉。
-        var clearOwnLogs = false;
+        // 缺省**开**（v1.33.2 起，此前为关）。
+        //
+        // 口径变了：不再是「清空对方的 /log」（那会改写目标机的操作史），
+        // 而是只删 /log 里含玩家 IP 的条目 —— 抹的是自己的痕迹，不是对方的历史。
+        // 口径一变，缺省跟着翻：旧实现默认关是对的（清空整目录属越权），
+        // 新实现默认关则是错的 —— 留下的 FileCopied/FileDeleted 条目会让
+        // 带 tracker="true" 的机器在断开时自动排一个脱机追踪
+        // （TrackerCompleteSequence.cs:30-47），那是「留痕 = 自杀」。
+        var wipeTraces = true;
         var uploadMarker = false;
         var connectFirst = true;
 
@@ -159,12 +147,6 @@ internal sealed record HackOptions(
         // 要换用 newip 显式开启，或直接用面板的 NEW IP 按钮换一次。
         var resetIP = false;
 
-        // 缺省**开**（v1.33.1 起，此前为关）。porthack 的门禁（已攻破端口数严格大于
-        // portsNeededForCrack，OS.cs:1916）对实测存档里 22 台机器恒假 —— 9 台防护机
-        // 门槛 9999998、13 台普通机器破满端口也差 1~6 个。默认关等于「明明有办法
-        // 拿下却装作没有」，与「攻破一切机器」的定位冲突，故缺省开。
-        // 要恢复原生门禁语义传 'noinviolable'。
-        var forceEscalate = true;
         var speed = HackSpeed.Normal;
         string script = null;
 
@@ -180,10 +162,8 @@ internal sealed record HackOptions(
 
             if (ConnectedAliases.Contains(lower)) { scope = HackScope.Connected; continue; }
             if (NetworkAliases.Contains(lower)) { scope = HackScope.Network; continue; }
-            if (KeepLogsAliases.Contains(lower)) { clearLogs = false; continue; }
-            if (WipeLogsAliases.Contains(lower)) { clearLogs = true; continue; }
-            if (OwnLogsAliases.Contains(lower)) { clearOwnLogs = true; continue; }
-            if (NoOwnLogsAliases.Contains(lower)) { clearOwnLogs = false; continue; }
+            if (KeepTraceAliases.Contains(lower)) { wipeTraces = false; continue; }
+            if (WipeTraceAliases.Contains(lower)) { wipeTraces = true; continue; }
             if (MarkerAliases.Contains(lower)) { uploadMarker = true; continue; }
             if (NoMarkerAliases.Contains(lower)) { uploadMarker = false; continue; }
             if (RedoAliases.Contains(lower)) { skipOwned = false; continue; }
@@ -195,8 +175,6 @@ internal sealed record HackOptions(
             if (NoCredentialAliases.Contains(lower)) { useCredentials = false; continue; }
             if (ShowExesAliases.Contains(lower)) { showExes = true; continue; }
             if (NoShowExesAliases.Contains(lower)) { showExes = false; continue; }
-            if (ForceEscalateAliases.Contains(lower)) { forceEscalate = true; continue; }
-            if (NoForceEscalateAliases.Contains(lower)) { forceEscalate = false; continue; }
             if (ResetIPAliases.Contains(lower)) { resetIP = true; continue; }
             if (NoResetIPAliases.Contains(lower)) { resetIP = false; continue; }
             if (SlowAliases.Contains(lower)) { speed = HackSpeed.Normal; continue; }
@@ -230,8 +208,8 @@ internal sealed record HackOptions(
         }
 
         return new HackOptions(
-            scope, ids, delay, clearLogs, clearOwnLogs, uploadMarker, connectFirst, disconnect, skipOwned,
-            allNodes, useCredentials, showExes, resetIP, speed, forceEscalate, script);
+            scope, ids, delay, wipeTraces, uploadMarker, connectFirst, disconnect, skipOwned,
+            allNodes, useCredentials, showExes, resetIP, speed, script);
     }
 }
 

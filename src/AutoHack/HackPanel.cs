@@ -48,17 +48,19 @@ internal sealed class HackPanelState
     internal float PortDelay { get; set; } = HackOptions.DefaultPortDelay;
 
     /// <summary>
-    /// 是否清目标机的 /log。缺省**关**（v1.16.0 起）—— 清痕会改写目标机状态
-    /// （抹掉对方的操作史），属「玩家明确要求才做」的动作；默认开会让只想打下来
-    /// 看看的玩家在不知情时抹掉对方日志。要清须显式勾选或传 <c>nologs</c> 的反面。
+    /// 是否抹掉<b>玩家自己留下的</b>痕迹 —— 目标机与玩家机 /log 里含玩家 IP 的条目。
+    /// 缺省**开**（v1.33.2 起）。
+    ///
+    /// 它由两个旧开关合并而来（<c>ClearLogs</c>「清目标日志」与 <c>ClearOwnLogs</c>
+    /// 「清我的日志」），两者缺省都是关，且都过粗 —— 清目标那一个是把对方 /log
+    /// 整目录删掉（改写对方状态），清自己那一个只擦玩家机。合并后口径收窄为
+    /// 「凡提到我 IP 的条目」，两台机器一视同仁。
+    ///
+    /// 缺省从「关」翻成「开」的理由：留痕的代价是带 <c>tracker="true"</c> 的机器
+    /// 在断开时自动排一个脱机追踪（<c>TrackerCompleteSequence.cs:30-47</c>），
+    /// 而新口径删的只是自己的痕迹，没有需要玩家权衡的取舍。要留痕取消勾选。
     /// </summary>
-    internal bool ClearLogs { get; set; } = false;
-
-    /// <summary>
-    /// 是否连玩家自己的 /log 一起清。缺省**关** —— 那是玩家自己的操作史
-    /// （谁连过他、他读过什么），不该被「入侵时顺手」抹掉，要清须显式开。
-    /// </summary>
-    internal bool ClearOwnLogs { get; set; } = false;
+    internal bool WipeTraces { get; set; } = true;
 
     /// <summary>是否上传 ~/autohack.txt 标记（缺省关）。</summary>
     internal bool UploadMarker { get; set; } = false;
@@ -109,16 +111,6 @@ internal sealed class HackPanelState
     internal bool SkipOwned { get; set; } = true;
 
     /// <summary>
-    /// 强行提权：忽略 porthack 的门禁，直接给目标写 <c>adminIP</c>（缺省**开**）。
-    ///
-    /// 实测存档里有 22 台机器 porthack 判据恒假（9 台防护机门槛 9999998、
-    /// 13 台普通机器破满端口也差 1~6 个），常规路径一台也拿不下。
-    /// **缺省开**：默认关等于「明明有办法拿下却装作没有」，与「攻破一切机器」的定位冲突。
-    /// 理由与代价见 <see cref="HackOptions.ForceEscalate"/>。
-    /// </summary>
-    internal bool ForceEscalate { get; set; } = true;
-
-    /// <summary>
     /// 收尾是否把玩家机换成一个新 IP（缺省**开**）。
     ///
     /// 走游戏原生的「换 IP 保命」动作（ISP 服务器的 `Assign New IP`，见 IpTools）。
@@ -149,8 +141,7 @@ internal sealed class HackPanelState
     internal readonly record struct Settings(
         HackScope Scope,
         float PortDelay,
-        bool ClearLogs,
-        bool ClearOwnLogs,
+        bool WipeTraces,
         bool UploadMarker,
         bool ConnectFirst,
         bool Disconnect,
@@ -159,7 +150,6 @@ internal sealed class HackPanelState
         bool UseCredentials,
         bool ShowExes,
         bool ResetIP,
-        bool ForceEscalate,
         int X,
         int Y,
         bool Collapsed);
@@ -173,15 +163,14 @@ internal sealed class HackPanelState
 
     /// <summary>当前设置快照。供 <see cref="HackPanel.Draw"/> 比对是否发生了改动。</summary>
     internal Settings Fingerprint => new(
-        Scope, PortDelay, ClearLogs, ClearOwnLogs, UploadMarker, ConnectFirst, Disconnect,
-        SkipOwned, AllNodes, UseCredentials, ShowExes, ResetIP, ForceEscalate, X, Y, Collapsed);
+        Scope, PortDelay, WipeTraces, UploadMarker, ConnectFirst, Disconnect,
+        SkipOwned, AllNodes, UseCredentials, ShowExes, ResetIP, X, Y, Collapsed);
 
     internal HackOptions ToOptions() => new(
         Scope,
         Array.Empty<string>(),
         PortDelay,
-        ClearLogs,
-        ClearOwnLogs,
+        WipeTraces,
         UploadMarker,
         ConnectFirst,
         Disconnect,
@@ -194,8 +183,6 @@ internal sealed class HackPanelState
         // 面板不再提供节奏档位（三档 UI 已删）：面板一律走原生节奏，
         // 命令行仍可用 slow / fast / instant 显式选档（见 HackTypes.Parse）。
         HackSpeed.Normal,
-
-        ForceEscalate,
         Script);
 }
 
@@ -282,7 +269,17 @@ internal static class HackPanel
     private static int ToolsBlockHeight
         => SectionHeight + ToolRows * (ToolButtonHeight + ToolRowGap) + Gap;
 
-    /// <summary>选项块从正文起点到 RUN 按钮顶部的总高。必须与 <see cref="DrawOptions"/> 的推进量一致。</summary>
+    /// <summary>
+    /// 选项块从正文起点到 RUN 按钮顶部的总高。必须与 <see cref="DrawOptions"/> 的推进量一致。
+    ///
+    /// 逐项相加而不是写死数字：改动行数时编译器会连这里一起算错，而不是让面板
+    /// 悄悄缺一条边。
+    ///
+    /// **这里曾有一个 22px 的偏差**（v1.33.1 及更早）：常量按 5 行复选框算，
+    /// <see cref="DrawOptions"/> 实际画了 6 行（第 6 行是 force escalate 复选框），
+    /// 面板底边比内容矮一行。v1.33.2 删掉那一行后，两边的数字才对上 ——
+    /// 现在 5 行，常量也是 5，改动任一侧都必须同步另一侧。
+    /// </summary>
     private const int OptionsBlockHeight =
         SectionHeight + SegmentHeight + Gap
         + SectionHeight + SliderHeight + Gap
@@ -457,7 +454,7 @@ internal static class HackPanel
         y += CheckRowHeight;
 
         state.SkipOwned = Check(state.IdBase + 18, left, y, ColumnWidth, state.SkipOwned, Loc.T("skip owned"), c);
-        state.ClearLogs = Check(state.IdBase + 19, left + ColumnWidth + 8, y, ColumnWidth, state.ClearLogs, Loc.T("wipe target logs"), c);
+        state.WipeTraces = Check(state.IdBase + 19, left + ColumnWidth + 8, y, ColumnWidth, state.WipeTraces, Loc.T("wipe my traces"), c);
         y += CheckRowHeight;
 
         state.ConnectFirst = Check(state.IdBase + 20, left, y, ColumnWidth, state.ConnectFirst, Loc.T("connect first"), c);
@@ -469,16 +466,16 @@ internal static class HackPanel
         y += CheckRowHeight;
 
         state.UploadMarker = Check(state.IdBase + 22, left, y, ColumnWidth, state.UploadMarker, Loc.T("upload marker"), c);
-        state.ClearOwnLogs = Check(state.IdBase + 23, left + ColumnWidth + 8, y, ColumnWidth, state.ClearOwnLogs, Loc.T("wipe my logs"), c);
+        state.ShowExes = Check(state.IdBase + 24, left + ColumnWidth + 8, y, ColumnWidth, state.ShowExes, Loc.T("native exes"), c);
         y += CheckRowHeight;
 
-        state.ShowExes = Check(state.IdBase + 24, left, y, ColumnWidth, state.ShowExes, Loc.T("native exes"), c);
-        state.ResetIP = Check(state.IdBase + 25, left + ColumnWidth + 8, y, ColumnWidth, state.ResetIP, Loc.T("new IP after run"), c);
+        state.ResetIP = Check(state.IdBase + 25, left, y, ColumnWidth, state.ResetIP, Loc.T("new IP after run"), c);
         y += CheckRowHeight;
 
-        state.ForceEscalate = Check(state.IdBase + 26, left, y, ColumnWidth, state.ForceEscalate, Loc.T("force escalate"), c);
-        y += CheckRowHeight;
-
+        // 这里曾有第六行（force escalate 复选框，IdBase + 26），v1.33.2 起常驻 ——
+        // 那个开关缺省就是开，留着等于给唯一出路配了个自毁按钮。
+        // 同一版还并掉了「wipe target logs」与「wipe my logs」两个复选框：
+        // 它们现在是同一个口径（只删含玩家 IP 的日志条目）下的一个开关。
         next = y + Gap;
     }
 

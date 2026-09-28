@@ -217,10 +217,13 @@ internal sealed class HackScript
                     connected = false;
                     break;
 
+                // 清痕本身已不依赖连接（HackEngine.WipeTraces 按 folderPath 直取目标
+                // /log），但脚本里的 'rm' 仍是玩家写下的**意图** —— 他以为它在目标机上
+                // 执行。dc 之后它落在自己机器上，意图与效果不符，仍属该拒的写法。
                 case HackStepKind.CleanLogs when !connected:
                     throw new FormatException(
                         "In '" + source + "': 'rm' comes after 'dc' with no 'connect' in between - "
-                        + "rm would act on your own file system, not the target's. Swap the two lines.");
+                        + "it would act on your own file system, not the target's. Swap the two lines.");
             }
         }
     }

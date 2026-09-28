@@ -3,7 +3,7 @@
 > Hacknet 的 BepInEx / Pathfinder 插件：用游戏自身的原生机制一键入侵全网，带控制面板与脚本驱动。
 > 本文件面向要理解或修改本仓库的编码 agent。规范见 https://llmstxt.org
 
-当前 v1.33.1。构建产物直投游戏插件目录，无需手动拷贝：
+当前 v1.33.2。构建产物直投游戏插件目录，无需手动拷贝：
 
 ```
 D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
@@ -21,7 +21,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    **绝不下载 Release 附件回来比对** —— 需要确认部署新鲜度时只看构建输出目录那份。
 3. **`gh release create` 绝不自动执行** —— 等用户显式发令。`git push` 可以直接做。
 
-**三十八条最容易踩的坑 / 最该知道的机制**（都带行号，可直接 grep）
+**三十九条最容易踩的坑 / 最该知道的机制**（都带行号，可直接 grep）
 
 1. `Computer.portsOpen` 恒为 0 —— Pathfinder 用 Harmony Prefix 接管 `openPort`/`openPorts`
    并 `return false`，状态改存 `PortState.Cracked`。任何读 `portsOpen` 的判断都是错的，
@@ -31,8 +31,13 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    **但 `deleteFile` 有权限门禁**（`Computer.cs:511-517`）：`currentUser.type >= 2` 时
    **静默返回 false** —— 不删、不报错、不写日志。删除一律走 `HackEngine.RemoveFiles`
    （两段式：游戏原语 + 无条件清 List），别自己调 `deleteFile`。
-3. `rm` 的目标机取自 `os.connectedComp`（`Programs.cs:956`）—— 断开之后再清痕，
-   删的是**玩家自己**的文件系统。故清痕必须排在 `dc` 之前。
+3. `rm` 的目标机取自 `os.connectedComp`（`Programs.cs:956`）—— 断开之后敲 `rm`，
+   删的是**玩家自己**的文件系统。脚本里的 `rm` 仍受此约束（`HackScript.Validate` 会拒
+   `dc` 后无 `connect` 的 `rm`）。
+   但**插件自己的清痕不受它约束**（v1.33.2 起）：`HackEngine.WipeTraces` 按 `folderPath`
+   直取目标 `/log`，不读 `os.connectedComp`，故它已从 `DependsOnConnection` 名单里退出。
+   排在前面的理由变成另一条：断开本身会往目标 `/log` 写 `"<玩家IP> Disconnected"`
+   （`Computer.disconnecting`，`Computer.cs:722-727`），排在断开后就得再清一遍。
 4. `Computer.deleteFile` 会自己写一条 log（`Computer.cs:543`）—— 但仅当 `name[0] != '@'`，
    而 `/log` 里的文件名恒以 `@` 开头（`Computer.log` 拼的），故清痕不会自我污染。
 5. 管理员反扑是**延迟**的（`BasicAdministrator.disconnectionDetected`，0–20 秒）——
@@ -58,9 +63,17 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    在游戏里**零引用**，它是 `generateBinaryString` 的**请求**长度：该函数开 `byte[length/8]`
    再 `Convert.ToString(b, 2)`（**不补前导零**，`Computer.cs:1580-1585`），产物约 445 字符。
    拿它校验曾让程序补全 `added 0 / skipped 37`（表面「给了但没效果」）。判据用「非空」。
-11. **目标清痕与自己的清痕是两回事** —— `ClearLogs`（`wipe target logs`）抹「入侵别人的证据」，
-   `ClearOwnLogs`（`wipe my logs`）抹「玩家自己的操作史」。**两条缺省都是关**
-   （v1.16.0 起；清痕会改写对方状态，属「玩家明确要求才做」）。
+11. **清痕只删「含玩家 IP 的条目」，不是清空整个 `/log`**（v1.33.2 起）——
+   `HackEngine.WipeTraces` 按 IP 过滤，目标机与玩家机同一口径，由 `HackOptions.WipeTraces`
+   一个开关控制，**缺省开**。它由两个旧开关合并而来（`ClearLogs` `wipe target logs` +
+   `ClearOwnLogs` `wipe my logs`，两者缺省都是关），口径从「清空对方 /log」收窄为
+   「删自己的痕迹」—— 口径一变缺省跟着翻：旧实现默认关是对的（清空整目录属越权），
+   新实现默认关是错的（留下 `FileCopied`/`FileDeleted` 条目会让带 `tracker="true"` 的机器
+   在断开时自动排一次追踪，见坑 28）。
+   这个口径恰好与游戏的追踪判据同构（`TrackerCompleteSequence.cs:41` 扫的就是
+   「含玩家 IP 且含 `FileCopied`/`FileDeleted`/`FileMoved`」），故它**既不误伤对方历史，
+   又刚好让追踪判据失配**。实测存档 167 台 / 656 条日志：新口径删 592 条（90.24%）、
+   保留 64 条，受影响 55 台；保留的样例是 `"User Account Added: from <别人IP>"` 这类。
    玩家机不在 `Targets` 也不在 `Skipped`（`HackEngine.cs:445` 显式跳过），必须单独追加。
    同理 `use known creds` 缺省**关**（v1.15.0 起）—— `adminPass` 是公开字段，开着等于
    默认跳过破端口/防火墙/porthack 三套机制，架空玩法。
@@ -144,7 +157,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     （`OS.cs:944-960`）在断开时检查目标 `/log`：只要有一行同时含玩家 IP 与
     `FileCopied`/`FileDeleted`/`FileMoved`，就排入追踪（`TrackerCompleteSequence.cs:30-47`），10~20 秒后
     端掉玩家。而 `Computer.deleteFile` 每次都会写 `"FileDeleted: by <玩家IP>"`（`Computer.cs:543`）。
-    故这类机器**无条件**清痕，不受 `clearLogs` 开关约束（缺省 false，必中）。
+    故这类机器**无条件**清痕（v1.33.2 起 `wipe my traces` 缺省就是开，必中）。
 21. **放原生破解 exe 当演出，必须已连着目标** —— `ExeModule` 构造时把 `targetIP` 定成
     「当前连接目标，没连接就是本机」（`ExeModule.cs:38`），没连着就放会把动画打在自己身上。
     另有 5 个端口不可用：3724/3659/9418 在 `OS.launchExecutable` 的 switch 里**没有 case**
@@ -249,12 +262,15 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     （`:78`）算一次，那一刻读到的已是新值，**不要手动重算**：`reset()`（`:319-331`）
     不重算它，手动补的那份重启后失效。
 
-28. **收尾清追踪是恒定动作，且不擦追踪者 /log**（用户定）—— 每轮 `autohack run` 的
+28. **收尾清追踪是恒定动作，且不擦追踪者 /log** —— 每轮 `autohack run` 的
     `HackRun.Finish` 无条件调 `TraceTools.Run`：止 `traceTracker` 倒计时、清
-    `TrackersInProgress` 列表，**但不碰对方 /log**。/log 是目标机自己的操作史，擦它属于
-    改写对方状态，该由 `wipe target logs` 单独决定，反追踪不顺手替玩家做。
+    `TrackersInProgress` 列表，**但不碰对方 /log**。整个删掉对方 /log 属于改写对方状态，
+    反追踪不顺手替玩家做。
     已知代价：`CompShouldStartTrackerFromLogs`（`TrackerCompleteSequence.cs:30-47`）的
-    复发源就是那些日志，故同一台机器上的追踪**可能复发**；要断源就显式开 `wipe target logs`。
+    复发源就是那些日志，故同一台机器上的追踪**可能复发**。
+    但 v1.33.2 起复发面已被压到很低 —— `CleanLogs` 步删的正是「含玩家 IP」的条目（坑 11），
+    那恰好就是这条判据的输入。留着这一层兜底是因为收尾清痕与断开之间有窗口
+    （`ResetIP` 等），且脚本模式可能不排清痕步。
     顺序约定：`Finish` 里清追踪排在换 IP 之前 —— 先收拾追踪、再换身份。
 
 29. **换 IP 会清空全部肉鸡标记，必须同步迁移** —— 提权时游戏把玩家当时的 IP 写进目标机
@@ -408,7 +424,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
       整个排除，其中 9 台是游戏自带防护机（`portsToCrack="9999998"`，EnTech 中继服务器
       系列），13 台是门槛 2~8 而端口表只有 1~4 个的普通机器。**两类都是 porthack 判据
       恒假**（要求已攻破端口数**严格大于**门槛，`OS.cs:1916`），破满端口也差 1~6 个
-      —— 它们只能靠 `ForceEscalate`，排除它们等于「有办法却装作没有」。
+      —— 它们只能靠 `ForceEscalate`（v1.33.2 起常驻），排除它们等于「有办法却装作没有」。
       随它删除的死代码：`CanEverEscalate`、`HasAnyCredential`、`SkippedHopeless`。
     - **已控剔除保留**（`skip owned` 复选框缺省开 / `redo` 命令行关掉它），
       但**只对全网扫描生效**：`skipOwned = options.SkipOwned && sweep`。
@@ -420,9 +436,12 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
       （`DisplayModule.cs:429/:625/:724`）—— 面板上那行乱码数字就是防护机的标志。
       玩家的 `unbreakable`（`HardenTools.Inviolable = 9999998`）写的是**同一个字段**，
       故加固出来的机器与游戏防护机在数据上无从区分。
-    - `ForceEscalate`（面板 `force escalate` / 命令行 `inviolable`，**缺省开**）在
-      `CanEscalate` 不过时直接 `giveAdmin`，与原生提权成功的终态一致；
-      要恢复原生门禁语义传 `noinviolable`。门禁不过时终端写一行
+    - `HackEngine.ForceEscalate` 在 `CanEscalate` 不过时直接 `giveAdmin`，与原生提权
+      成功的终态一致。**v1.33.2 起常驻，不再是开关**：面板的 `force escalate` 复选框、
+      `HackOptions.ForceEscalate` 字段、cfg 键 `force_escalate` 与命令行别名
+      `inviolable`/`noinviolable` **全部删除**。理由：该开关缺省就是开，留一个
+      「默认开、关了就打不下」的开关，等于给唯一出路配了个自毁按钮。
+      门禁不过时终端写一行
       `escalation gate not met (needs > N open port(s), have M) - forced admin anyway`。
 
 37. **演出动画的并发数由 RAM 决定，不是 1；且存活时长要算上淡出** —— 单 exe 占 190~400mb
@@ -446,13 +465,34 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     **演出会点燃追踪**：9 个 exe 里 8 个调 `hostileActionTaken()`（3 个在构造函数、
     5 个在 `LoadContent`，即 `OS.addExe` 那一刻），目标 `traceTime > 0` 时即
     `os.traceTracker.start`。泵**每帧**扑掉一次（`HackEngine.KillTrace`）——
-    步骤层的清理够不着 `addExe` 那个时刻。已提权（`adminIP` 已是玩家）的机器不排演出。
+    步骤层的清理够不着 `addExe` 那个时刻。已提权（`adminIP` 已是玩家）的机器不排演出 ——
+    但那道判据只在**入队时**求值，而提权排在全部端口之后（`BuildSteps`），
+    故它拦不住「破端口时还没控、提权时队列里已压着好几个」这种情况。
+    **队列的截断点有两个，都在目标边界上**（v1.33.2）：
+    `HackRun.Tick` 换目标时调 `NativeExes.StopTarget(os, 上一台.ip)`，
+    `HackRun.Finish` 调 `NativeExes.StopAll(os)`。两者都只清队列 + 置
+    `isExiting = true` 走游戏自己的 2 秒淡出（`ExeModule.cs:68-77`），
+    **不硬删 `os.exes`** —— 硬删会跳过淡出、绕过游戏自己的移除时机。
+    归属靠 `NativeExes.Live` 记实例引用，不按 `targetIP` 反查 `os.exes`：
+    同一台目标上玩家自己也可能开着 ShellExe 之类，按 IP 匹配会误伤。
+    实测（60 台 × 每台 3~10 端口，`PortDelay 0.6`）：收尾后拖尾 **88.8 秒 → 0 秒**。
     存活时长**不是动画名义时长**，还要加收尾停顿与淡出 2 秒
     （`fade` 从 1 到 0 需 `1 / FADEOUT_RATE`，`ExeModule.cs:9/:76`）：
     RTSPCrack 实为 `IDLE_TIME 30.5 + 2 = 32.5s`（`RTSPPortExe.cs:10`），不是 6.3s；
     KBT_PortTest 为 `RUNTIME 22 + COMPLETE_TIME 2 + 2 = 26s`（`MedicalPortExe.cs:7-9`）。
     另：exe 必须在**入队时**构造，不能推迟到播放 —— 其 `targetIP` 在构造时定成当前连接目标
     （坑 21），队列跨目标存活，延迟构造会让 `Completed()` 给一台本不该开端口的机器开端口。
+
+39. **按 IP 过滤日志条目时，子串判据会误伤同前缀的 IP** —— 游戏自己的追踪判据是裸
+    `data.Contains(targetIP)`（`TrackerCompleteSequence.cs:41`），会把 `"156.151.1.12"`
+    认成提到 `"156.151.1.1"`。游戏那样写只是**触发**一次追踪（误判代价是白紧张一场），
+    而清痕是要**删**东西 —— 误判会删掉一条根本不属于我们的记录，正是坑 11 要避免的
+    「改写对方状态」。实测存档 167 个 IP 里就存在一对这种前缀关系
+    （`156.151.1.1` / `156.151.1.12`），不是假想。
+    故 `HackEngine.Mentions` 在命中处前后各留一个字符做边界：两侧都不是数字或点才算真命中。
+    全存档回归：宽松判据 592 条、边界判据 592 条（本例不改变结果，但前缀对确实存在）。
+    同类陷阱：任何「文本包含 IP」的判据都要先想前缀重叠。
+
 
 ## README 已精简掉的内容（原样保留于此）
 
@@ -465,18 +505,20 @@ README 在 v1.32.6 之后被刻意精简过一轮（删了 94 行），只留使
 游戏里有**两套**都叫「追踪」的机制，别混：
 
 | | 表现 | 怎么应付 |
-|## 仓库文档|## 仓库文档|## 仓库文档|
+|---|---|---|
 | `TRACE :` 倒计时 | 屏幕**左下角**红色数字从 100 往下走，提示音逐渐变密。归零 = 玩家机崩 | **每轮收尾自动清除**（无需设置）；手动即时清除用 `autohack trace`，或断开连接 |
-| 追踪中（无任何提示） | **完全看不见**。断线时若那台机器 `/log` 里留有你 IP 的 copy/delete/move 记录，它 10~20 秒后自动反打：开端口 → 闪屏 → forkbomb → 玩家机崩 | v1.30.0 起**左下角常驻显示**「追踪中 : N 台 · M 秒」 |
+| 追踪中（无任何提示） | **完全看不见**。断线时若那台机器 `/log` 里留有你 IP 的 copy/delete/move 记录，它 10~20 秒后自动反打：开端口 → 闪屏 → forkbomb → 玩家机崩 | v1.30.0 起**左下角常驻显示**「追踪中 : N 台 · M 秒」；v1.33.2 起每台机器末尾的 `wipe my traces`（缺省开）会删掉那些含你 IP 的记录，从源头断掉 |
 
-**清追踪是每轮收尾的恒定动作，不需要设置**：一次 `autohack run` 收尾时无条件止住两套追踪、
-并把追踪者的 `/log` 擦掉。它曾与「跑完断开」合成一个复选框，现拆开 —— 清追踪只是收拾自己
-制造的烂摊子，留着只有坏处（忘记勾选就被倒计时崩掉机器）；断开则是玩家的行为选择。
+**清追踪是每轮收尾的恒定动作，不需要设置**：一次 `autohack run` 收尾时无条件止住两套追踪。
+**不擦追踪者的 `/log`** —— 那是目标机自己的操作史，整个删掉属于改写对方状态。
+它曾与「跑完断开」合成一个复选框，现拆开 —— 清追踪只是收拾自己制造的烂摊子，
+留着只有坏处（忘记勾选就被倒计时崩掉机器）；断开则是玩家的行为选择。
 要**当场**清除（不等本轮结束）用 `autohack trace`。
 
 第二套的**复发源就是日志**，而反追踪**不擦**它（用户定）—— `/log` 是目标机自己的操作史，
-擦它属于改写对方状态，该由 `wipe target logs` 单独决定，反追踪不顺手替玩家做。
-代价是同一台机器上的追踪可能复发；要彻底断源就显式开 `wipe target logs`。
+整个删掉对方 /log 属于改写对方状态，反追踪不顺手替玩家做。
+代价是同一台机器上的追踪可能复发；但 v1.33.2 起每台机器末尾的 `wipe my traces`
+（缺省开）会删掉含你 IP 的条目 —— 那正是这条判据的输入，复发面已被压到很低。
 
 ### 工具：`allnodes` 的适用范围与三条收尾通道
 

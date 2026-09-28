@@ -1,5 +1,6 @@
 namespace AutoHack;
 
+using System;
 using Hacknet;
 using Microsoft.Xna.Framework;
 
@@ -105,6 +106,16 @@ internal static class NativeExes
 
     /// <summary>待播动画，按 <see cref="Compare"/> 排序 —— 代价小的在前。</summary>
     private static readonly List<Pending> Queue = new(MaxQueued);
+
+    /// <summary>
+    /// <b>已经挂上面板、仍归本类管的</b> exe 实例。停播时要靠它精确找到自己挂的那些 ——
+    /// 不能拿 <c>os.exes</c> 按 <c>targetIP</c> 反查：同一台目标上玩家自己也可能开着
+    /// 别的 exe（ShellExe 之类），按 IP 匹配会把玩家的程序一起淡出掉。
+    ///
+    /// 播完的实例由游戏自己摘除（<c>needsRemoval</c>，ExeModule.cs:76 → OS.cs:852），
+    /// 故每帧清一次「已不在 <c>os.exes</c> 里」的项，列表不随会话增长。
+    /// </summary>
+    private static readonly List<ExeModule> Live = new(MaxQueued);
 
     /// <summary>
     /// 可安全演出的破解程序名 → <b>实际存活时长</b>（秒）。这张表同时就是白名单，
@@ -271,12 +282,30 @@ internal static class NativeExes
 
     /// <summary>
     /// 每帧推进一步：只要预算装得下队首，就把它挂上去（队首的排序键最小，见
-    /// <see cref="Compare"/>）。由 <see cref="HackOverlay"/> 的 OS.Update 补丁调用，
-    /// 与运行是否结束无关 —— 收尾后的队列仍要播完。
+    /// <see cref="Compare"/>）。由 <see cref="HackOverlay"/> 的 OS.Update 补丁调用。
+    ///
+    /// 泵本身不关心入侵是否还在推进 —— 队列何时被截断由 <see cref="StopTarget"/> 与
+    /// <see cref="StopAll"/> 决定，那两个入口由 <see cref="HackRun"/> 在目标边界与
+    /// 整轮收尾处调用。
+    ///
+    /// 只在游戏线程调用（OS.Update 的 Harmony Postfix），故与 <see cref="Queue"/> /
+    /// <see cref="Live"/> 的读写天然串行，不需要加锁。
     /// </summary>
     internal static void Tick(OS os)
     {
-        if (os == null || Queue.Count == 0)
+        if (os == null)
+        {
+            return;
+        }
+
+        // 播完的实例已由游戏摘除，这里跟着剪一遍 —— 队列空时也要剪，
+        // 否则 Live 会在整个会话里只增不减。
+        if (Live.Count > 0)
+        {
+            Live.RemoveAll(exe => exe == null || !os.exes.Contains(exe));
+        }
+
+        if (Queue.Count == 0)
         {
             return;
         }
@@ -293,6 +322,9 @@ internal static class NativeExes
             // 队列按升序排、队首的键最小，装不下就说明其余更装不下 ——
             // 留到预算释放后再挂，不是丢弃。
             os.addExe(head.Exe);
+
+            // 登记归属：停播时要按实例精确摘出来（见 Live）。
+            Live.Add(head.Exe);
 
             // 挂上去了才算「出现过」—— 排过队但被挤掉、丢弃、或预算不足没挂上的都不算。
             ShownCount[head.ExeName] = Count(head.ExeName) + 1;
@@ -337,11 +369,89 @@ internal static class NativeExes
     }
 
     /// <summary>丢弃所有待播动画，并把「出现次数」清零。换 OS（回主菜单再进档）时调用 ——
-    /// 否则上一局排的动画会漏进新一局，且上一局的均衡进度会带偏新一局的次序。</summary>
+    /// 否则上一局排的动画会漏进新一局，且上一局的均衡进度会带偏新一局的次序。
+    ///
+    /// <b>不淡出 <see cref="Live"/> 里的实例</b>：换 OS 意味着那些 exe 连同旧 OS 的
+    /// <c>exes</c> 列表一起被丢弃，去碰它们没有意义。只清列表本身。</summary>
     internal static void Reset()
     {
         Queue.Clear();
+        Live.Clear();
         ShownCount.Clear();
+    }
+
+    /// <summary>
+    /// 一台目标的动作跑完了：丢掉它待播的动画，并让它已经在面板上播的那个淡出。
+    ///
+    /// <b>为什么需要这个入口。</b>动画在<b>破端口那一刻</b>入队，而提权排在全部端口之后
+    /// （BuildSteps）—— 等到提权发生时，队列里还压着属于这台机器的好几个动画
+    /// （队列容量 8，单个动画要活 8~33 秒，而单台端口步只花端口数 × PortDelay ≈ 几秒）。
+    /// 不截断的话，玩家会在「已经黑进去了」之后继续看这台机器的破解动画。
+    ///
+    /// 按 <c>targetIP</c> 匹配而不是按 <see cref="Computer"/> 引用：exe 自己就是靠
+    /// <c>Programs.getComputer(os, targetIP)</c> 找目标的（SSHCrackExe.cs:226 等），
+    /// 那是它与目标之间唯一的联系，也是构造时定下的那个值（ExeModule.cs:38）。
+    /// </summary>
+    internal static void StopTarget(OS os, string ip)
+    {
+        if (os == null || string.IsNullOrEmpty(ip))
+        {
+            return;
+        }
+
+        Queue.RemoveAll(pending => SameTarget(pending.Exe, ip));
+        Fade(os, exe => SameTarget(exe, ip));
+    }
+
+    /// <summary>
+    /// 整轮结束：清空待播队列，并让所有仍在面板上播的动画淡出。
+    ///
+    /// 与 <see cref="StopTarget"/> 的差别只是范围 —— 收尾时不该再有「本轮的演出」
+    /// 继续拖尾，而单台机器收尾只该截断那一台。
+    /// </summary>
+    internal static void StopAll(OS os)
+    {
+        if (os == null)
+        {
+            return;
+        }
+
+        Queue.Clear();
+        Fade(os, _ => true);
+    }
+
+    private static bool SameTarget(ExeModule exe, string ip)
+        => exe != null && string.Equals(exe.targetIP, ip, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// 让匹配的实例淡出，并把它们从 <see cref="Live"/> 摘除。
+    ///
+    /// <b>走游戏自己的淡出，而不是从 <c>os.exes</c> 里硬删。</b>置
+    /// <c>isExiting = true</c> 后，<c>ExeModule.Update</c> 会在 2 秒内把 <c>ramCost</c>
+    /// 线性降到 0 并置 <c>needsRemoval</c>（ExeModule.cs:68-77），由 <c>OS.Update</c>
+    /// 的布局循环摘除（OS.cs:852）—— 那是游戏自己的退场路径，RAM 预算也随淡出逐帧归还。
+    /// 硬删会跳过这一切：占用瞬间释放但动画突兀消失，且绕开了游戏的移除时机。
+    ///
+    /// 已经在 <c>os.exes</c> 里的才置位；已播完的实例跳过（它已经不在列表里，
+    /// <see cref="Tick"/> 的剪枝只是还没来得及跑）。
+    /// </summary>
+    private static void Fade(OS os, Func<ExeModule, bool> match)
+    {
+        for (var i = Live.Count - 1; i >= 0; i--)
+        {
+            var exe = Live[i];
+            if (exe == null || !match(exe))
+            {
+                continue;
+            }
+
+            if (os.exes.Contains(exe))
+            {
+                exe.isExiting = true;
+            }
+
+            Live.RemoveAt(i);
+        }
     }
 
     /// <summary>

@@ -48,14 +48,13 @@ internal static class Loc
             ["use known creds"] = "用已知账密",
             ["whole map"] = "整张地图",
             ["skip owned"] = "跳过已拿下",
-            ["wipe target logs"] = "清除目标日志",
+
             ["connect first"] = "先连接",
             ["disconnect when done"] = "跑完断开",
             ["upload marker"] = "上传标记",
-            ["wipe my logs"] = "清除我的日志",
+            ["wipe my traces"] = "清除我的痕迹",
             ["native exes"] = "原生演出",
             ["new IP after run"] = "跑完换 IP",
-            ["force escalate"] = "强行提权",
 
             // TOOLS
             ["TOOLS"] = "工具",

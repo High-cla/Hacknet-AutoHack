@@ -36,7 +36,7 @@ internal static class ToolDispatch
         (Exes, "fill /bin with every crack program the game can produce"),
         (Unbreakable, "harden THIS machine (irreversible)"),
         (Pull, "download every file in the current directory to local home"),
-        (Purge, "delete every file in the current directory (shared with log wipe)"),
+        (Purge, "delete every file in the current directory"),
         (Drop, "disconnect and remove the connected node from the map"),
         (Trace, "anti-trace: stop the countdown and every pending tracker"),
         (Skip, "complete the active mission and take the next one"),

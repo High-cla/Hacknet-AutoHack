@@ -42,6 +42,13 @@ internal sealed class HackRun
     private int _index;
     private float _timer;
 
+    /// <summary>
+    /// 上一步所属的目标。步骤按目标成组排列（BuildSteps 逐个 target 展开），
+    /// 故「目标变了」就是「上一台跑完了」—— 那是截断它演出的时机（见
+    /// <see cref="NativeExes.StopTarget"/>）。
+    /// </summary>
+    private Computer _activeTarget;
+
     /// <summary>本次运行中靠已知凭据登入（即已提权）的机器，其破端口类步骤整体跳过。</summary>
     private readonly HashSet<Computer> _loggedIn = new();
 
@@ -78,9 +85,6 @@ internal sealed class HackRun
         _targets = plan.Targets;
         SkippedOwned = plan.SkippedOwned;
 
-        // clearLogs 已开时全体都清，不存在「额外强制」的机器，故那种情况计 0。
-        ForcedLogWipe = options.ClearLogs ? 0 : _targets.Count(t => t.HasTracker);
-
         _steps = BuildSteps(_targets, plan.Skipped, options, os, _script);
         Current = _targets.Count > 0 ? _targets[0].name : "-";
         Phase = "ENGAGING";
@@ -104,12 +108,6 @@ internal sealed class HackRun
 
     /// <summary>因已控（肉鸡）而跳过的机器数。</summary>
     internal int SkippedOwned { get; }
-
-    /// <summary>
-    /// 因带 <c>tracker="true"</c> 而被强制清痕的机器数（不受 <c>clearLogs</c> 开关约束）。
-    /// 理由见 <see cref="BuildSteps"/> 的清痕分支。
-    /// </summary>
-    internal int ForcedLogWipe { get; }
 
     /// <summary>
     /// 面板标题一律大写。在每个 Phase 赋值处转换一次，
@@ -141,6 +139,19 @@ internal sealed class HackRun
             }
 
             var step = _steps[_index];
+
+            // 换目标 = 上一台跑完了。它排的演出动画此刻起没有理由再播 ——
+            // 破端口时入的队，而提权排在全部端口之后，队列里往往还压着好几个
+            // （容量 8、单个动画 8~33 秒，单台端口步只花几秒）。见 NativeExes.StopTarget。
+            if (!ReferenceEquals(_activeTarget, step.Target))
+            {
+                if (_activeTarget != null)
+                {
+                    NativeExes.StopTarget(os, _activeTarget.ip);
+                }
+
+                _activeTarget = step.Target;
+            }
 
             // 该目标的连接被拒（白名单）：只跳过**依赖连接**的步骤，其余照常执行。
             // 依据见 _refused 的字段注释 —— 破端口/提权/投放操作的是 target 对象本身，
@@ -177,15 +188,18 @@ internal sealed class HackRun
     /// <summary>
     /// 该步骤是否依赖「已连接」这一状态。
     ///
-    /// 只有三个：Connect 自己；清痕（<c>rm</c> 的目标机取自 <c>os.connectedComp</c>，
-    /// Programs.cs:956）；断开（未连接时是空操作）。其余步骤操作的是 <c>target</c>
-    /// 对象本身，不经连接 —— 端口表的 <c>Cracked</c> 状态与 <c>giveAdmin</c> 写入的
-    /// <c>adminIP</c> 都落在目标机上，连不连得上都成立。
+    /// 只有两个：Connect 自己与 Disconnect（未连接时是空操作）。其余步骤操作的是
+    /// <c>target</c> 对象本身，不经连接 —— 端口表的 <c>Cracked</c> 状态、
+    /// <c>giveAdmin</c> 写入的 <c>adminIP</c>、以及清痕走的
+    /// <c>Computer.deleteFile(ipFrom, 名, folderPath)</c> 都直接落在目标机上。
+    ///
+    /// 清痕曾在这个名单里 —— 那时它回显并依赖 <c>rm log/*</c>，而 <c>rm</c> 的目标机
+    /// 取自 <c>os.connectedComp</c>（Programs.cs:956）。改为按 IP 逐条点名删之后
+    /// （见 <see cref="HackEngine.WipeTraces"/>），它连回显都不需要了，自然也不再依赖连接。
     /// </summary>
     private static bool DependsOnConnection(HackStepKind kind) => kind switch
     {
         HackStepKind.Connect => true,
-        HackStepKind.CleanLogs => true,
         HackStepKind.Disconnect => true,
         _ => false,
     };
@@ -215,7 +229,7 @@ internal sealed class HackRun
             return Options.PortDelay;
         }
 
-        // 清痕是纯内存操作（ClearLogs 只做 List 清空 + deleteFile 遍历，
+        // 清痕是纯内存操作（WipeTraces 只做 List 扫描 + deleteFile 遍历，
         // 无磁盘 IO、无 Thread.Sleep），且每台至多回显一行摘要 ——
         // 没有需要人眼跟上的逐条节奏。故不吃节流：一整屏机器同帧抹完。
         // 单帧步数仍受 MaxStepsPerFrame 约束，不会失控。
@@ -382,32 +396,26 @@ internal sealed class HackRun
                 // （OS.cs:1871-1879），而 connect 的第一件事就是无条件断开旧连接
                 // （Programs.connect，Programs.cs:235-236）—— 那会立刻触发 handleDisconnection
                 // 与管理员反扑，等于自找麻烦。此处已连着目标，写所有权标记即可。
+                // 两道门禁：先试原生 porthack 语义（端口数越不过门槛且防火墙已解），
+                // 过不了就直接写 adminIP —— 与原生提权成功的终态完全一致
+                // （<c>giveAdmin</c> 就是游戏自己提权时走的那一步，Computer.cs:851-855）。
+                //
+                // 这曾是可选开关（v1.33.1 的 ForceEscalate，缺省开），v1.33.2 起常驻：
+                // porthack 的门禁对实测存档里 22 台机器恒假（9 台防护机门槛 9999998、
+                // 13 台普通机器破满端口也差 1~6 个），留一个「默认开、关了就打不下」
+                // 的开关，等于给唯一出路配了个自毁按钮。
+                //
+                // 门禁过不了时**必须说出来**：静默成功会让玩家以为这台机器是靠破端口拿下的。
                 if (HackEngine.CanEscalate(target))
                 {
                     target.giveAdmin(os.thisComputer.ip);
                 }
-                else if (Options.ForceEscalate && HackEngine.ForceEscalate(target, os))
+                else if (HackEngine.ForceEscalate(target, os))
                 {
-                    // 常规门禁过不了（端口数越不过门槛，如防护机的 9999998），
-                    // 玩家开了强行提权 —— 直接写 adminIP，与原生提权成功的终态一致。
-                    // 必须说出来：静默成功会让玩家以为这台机器是靠破端口拿下的。
                     os.write("[autohack] " + target.name
                         + " :: escalation gate not met (needs > " + target.portsNeededForCrack
                         + " open port(s), have " + HackEngine.OpenPortCount(target)
                         + ") - forced admin anyway");
-                }
-                else if (HackEngine.OpenPortCount(target) <= target.portsNeededForCrack)
-                {
-                    // 门禁没过、玩家也没开强行提权。这里必须出声 —— 默认的静默会让
-                    // 「为什么这台机器拿不下」无从排查，而恰好有一个开关就是为它准备的。
-                    //
-                    // 只在「端口数不够」时说：门禁的另一半是防火墙未解，那种情况
-                    // SolveFirewall 步已经写过一行 "firewall solved"，再报一遍是重复。
-                    os.write("[autohack] " + target.name + " :: escalation blocked - needs > "
-                        + target.portsNeededForCrack + " open port(s), have "
-                        + HackEngine.OpenPortCount(target)
-                        + ". This machine cannot be cracked by ports; turn on 'force escalate'"
-                        + " (or pass 'inviolable') to take it anyway.");
                 }
 
                 break;
@@ -456,41 +464,21 @@ internal sealed class HackRun
                 break;
 
             case HackStepKind.CleanLogs:
-                Phase = "WIPING LOGS";
+                Phase = "WIPING TRACES";
 
-                // 正常目标：清痕排在它自己的 Disconnect 之前，此刻 os.connectedComp
-                // 就是 target，回显的 rm 是一条真能跑的命令（正是玩家手敲的那条）。
-                // 先回显后执行，与其余步骤同一约定。
+                // 不回显 rm：这一步已不是「敲一条终端命令」，而是按 IP 逐条点名删
+                // 日志条目（见 HackEngine.WipeTraces）。回显 rm log/* 反而误导 ——
+                // 玩家会以为整个 /log 被清空了，实际只删了提到自己 IP 的那些。
                 //
-                // 命令的两个作用域都成立，缺一不可：
-                // ① 目标机取自连接 —— Programs.rm（Programs.cs:956）用的是
-                //    os.connectedComp，断开后就变成玩家自己的文件系统；
-                // ② 目录取自当前目录 —— rm 的参数 "log/*" 会经 getFolderAtPath
-                //    （Programs.cs:1582）在【当前目录】下找 log 子文件夹。
-                //    本插件从不发 cd，而 connect 会 Clear() 导航路径
-                //    （Programs.cs:235），故此刻当前目录恒为目标根。
-                //
-                // 路径不写前导斜杠：Hacknet 没有绝对路径，getFolderAtPath 按 '/'
-                // 切分后把空段整个跳过（Programs.cs:1590），"/log" 与 "log" 解析结果
-                // 相同 —— 但前者会让人以为它从根出发。玩家在 cd log 之后敲
-                // "rm log/*" 之所以失败，正是因为在【当前目录】里再找 log 找不到。
-                var onTarget = os.connectedComp == target;
-                if (onTarget)
-                {
-                    Echo(os, step.Command ?? "rm log/*");
-                }
+                // 不需要连接：目标机与目录都由参数给定，不读 os.connectedComp。
+                var wiped = HackEngine.WipeTraces(target, os.thisComputer.ip);
 
-                var wiped = HackEngine.ClearLogs(target, os.thisComputer.ip);
-
-                // 战果必须可见。原版 rm 逐文件打印 "Deleting <名>." + "Done"
-                // （Programs.cs:1018-1031），全自动跑 100+ 台会刷屏，压成一行摘要，
-                // 措辞沿用游戏自己的两个词。删 0 条时不吭声 —— 无痕迹的机器是多数。
+                // 战果必须可见。删 0 条时不吭声 —— 无痕迹的机器是多数。
                 if (wiped.Count > 0)
                 {
-                    os.write(onTarget
-                        ? "Deleting " + wiped.Count + " file(s)... Done"
-                        : "[autohack] " + target.name + " :: rm log/* -> "
-                            + wiped.Count + " log file(s) wiped");
+                    os.write("[autohack] " + target.name + " :: wiped "
+                        + wiped.Count + " log entr" + (wiped.Count == 1 ? "y" : "ies")
+                        + " mentioning " + os.thisComputer.ip);
                 }
 
                 break;
@@ -612,13 +600,23 @@ internal sealed class HackRun
         Finished = true;
         Phase = "COMPLETE";
 
+        // 收尾演出 —— 与反追踪同理，无条件执行：本轮的破解动画不该在「已经打完了」
+        // 之后继续拖尾。队列里通常还满着（容量 8，每个动画 8~33 秒，而并发上限由
+        // RAM 决定、只有 2~3 个），不截断的话收尾后还要空播半分钟以上。
+        // 已在面板上的那个走游戏自己的淡出，2 秒内消失（见 NativeExes.StopAll）。
+        NativeExes.StopAll(os);
+
         // 收尾反追踪 —— 无条件执行，不是选项：止住倒计时 + 清空脱机追踪列表。
-        // **不擦追踪者的 /log**（用户定）：那是目标机的操作史，改由 wipe target logs 单独决定。
+        // **不擦追踪者的 /log**：那是目标机的操作史，反追踪不该顺手替玩家做决定。
         // 已知代价 —— 追踪的复发源正是那些日志：OS.handleDisconnection（OS.cs:944-960）
         // 在每次断开时检查刚断开那台的 /log，只要有一行同时含玩家 IP 与
         // FileCopied/FileDeleted/FileMoved，就自动排入一条新的 TrackerDetail
         // （判据见 TrackerCompleteSequence.CompShouldStartTrackerFromLogs，:30-47），
-        // 10~20 秒后计时归零端掉玩家。故同一台机器上的追踪可能复发 —— 要断源就开 wipe target logs。
+        // 10~20 秒后计时归零端掉玩家。
+        //
+        // 复发概率已被本版的清痕口径压到很低：CleanLogs 步删的正是「含玩家 IP」的条目
+        // （HackEngine.WipeTraces），那恰好就是这条判据的输入。仍留着这一层是因为
+        // 收尾清痕与断开之间有窗口（换 IP、ResetIP 等），且脚本模式可能不排清痕步。
         //
         // 排在换 IP 之前：语义上「先收拾追踪、再换身份」；且换 IP 会改掉
         // os.thisComputer.ip，任何按旧 IP 匹配的判断都必须在它之前做完。
@@ -669,12 +667,6 @@ internal sealed class HackRun
         {
             os.write("[autohack] " + _refused.Count
                 + " node(s) refused the session (whitelist) - cracked without one.");
-        }
-
-        if (ForcedLogWipe > 0)
-        {
-            os.write("[autohack] wiped " + ForcedLogWipe
-                + " node(s) carrying tracker=\"true\" - their /log would auto-start a trace on disconnect.");
         }
 
         Current = "done - " + _targets.Count + " target(s)";
@@ -775,20 +767,23 @@ internal sealed class HackRun
                 steps.Add(new HackStep(HackStepKind.UploadMarker, target, default, null));
             }
 
-            // 清痕必须排在断开**之前**：rm 的语义是「操作当前连接的文件系统」
-            // —— Programs.rm 的作用域来自 getCurrentFolder(os)，而它读的是
-            // os.connectedComp 与 os.navigationPath（Programs.cs:1531-1534 →
-            // getFolderAtDepth :1536-1560），Programs.disconnect 又会把
-            // navigationPath 清空。断开之后再清，回显的 rm 就是条假命令。
-            // 带 tracker="true" 的机器**无条件**清痕，不受 clearLogs 开关约束。
-            // OS.handleDisconnection（OS.cs:944-960）在断开时检查目标 /log：只要有一行
-            // 同时含玩家 IP 与 FileCopied/FileDeleted/FileMoved，就自动排入追踪
-            // （TrackerCompleteSequence.cs:30-47），10~20 秒后计时归零端掉玩家。
-            // 而 deleteFile 每次都会写 "FileDeleted: by <玩家IP>"（Computer.cs:543）。
-            // 这类机器上「留痕」不是疏忽而是自杀。
-            if (options.ClearLogs || target.HasTracker)
+            // 清痕排在断开**之前**是硬要求：断开本身会往目标 /log 写一条
+            // "<玩家IP> Disconnected"（Computer.disconnecting，Computer.cs:722-727），
+            // 那条也含玩家 IP，排在断开后就得再清一遍。
+            //
+            // 不需要回显也不需要连接：清痕走
+            // Computer.deleteFile(ipFrom, 名, folderPath)（HackEngine.WipeTraces），
+            // 目标机与目录都由参数给定，不读 os.connectedComp / navigationPath ——
+            // 这正是它从 DependsOnConnection 名单里退出来的原因。
+            //
+            // 这一步**不设开关**：留痕的代价是带 tracker="true" 的机器在断开时
+            // 自动排一个脱机追踪（OS.handleDisconnection，OS.cs:944-960 →
+            // TrackerCompleteSequence.cs:30-47），10~20 秒后计时归零端掉玩家。
+            // 而 wipe 删的只是含玩家 IP 的条目，目标机自己的历史原样保留 ——
+            // 没有需要玩家权衡的取舍。要留痕传 'keep'。
+            if (options.WipeTraces)
             {
-                steps.Add(new HackStep(HackStepKind.CleanLogs, target, default, "rm log/*"));
+                steps.Add(new HackStep(HackStepKind.CleanLogs, target, default, null));
             }
 
             if (options.Disconnect)
@@ -804,8 +799,8 @@ internal sealed class HackRun
         // 被剔除的机器照样清痕：它们此前进过、破过、侦察过，/log 里留着痕迹，
         // 「跳过入侵」不等于「放过证据」。排在全部正常步骤之后 —— 正常流程不会再碰
         // 这些机器，此刻清是终点动作，不会有新记录再追加进来。
-        // 对没有痕迹的机器是幂等的：ClearLogs 返回空列表，不产生任何输出。
-        if (options.ClearLogs)
+        // 对没有痕迹的机器是幂等的：WipeTraces 返回空列表，不产生任何输出。
+        if (options.WipeTraces)
         {
             foreach (var comp in skipped)
             {
@@ -813,24 +808,15 @@ internal sealed class HackRun
             }
         }
 
-        // 玩家自己的机器单独一条开关（ClearOwnLogs），缺省关。
-        //
-        // 它与上面的目标清痕是两回事：上面抹的是「我入侵别人留下的证据」，
-        // 这条抹的是「玩家自己的操作史」—— 玩家的 /log 记的是谁连过他、他读过什么文件。
-        // 后者是玩家自己的数据，不该被「入侵时顺手」清掉，故必须显式开。
+        // 玩家自己的机器也在同一口径内 —— 它的 /log 里同样有指向自己的条目
+        // （"<目标IP> Disconnected" 之类），那就是「我的痕迹」。
         //
         // 机器不在 targets 里（ResolveTargets 显式跳过 os.thisComputer，
         // HackEngine.cs:445），也不在 skipped 里 —— 上面两处都够不着，必须单独追加。
         //
         // 排在全部步骤之后是刻意的：玩家的 /log 记的是「谁连过我」，入侵过程中
         // 每连一台都会往自己机器上写一条，提前清会被后续步骤重新写回来。
-        //
-        // 不需要等断开：ClearLogs → RemoveFiles 把 folderPath 直接传给
-        // Computer.deleteFile（HackEngine.cs:848），而
-        // Programs.getFolderFromNavigationPath（Programs.cs:1749-1770）只读 path
-        // 与 startFolder，不看 os.connectedComp / navigationPath ——
-        // 与 rm 命令的作用域规则不同。
-        if (options.ClearOwnLogs)
+        if (options.WipeTraces)
         {
             steps.Add(new HackStep(HackStepKind.CleanLogs, os.thisComputer, default, null));
         }
@@ -882,7 +868,7 @@ internal sealed class HackRun
             }
 
             // OpenPort 可重复（逐端口展开）。CleanLogs 也可重复 —— 它对空 /log
-            // 是幂等的（ClearLogs 返回空列表、不输出），而「证据必须消失」是硬承诺，
+            // 是幂等的（WipeTraces 返回空列表、不输出），而「证据必须消失」是硬承诺，
             // 让玩家写两次就多清一次比静默吞掉第二个更符合预期。
             // 其余动作改的是游戏状态，重复出现只取首次。
             if (action.Kind is not (HackStepKind.OpenPort or HackStepKind.CleanLogs) &&
@@ -904,12 +890,18 @@ internal sealed class HackRun
             steps.Add(new HackStep(action.Kind, target, default, CommandFor(action.Kind)));
         }
 
-        // 带 tracker="true" 的机器：脚本没写清痕也要补上（理由见 BuildSteps）。
-        // 排在 KillTrace 之前。即便脚本已 dc，ClearLogs 仍按 folderPath 直取目标
-        // /log（HackEngine.cs:741），不依赖连接 —— 只是不再回显那条 rm。
-        if (target.HasTracker && !emitted.Contains(HackStepKind.CleanLogs))
+        // 清痕排在 KillTrace 之前，且**不设开关**（与内置次序同一口径，见 BuildSteps）。
+        // 排在最后是刻意的：提权与投放都会往目标 /log 追加条目，早清等于白清。
+        //
+        // 即便脚本已 dc 也不受影响：WipeTraces 按 folderPath 直取目标 /log
+        // （HackEngine.WipeTraces），不读 os.connectedComp，也不再回显那条 rm。
+        //
+        // 脚本没写 rm 时补上（开关为真才补）—— 留痕的代价是目标机在断开时自动排一个
+        // 脱机追踪（TrackerCompleteSequence.cs:30-47）。脚本里写了 rm 就不补：
+        // 那是玩家显式指定的位置，多清一次虽幂等，但会把清理点挪到玩家没写的地方。
+        if (options.WipeTraces && !emitted.Contains(HackStepKind.CleanLogs))
         {
-            steps.Add(new HackStep(HackStepKind.CleanLogs, target, default, "rm log/*"));
+            steps.Add(new HackStep(HackStepKind.CleanLogs, target, default, null));
         }
 
         // 兜底反追踪：与内置次序同理，脚本没写也要有 —— 断开已让它失效，
@@ -948,7 +940,7 @@ internal sealed class HackRun
         HackStepKind.Disconnect => "dc",
         HackStepKind.Escalate => "porthack",
         HackStepKind.Probe => "probe",
-        HackStepKind.CleanLogs => "rm log/*",
+
         _ => null,
     };
 }

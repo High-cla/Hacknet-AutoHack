@@ -68,8 +68,11 @@ internal static class PanelSettings
             Math.Max(Entry("port_delay", s.PortDelay).Value, HackOptions.MinPortDelay),
             HackOptions.MaxPortDelay);
 
-        s.ClearLogs = Entry("clear_logs", s.ClearLogs).Value;
-        s.ClearOwnLogs = Entry("clear_own_logs", s.ClearOwnLogs).Value;
+        // 键名从 clear_logs / clear_own_logs 改为 wipe_traces：口径变了（只删含玩家 IP
+        // 的条目），旧键存的是「整目录清空」的意图，不能悄悄套用到新语义上 ——
+        // 旧的 true 在新口径下过宽、旧的 false 又会把新缺省（开）压成关。
+        // 故换键、不迁移：玩家沿用新缺省即可。
+        s.WipeTraces = Entry("wipe_traces", s.WipeTraces).Value;
         s.UploadMarker = Entry("upload_marker", s.UploadMarker).Value;
         s.ConnectFirst = Entry("connect_first", s.ConnectFirst).Value;
         s.Disconnect = Entry("disconnect_when_done", s.Disconnect).Value;
@@ -78,7 +81,6 @@ internal static class PanelSettings
         s.UseCredentials = Entry("use_credentials", s.UseCredentials).Value;
         s.ShowExes = Entry("native_exes", s.ShowExes).Value;
         s.ResetIP = Entry("new_ip", s.ResetIP).Value;
-        s.ForceEscalate = Entry("force_escalate", s.ForceEscalate).Value;
 
         s.X = Entry("panel_x", s.X).Value;
         s.Y = Entry("panel_y", s.Y).Value;
@@ -95,8 +97,7 @@ internal static class PanelSettings
 
         Entry("scope", s.Scope).Value = s.Scope;
         Entry("port_delay", s.PortDelay).Value = s.PortDelay;
-        Entry("clear_logs", s.ClearLogs).Value = s.ClearLogs;
-        Entry("clear_own_logs", s.ClearOwnLogs).Value = s.ClearOwnLogs;
+        Entry("wipe_traces", s.WipeTraces).Value = s.WipeTraces;
         Entry("upload_marker", s.UploadMarker).Value = s.UploadMarker;
         Entry("connect_first", s.ConnectFirst).Value = s.ConnectFirst;
         Entry("disconnect_when_done", s.Disconnect).Value = s.Disconnect;
@@ -105,7 +106,6 @@ internal static class PanelSettings
         Entry("use_credentials", s.UseCredentials).Value = s.UseCredentials;
         Entry("native_exes", s.ShowExes).Value = s.ShowExes;
         Entry("new_ip", s.ResetIP).Value = s.ResetIP;
-        Entry("force_escalate", s.ForceEscalate).Value = s.ForceEscalate;
         Entry("panel_x", s.X).Value = s.X;
         Entry("panel_y", s.Y).Value = s.Y;
         Entry("collapsed", s.Collapsed).Value = s.Collapsed;

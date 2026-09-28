@@ -26,7 +26,7 @@
 autohack                                        # 开关控制面板
 autohack run [here] [delay=秒] [stay] [redo] [nologs] [nomark] [direct]   # 不开面板，直接执行
 autohack run script=stealth                     # 用脚本决定入侵次序（见下）
-autohack scan|dec|mem|exes|unbreakable [allnodes]  # 独立工具（见「工具」）
+autohack scan|dec|mem|exes|unbreakable [allnodes]  # 独立工具（见下表）
 autohack pull|purge|drop|trace|ip               # 对当前连接节点动手 / 掐追踪 / 换本机 IP
 autohack skip                                   # 完成当前任务并接下一个（含 DLC 合同与 Kaguya Trials）
 autohack -h                                     # 帮助
@@ -53,22 +53,12 @@ autohack -h                                     # 帮助
 | `skip owned nodes` | 全网扫描时跳过已拿下的肉鸡，不重复入侵（缺省开） |
 | — | 永远提不了权的机器（端口表容量 ≤ `portsToCrack`）在全网扫描时一律跳过，见下 |
 | `RUN` | 按当前设置执行 |
-| TOOLS 区 `SCAN NETWORK` / `DEC DECRYPT` / `MEMORY DUMP` / `ALL PROGRAMS` | 见「工具」，单击**立即执行**，无二次确认 |
+| TOOLS 区 `SCAN NETWORK` / `DEC DECRYPT` / `MEMORY DUMP` / `ALL PROGRAMS` | 单击**立即执行**，无二次确认（见下表） |
 | TOOLS 区 `PULL FILES` / `PURGE FILES` / `DROP NODE` | 对**当前连接的节点**动手：下载 / 删除当前目录下全部文件、把节点从网络图摘掉（后两个用告警色） |
 | TOOLS 区 `UNBREAKABLE` | 加固本机，**不可逆**，用告警色标注 |
-| TOOLS 区 | **反追踪不进 TOOLS 区**：清追踪已是每轮收尾的恒定动作（见「追踪」）。命令行即时清除仍可用 `autohack trace` |
+| TOOLS 区 | **反追踪不进 TOOLS 区**：清追踪已是每轮收尾的恒定动作。命令行即时清除仍可用 `autohack trace` |
 
 执行期间面板切换为进度视图：阶段 + 百分比、分段进度条、当前目标与动作计数，下方滚动显示逐目标战果。完成后显示 `LAST RUN` 与 `RUN AGAIN`。
-
-**为什么自绘而不是用原生控件**（三条都实测过）：
-
-1. `CheckBox.doCheckBox(id, x, y, on, color, text)` 只在 `GuiData.hot == id` 时才画文字（`Hacknet.Gui/CheckBox.cs:55-59`）——**标签平时不可见**，这是旧面板显脏的主因。
-2. 原生 `Button` 用 `tinyfont`（Font10）并自动缩放塞进按钮（`Button.cs:96-110`），字号与间距不可控；自绘统一用 `smallfont`（Font12）加显式缩放系数，得到 0.9 / 1.0 / 1.1 / 1.3 四级字号阶梯。
-3. 原生 `Button` 在宽度 > 65 时会额外画一条 13px 颜色标签条，与紧凑面板风格冲突。
-
-配色（`highlightColor` / `terminalTextColor`）**取自 `OS` 当前主题**，换主题时面板跟随，不会与游戏自身 UI 撞色。
-
-输入是模态的：`OS.Draw` 的 **Prefix** 在正文绘制前检查光标是否落在 `HackPanel.LastFrame` 内，是则置 `GuiData.blockingInput = true`。必须用 Prefix —— 正文里的游戏控件在 `Draw` 期间就消费输入，Postfix 已经太晚；只在光标位于面板上时抢占，面板之外照常操作游戏。
 
 ### 设置持久化
 
@@ -103,19 +93,6 @@ autohack -h                                     # 帮助
 > 差额是「可以直接敲 IP 连上、但不在连线上」的机器 —— `Programs.connect` 遍历的是
 > `netMap.nodes` 全表，本来就不检查 `links`。
 
-### 追踪
-
-游戏里有**两套**都叫「追踪」的机制，别混：
-
-| | 表现 | 怎么应付 |
-|---|---|---|
-| `TRACE :` 倒计时 | 屏幕**左下角**红色数字从 100 往下走，提示音逐渐变密。归零 = 玩家机崩 | **每轮收尾自动清除**（无需设置）；手动即时清除用 `autohack trace`，或断开连接 |
-| 追踪中（无任何提示） | **完全看不见**。断线时若那台机器 `/log` 里留有你 IP 的 copy/delete/move 记录，它 10~20 秒后自动反打：开端口 → 闪屏 → forkbomb → 玩家机崩 | v1.30.0 起**左下角常驻显示**「追踪中 : N 台 · M 秒」 |
-
-**清追踪是每轮收尾的恒定动作，不需要设置**：一次 `autohack run` 收尾时无条件止住两套追踪、并把追踪者的 `/log` 擦掉。它曾与「跑完断开」合成一个复选框，现拆开 —— 清追踪只是收拾自己制造的烂摊子，留着只有坏处（忘记勾选就被倒计时崩掉机器）；断开则是玩家的行为选择。要**当场**清除（不等本轮结束）用 `autohack trace`。
-
-第二套的**复发源就是日志**，而反追踪**不擦**它（用户定）—— `/log` 是目标机自己的操作史，擦它属于改写对方状态，该由 `wipe target logs` 单独决定，反追踪不顺手替玩家做。代价是同一台机器上的追踪可能复发；要彻底断源就显式开 `wipe target logs`。
-
 ### 自动换 IP
 
 每轮入侵收尾时，玩家机自动换一个新 IP，并把**全图所有已控机器**的归属迁移过去。这是游戏原生的「换 IP 保命」动作（ISP 服务器上的 `Assign New IP`，`ISPDaemon.cs:122-142`），本插件把它自动化。
@@ -125,10 +102,6 @@ autohack -h                                     # 帮助
 - **回显**：终端写明 `new local IP: <旧> -> <新> (N owned node(s) re-tagged)`；`N` 为 0 表示当前没有被控机器。
 - **两种用法**：面板 TOOLS 区的 `NEW IP` 按钮（单击立即换一次，与命令行 `autohack ip` 同一实现）；或 `new IP after run` 复选框（每轮收尾自动换）。
 - **缺省关**（v1.32.6 起，此前为开）：换 IP 会**打断要求 IP 不变的任务链** —— lelzSec 那条明写「Your IP's been whitelisted (so dont go changing it for now)」，白名单记的是当时的 IP。要每轮自动换就勾上复选框或命令行传 `newip`；只换这一次用按钮/`autohack ip`。
-
-### 工具（v1.14.0 起；v1.14.1 / v1.14.2 修缺陷；v1.16.0 加三个远程动作；v1.18.0 删除通道归一；v1.27.0 加扫描；v1.29.0 加跳过任务；v1.30.0 加清追踪；v1.32.0 反追踪并入复选框、修好命令动词；v1.32.1 修 skip 对 DLC 任务无效；v1.32.2 修「当前节点」遇白名单没反应；v1.32.3 修换 IP 后连不上本机；v1.32.4 面板设置持久化；v1.32.5 扫描只揭示当前节点的连通分量；v1.32.6 换 IP 改按钮、缺省翻转为关，replace 失败会说明原因）
-
-工具与入侵流程**完全独立** —— 不进 `autohack run` 的自动流程，命令与面板 TOOLS 区按钮走**同一份实现**。面板按钮**单击立即执行**，不弹二次确认（`UNBREAKABLE` / `PURGE FILES` / `DROP NODE` 用告警色 + 回显里的 `irreversible` 代替）。
 
 | 命令 | 作用 |
 |---|---|
@@ -141,60 +114,10 @@ autohack -h                                     # 帮助
 | `autohack purge` | 删除**当前目录**下全部文件（同游戏 `rm`；与清痕**同一实现**；**只删文件，不删文件夹**）。`clearfolder` 类任务要求目标目录一个文件不剩，**先 `cd` 对再敲** —— 站错目录会删掉任务不需要的东西而目标目录仍非空 |
 | `autohack drop` | 断开并把当前连接的节点从网络图上摘掉 |
 | `autohack ip` | 给本机换一个新 IP（原生 `Assign New IP` 三步 + 全图已控机器归属迁移 + 重建 Pathfinder 查找表），与面板 `NEW IP` 按钮同一实现 |
-| `autohack trace` | **反追踪**：同时止住两套追踪（倒计时 + 脱机追踪），**不碰对方 `/log`**（见「追踪」） |
+| `autohack trace` | **反追踪**：同时止住两套追踪（倒计时 + 脱机追踪），**不碰对方 `/log`** |
 | `autohack skip` | **跳过当前任务**：完成它并接下一个（走游戏自己的三条原生收尾通道，含 DLC 合同与 Kaguya Trials） |
 
-`allnodes` 只对 `dec` / `mem` 有意义（缺省只作用于当前连接节点，与 `run` 口径一致）；`exes` 与 `unbreakable` 天然只针对玩家自己；`scan` 不看这个开关（它本就只扫当前节点那片连通分量，`allnodes` 的语义是「跳过连线直接连全表」，属 `run` 的目标口径）；`skip` 同理不看（它与网络无关）。
-
-`skip` 是唯一**不属于入侵**的工具：它只推进任务流程，不碰任何机器。游戏原生本就有「Force Complete」，但门禁是 `Settings.forceCompleteEnabled`，缺省关且只有带 `-enablefc` 启动才开 —— 没有任何 UI 能开它。`skip` 走的就是那几个按钮的原生方法，**只走命令行，不进面板**（用户定）。
-
-任务收尾有三条独立通道，`skip` 按序覆盖：普通任务走 `ActiveMission.finish()`；DLC 合同走 `DLCHubServer.PlayerAttemptCompleteMission`（合同另有 `ClaimableMission` 管归档与序列化，只调 `finish()` 会继续挂在面板上）；**Kaguya Trials（DLC 引导）走 `DLCIntroExe.MissionWasCompleted()`** —— 该引导自持任务实例、且进行中 `os.currentMission` 为 null，故它必须最先判，否则会被「无任务」提前返回吃掉。
-
-**两个远程动作都不碰文件夹**：`pull` 全部落到 `/home/stash` —— 这个夹**游戏自己就建**（`OS.cs:386-388` 给玩家机建 home 时一并加了 `stash` 与 `misc`，存档里也持久化），mod 只兜底；`purge` 只清文件，**不删文件夹**。原因是游戏自身**没有任何删除文件夹的入口**（`Programs` 里没有 rmdir，官方 Action 也只有 `<DeleteFile>`），mod 一旦建出文件夹，玩家就永远清不掉。`purge` 的回显会把「还剩几个子文件夹」一并报出，免得对着一个空夹反复试。
-
 注意 `pull` 拉回来的 `.exe` **不能直接跑**：游戏只在 `/bin` 里解析可执行程序（`ProgramRunner.cs:689` 写死 `searchForFolder("bin")`），要用得先 `mv` 到 `/bin`。
-
-### 白名单服务器
-
-带 `WhitelistAuthenticatorDaemon` 的机器会拒绝你的 `connect`。**但它拦不住入侵** —— 破端口、提权、投放都直接改目标机本身，不经连接。
-
-所以本插件照常拿下它，然后把你的 IP 追加进它的 `/Whitelist/list.txt`，再重连一次恢复会话（后续清痕与断开需要连接）。这正是游戏设计的正路：官方任务 `PAE2_Whitelist.xml` 里那台的 `list_add_manual.txt` 就写着「`append list.txt <你的IP>`」。
-
-终端回显会说清楚走到了哪一步：`appended to /Whitelist/list.txt` → `reconnected - whitelist bypassed`。已列过的 IP 不会重复追加。
-
-#### DEC 解密：反推而非暴力
-
-游戏的 `FileEncrypter.Encrypt` 是逐字符仿射（`FileEncrypter.cs:40`）：
-
-```
-num = data[i] * 1822 + 32767 + passcode
-```
-
-头部第 4 段恒为加密字符串 `"ENCODED"`，其首字符 `'E'` 的密文因此恒等于
-`'E' * 1822 + 32767 + passcode = 158485 + passcode`。于是
-
-```
-passcode = 头部第 4 段首个密文数字 - 158485
-```
-
-得到后**交给游戏自身的 `FileEncrypter.TestingDecryptString` 反验**：只有 `passcode`
-正确，第 4 段才会解出 `"ENCODED"`；验不过即判定失败并如实报出，不做任何猜测。
-多层嵌套递归解到正文不含 `#DEC_ENC` 标记为止，层数上限 16 防自引用挂死。
-
-> 实测：玩家存档 `save_1.xml` 中 **39 个**唯一 DEC 文件（含 4 个两层嵌套，共 43 层），
-> 全部反推 + 反验通过。
-
-产物落点与内存转储一致，都在 `/home/MemDumps` —— 工具产出都是「可读文件」，分开落点只会让玩家两处找东西。
-
-#### 内存转储
-
-查看与导出都走游戏自身的往返对（`GetCompactSaveString` / `GetEncodedFileString` /
-`GetMemoryFromEncodedFileString`）。导出落点 `home/MemDumps`，与游戏
-`MemoryDumpDownloader` 一致（`MemoryDumpDownloader.cs:92-99`），并当场做一次往返比对。
-
-> 游戏自身缺陷：`MemoryContents.GetSaveString()` 的 `FileFragments` 分支遍历的是
-> `CommandsRun.Count`（`MemoryContents.cs:48`），当 `FileFragments` 比 `CommandsRun`
-> 长时会 `IndexOutOfRangeException`。查看/导出都兜住它，坏存档不会把游戏线程带崩。
 
 #### 自身加固（不可逆）
 
@@ -270,23 +193,6 @@ dotnet build src/SaveFix/SaveFix.csproj -c Release
 ```
 
 两个 csproj 都是 net472 + LangVersion 13，`HacknetDir` 缺省 `D:\steam\steamapps\common\Hacknet\`，可用 `-p:HacknetDir=<路径>` 覆盖；引用程序集从 `$(HacknetDir)` 就地取，`Private=false` 不复制。
-
-### 产物核对
-
-**当前规矩（用户定）：只看产物 MD5，不做反编译核对。**
-
-| 产物 | 版本 | 字节数 | MD5 |
-|---|---|---|---|
-| `AutoHack.dll` | v1.32.6 | 112640 | `1c5bbfb091ee4b8d6f58788493663c7f` |
-| `HacknetSaveFix.dll` | 独立插件 | 5120 | `505df298c541768b0cc39a3d4d610806` |
-
-核对流程：清理 `obj`/`bin` → 构建（须 0 警告 0 错误）→ 记 `md5sum` 与字节数，
-与上一版比对。构建成功即证明源码已编入（增量缓存已清，漏编会报错）；
-MD5 只用于确认部署确实是新的那个产物。
-**验证只看构建输出目录里已编译的那份**，不下载 Release 附件回来比对（用户定，v1.22.0 起）。
-
-**版本沿革不在此维护** —— 历史指纹与逐版改动查 git（`git log --oneline` / `git show <sha>`）。
-本文件只描述**当前**行为；要看某个旧版做了什么，`git show vX.Y.Z` 比任何表格都准。
 
 ## 架构
 

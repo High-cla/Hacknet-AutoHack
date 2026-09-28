@@ -30,12 +30,17 @@ using Microsoft.Xna.Framework;
 /// 现在改成队列 + 每帧泵：每帧在<b>游戏自己重算的预算</b>内挂载，
 /// 故 <c>addExe</c> 的门禁恒真、溢出在结构上不可能发生。
 ///
-/// <b>能并发就并发，且优先放「内存小、时间短」的。</b>并发上限由 RAM 决定，
+/// <b>能并发就并发，且优先放「没出现过的、内存小、时间短的」。</b>并发上限由 RAM 决定，
 /// 不是 1 —— 761mb 的预算配上 190~400mb 的单个动画，同时挂 2~3 个是常态。
-/// 队列按 <see cref="Compare"/> 升序排（内存小者先、同则时间短者先、再则随机），
+/// 队列按 <see cref="Compare"/> 升序排：已播出次数少的在前（九种动画轮流冒头），
+/// 同次数时内存小、时间短的在前，再相同则按随机数。
 /// 泵只挂队首且要求装得下 —— 按代价升序贪心装箱正是<b>最大化并发个数</b>的装法，
 /// 小动画先占位、也先播完释放，吞吐因此最高。
 /// 超出 <see cref="MaxQueued"/> 的新请求丢弃：演出是可丢的装饰，战果早已写好。
+///
+/// <b>演出会点燃追踪。</b>9 个白名单 exe 里有 8 个调 <c>hostileActionTaken()</c>
+/// （3 个在构造函数、5 个在 <c>LoadContent</c>），目标 <c>traceTime &gt; 0</c> 时即
+/// 启动倒计时。泵每帧扑掉一次，理由与覆盖面见 <see cref="KillTrace"/>。
 ///
 /// 每帧只挂一个：<c>os.ramAvaliable</c> 由 <c>OS.Update</c> 每帧重算
 /// （OS.cs:840-859），一帧内连挂多个会让后续 <c>addExe</c> 拿同一个尚未扣减的
@@ -84,14 +89,19 @@ internal static class NativeExes
     /// 动画打错对象还是轻的，<c>Completed()</c> 里的 <c>openPort</c> 会给一台
     /// 本不该被开端口的机器开端口 —— 那是污染战果。
     /// 同理，构造体里的 <c>hostileActionTaken()</c>（PacificPortExe.cs:26、
-    /// TorrentPortExe.cs:36、RTSPPortExe.cs:32）必须在破端口那一刻触发：
-    /// 推到播放时就成了收尾之后，而 <c>HackRun.Finish</c> 已经清过一轮追踪，
-    /// 等于凭空复燃一次倒计时。
+    /// TorrentPortExe.cs:36、RTSPPortExe.cs:32）在入队那一刻就点燃追踪：
+    /// 推到播放时点燃会落到收尾之后（<c>HackRun.Finish</c> 已清过一轮），
+    /// 等于凭空复燃一次倒计时 —— 现在泵每帧都会扑掉它（见 <see cref="KillTrace"/>），
+    /// 但构造时机仍该由「破端口那一刻」决定，不该依赖事后清理。
     ///
-    /// <paramref name="Tiebreak"/> 是「同档内随机」的载体：代价相同的动画按它排，
+    /// <paramref name="ExeName"/> 是查 <see cref="ShownCount"/> 的键 —— 调度以「这类动画
+    /// 播出过几次」为主序，故必须把名字一起带着，不能等到播出时再反查。
+    ///
+    /// <paramref name="Tiebreak"/> 是「同档次内随机」的载体：键相同的动画按它排，
     /// 入队时取一个随机数，故同档的相对次序每次都不一样。
     /// </summary>
-    private readonly record struct Pending(ExeModule Exe, int RamCost, float Seconds, float Tiebreak);
+    private readonly record struct Pending(
+        ExeModule Exe, string ExeName, int RamCost, float Seconds, float Tiebreak);
 
     /// <summary>待播动画，按 <see cref="Compare"/> 排序 —— 代价小的在前。</summary>
     private static readonly List<Pending> Queue = new(MaxQueued);
@@ -131,26 +141,92 @@ internal static class NativeExes
         ["RTSPCrack.exe"] = 32.5f,
     };
 
-    /// <summary>调度次序：先内存小、再时间短、最后按随机数 —— 前两级降序地
-    /// 把「占得少、走得快」的排到前面，第三级保证同档内次序随机。</summary>
+    /// <summary>内存分档宽度（mb）。ramCost 落在 190~400，按 100 分即 4 档。</summary>
+    private const int RamTierMb = 100;
+
+    /// <summary>时长分档宽度（秒）。实际存活 8.2~32.5 秒，按 10 分即 4 档。</summary>
+    private const int SecondTierSec = 10;
+
+    /// <summary>时长档数 —— 内存档的权重。取 4 是因为 <see cref="SecondTierSec"/>
+    /// 把时长分成了 4 档，相乘即「内存档优先、时长档次之」的二维编号。</summary>
+    private const int SecondTierCount = 4;
+
+    /// <summary>
+    /// <see cref="Tier"/> 的取值上界，排序键用它当进制（实测档号落在 4~19，取 32 留足余量）。
+    /// 必须<b>严格大于</b>档号最大值，否则次数差 1 的两项可能被档号差吃掉，
+    /// 「没出现过的优先」就不再成立。
+    /// </summary>
+    private const int TierSpan = 32;
+
+    /// <summary>
+    /// 每个 exe 名<b>已经播出过多少次</b>。调度以它为主序（少者先），
+    /// 于是各类动画的出现次数自发趋于均衡 —— 这就是「加权平均」的那一半。
+    ///
+    /// 只在实际挂上 RAM 面板（<see cref="Tick"/> 里的 <c>addExe</c>）时递增：
+    /// 入队后被挤掉、被丢弃、或因预算不足一直没挂上的，都不算「出现过」。
+    ///
+    /// 排序时<b>实时查这张表</b>，而不是把次数抄进 <see cref="Pending"/> ——
+    /// 这样「刚播完的那一个」立刻在队列里排到最后，积压的同类不会连着播。
+    /// </summary>
+    private static readonly Dictionary<string, int> ShownCount = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// 调度次序：<b>先播出得少的（没出现过的优先），同次数时内存小、时间短的优先，
+    /// 再相同则按随机数</b>。
+    ///
+    /// 主序是「已播出次数」：九种动画轮流冒头，而不是反复演同几个。
+    /// 次序的权重来自 <see cref="Tier"/>（内存档 + 时长档），让内存小、跑得快的
+    /// 在同次数下先上，并发吞吐与观感都更好。
+    ///
+    /// <b>为什么必须分档，不能逐值比较。</b>每个 exe 的 <c>ramCost</c> 与存活时长
+    /// 在游戏里都是唯一的（190/208/210/242/350/356/360/360/400 与 8.2/10/14.2/14.5/
+    /// 17/17/18.5/26/32.5），逐值比较时前两级<b>永远不相等</b>，第三级的随机数就
+    /// 永远轮不到求值 —— 播出次序退化成表的书写顺序，每次运行一模一样。
+    /// 分档把「相等」造出来，随机数才真正参与排序。
+    /// </summary>
     private static int Compare(Pending a, Pending b)
     {
-        if (a.RamCost != b.RamCost)
-        {
-            return a.RamCost.CompareTo(b.RamCost);
-        }
-
-        return a.Seconds != b.Seconds ? a.Seconds.CompareTo(b.Seconds) : a.Tiebreak.CompareTo(b.Tiebreak);
+        var keyA = SortKey(a);
+        var keyB = SortKey(b);
+        return keyA != keyB ? keyA.CompareTo(keyB) : a.Tiebreak.CompareTo(b.Tiebreak);
     }
+
+    /// <summary>
+    /// 排序键 = <b>已播出次数 × <see cref="TierSpan"/> + 代价档</b>。
+    ///
+    /// 次数乘一个大于档号上界的进制，是为了让「没出现过」压倒一切：次数为 0 时键 ≤ 19，
+    /// 而任何播出过一次的键 ≥ 32 —— 无论它的代价档多小，都排不到前面去。
+    /// 代价档只在<b>同次数</b>时才起区分作用，这正是「加权」二字的位置。
+    /// </summary>
+    private static int SortKey(Pending p) => Count(p.ExeName) * TierSpan + Tier(p);
+
+    private static int Count(string exeName)
+        => ShownCount.TryGetValue(exeName, out var n) ? n : 0;
+
+    /// <summary>代价档号：内存档为主、时长档为辅（见 <see cref="SortKey"/>）。</summary>
+    private static int Tier(Pending p)
+        => p.RamCost / RamTierMb * SecondTierCount + (int)(p.Seconds / SecondTierSec);
 
     /// <summary>
     /// 为一次端口破解排一个原生动画。<paramref name="target"/> 必须正是当前连接目标 ——
     /// 否则动画会打在本机上（见类注释约束 1）。未连接、无对应程序、程序不在白名单时静默跳过；
-    /// 队列满时只有比队尾更优才挤进来。
+    /// 目标已提权时也跳过（见方法内）；队列满时只有排序键比队尾更小才挤进来。
     /// </summary>
     internal static void Show(OS os, Computer target, PortInfo port)
     {
         if (os == null || target == null || !ReferenceEquals(os.connectedComp, target))
+        {
+            return;
+        }
+
+        // 已提权的机器不排演出。它不需要破端口（权限已在手），动画因此纯粹是噪音，
+        // 而且每一发都会点燃追踪（见 Tick 的清理）。判据用 adminIP —— 与
+        // HackEngine.IsOwned 同一把尺子，也是「已经黑进去了」的权威定义。
+        //
+        // 常规路径下走不到这里：全网扫描缺省已在 ResolveTargets 剔除已控机器。
+        // 起作用的是 redo / 显式点名 / 白名单回退 / 「当前节点」反推这四条路 ——
+        // 玩家要碰那台机器，但碰不等于要看一遍它已经完成过的动画。
+        if (HackEngine.IsOwned(target, os))
         {
             return;
         }
@@ -171,15 +247,16 @@ internal static class NativeExes
             return;
         }
 
-        var pending = new Pending(exe, exe.ramCost, seconds, (float)Utils.random.NextDouble());
+        var pending = new Pending(exe, exeName, exe.ramCost, seconds, (float)Utils.random.NextDouble());
 
         if (Queue.Count >= MaxQueued)
         {
-            // 队列满：只有比队尾（代价最大的那个）更优才挤得进来，否则丢弃新来的。
-            // 这样队列始终装着「最小的 MaxQueued 个」，而不是先到先得 —— 与
-            // 「优先放内存小、时间短」同一套取舍。被挤掉的实例只是不再演出：
-            // 它从未 addExe，不会开端口、不影响战果（构造期的 hostileActionTaken
-            // 已经触发过，与旧实现一致）。
+            // 队列满：只有排序键比队尾（键最大的那个）更小才挤得进来，否则丢弃新来的。
+            // 这样队列始终装着「键最小的 MaxQueued 个」，而不是先到先得 —— 与
+            // 「没出现过的优先、同次数时内存小时间短优先」同一套取舍。
+            // 被挤掉的实例只是不再演出：它从未 addExe，不会开端口、不影响战果
+            // （构造期点火的那三个 exe 的 hostileActionTaken 已经触发过，与旧实现一致，
+            // 且泵每帧都会把它扑掉 —— 见 KillTrace）。
             if (Compare(pending, Queue[Queue.Count - 1]) >= 0)
             {
                 return;
@@ -193,9 +270,9 @@ internal static class NativeExes
     }
 
     /// <summary>
-    /// 每帧推进一步：只要预算装得下队首，就把它挂上去（队首是最小的，见
-    /// <see cref="Compare"/>）。由 <see cref="HackOverlay"/> / <see cref="PendingRuns"/>
-    /// 的 OS.Update 补丁调用，与运行是否结束无关 —— 收尾后的队列仍要播完。
+    /// 每帧推进一步：只要预算装得下队首，就把它挂上去（队首的排序键最小，见
+    /// <see cref="Compare"/>）。由 <see cref="HackOverlay"/> 的 OS.Update 补丁调用，
+    /// 与运行是否结束无关 —— 收尾后的队列仍要播完。
     /// </summary>
     internal static void Tick(OS os)
     {
@@ -208,22 +285,64 @@ internal static class NativeExes
         // 而 addExe 只扣 exes 的累计值、不回写它。同帧连挂多个会拿同一个
         // 尚未扣减的值反复判断，挂到预算之外。60 个/秒已远快于需求。
         var head = Queue[0];
-        if (head.RamCost > os.ramAvaliable)
+        if (head.RamCost <= os.ramAvaliable)
         {
-            return;
+            Queue.RemoveAt(0);
+
+            // 绕开 launchExecutable：它的位置算法是面板为空时的那一套（见类注释）。
+            // 队列按升序排、队首的键最小，装不下就说明其余更装不下 ——
+            // 留到预算释放后再挂，不是丢弃。
+            os.addExe(head.Exe);
+
+            // 挂上去了才算「出现过」—— 排过队但被挤掉、丢弃、或预算不足没挂上的都不算。
+            ShownCount[head.ExeName] = Count(head.ExeName) + 1;
+
+            // 计数变了，队列里同类的键随之变大，重排一次让「刚播完的那类」立刻让位
+            // 给还没露面的。队列至多 8 项，每帧最多走这一次。
+            Queue.Sort(Compare);
         }
 
-        Queue.RemoveAt(0);
-
-        // 绕开 launchExecutable：它的位置算法是面板为空时的那一套（见类注释）。
-        // 队列按升序排、队首是代价最小的，装不下就说明其余更装不下 ——
-        // 留到预算释放后再挂，不是丢弃。
-        os.addExe(head.Exe);
+        KillTrace(os);
     }
 
-    /// <summary>丢弃所有待播动画。换 OS（回主菜单再进档）时调用 ——
-    /// 否则上一局排的动画会漏进新一局。</summary>
-    internal static void Reset() => Queue.Clear();
+    /// <summary>
+    /// 扑掉演出点燃的追踪。
+    ///
+    /// <b>演出是会点燃追踪的</b>，这是它最容易被忽略的副作用 —— 9 个白名单 exe 里有 8 个调
+    /// <c>hostileActionTaken()</c>（唯一不调的是 MedicalPortExe，即 KBT_PortTest），分两处：
+    /// <list type="bullet">
+    /// <item><b>构造函数里</b>（入队那一刻）：TorrentPortExe.cs:36、PacificPortExe.cs:26、
+    /// RTSPPortExe.cs:32。</item>
+    /// <item><b>LoadContent 里</b>（<c>OS.addExe</c> 挂载那一刻，OS.cs:2171）：
+    /// SSHCrackExe.cs:90、FTPBounceExe.cs:72、SMTPoverflowExe.cs:61、
+    /// HTTPExploitExe.cs:59、SQLExploitExe.cs:63。</item>
+    /// </list>
+    /// 目标 <c>traceTime &gt; 0</c> 时它即 <c>os.traceTracker.start(traceTime)</c>
+    /// （Computer.cs:294-308），倒计时归零走 <c>os.timerExpired()</c>
+    /// （TraceTracker.cs:85-90）端掉玩家。
+    ///
+    /// <b>为什么在 Tick 里扑，而不是在入侵步骤里扑。</b>LoadContent 那一批在
+    /// <c>addExe</c> 时才点火，而 addExe 发生在<b>入队之后若干帧到几十秒</b>——
+    /// 那时入侵的端口步早已跑完，步骤层的任何清理都够不着。只有泵这里能覆盖。
+    /// 构造期点火的那三个则在入队当帧就被扑掉。
+    ///
+    /// <b>成本为零</b>：未激活时 <see cref="HackEngine.KillTrace"/> 直接返回 false
+    /// （<c>traceTracker</c> 非 <c>active</c>，TraceTracker.cs:116-120 只置两个字段）。
+    /// 队列非空时逐帧调用，不会输出任何东西。
+    /// </summary>
+    private static void KillTrace(OS os)
+    {
+        // 不报数：这是每帧都可能发生的维护动作，写终端就是刷屏。
+        HackEngine.KillTrace(os);
+    }
+
+    /// <summary>丢弃所有待播动画，并把「出现次数」清零。换 OS（回主菜单再进档）时调用 ——
+    /// 否则上一局排的动画会漏进新一局，且上一局的均衡进度会带偏新一局的次序。</summary>
+    internal static void Reset()
+    {
+        Queue.Clear();
+        ShownCount.Clear();
+    }
 
     /// <summary>
     /// 按白名单里的名字造出对应 exe。位置交给 <c>OS.Update</c> 的布局循环定

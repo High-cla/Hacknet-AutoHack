@@ -3,7 +3,7 @@
 > Hacknet 的 BepInEx / Pathfinder 插件：用游戏自身的原生机制一键入侵全网，带控制面板与脚本驱动。
 > 本文件面向要理解或修改本仓库的编码 agent。规范见 https://llmstxt.org
 
-当前 v1.32.8。构建产物直投游戏插件目录，无需手动拷贝：
+当前 v1.33.0。构建产物直投游戏插件目录，无需手动拷贝：
 
 ```
 D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
@@ -408,7 +408,15 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     正是 `addExe` 用的同一道门，故预判与放行永远一致，不必自己复算。
     **每帧只挂一个**：`addExe` 只扣 `exes` 累计值、**不回写** `os.ramAvaliable`，
     同帧连挂多个会拿同一个尚未扣减的值反复判断，挂出预算之外。
-    调度按「内存小 → 时间短 → 随机」排序（代价升序贪心装箱 = 最大化并发个数）。
+    调度按「**已播出次数** → 内存小 → 时间短 → 随机」排序：排序键 =
+    次数 × 32 + 代价档（内存档 × 4 + 时长档），次数乘一个大于档号上界的进制，
+    使「没出现过的」压倒一切 —— 九种动画轮流冒头，出现次数自发趋于均衡
+    （实测 15 分钟长跑各类次数极差 1）。同次数时按代价升序贪心装箱 = 最大化并发个数。
+    计数只在实际 `addExe` 成功时递增，且**播出后立刻重排**，否则积压的同类会接着播。
+    **演出会点燃追踪**：9 个 exe 里 8 个调 `hostileActionTaken()`（3 个在构造函数、
+    5 个在 `LoadContent`，即 `OS.addExe` 那一刻），目标 `traceTime > 0` 时即
+    `os.traceTracker.start`。泵**每帧**扑掉一次（`HackEngine.KillTrace`）——
+    步骤层的清理够不着 `addExe` 那个时刻。已提权（`adminIP` 已是玩家）的机器不排演出。
     存活时长**不是动画名义时长**，还要加收尾停顿与淡出 2 秒
     （`fade` 从 1 到 0 需 `1 / FADEOUT_RATE`，`ExeModule.cs:9/:76`）：
     RTSPCrack 实为 `IDLE_TIME 30.5 + 2 = 32.5s`（`RTSPPortExe.cs:10`），不是 6.3s；

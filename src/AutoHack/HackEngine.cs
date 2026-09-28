@@ -449,6 +449,13 @@ internal static class HackEngine
         };
 
         var sweep = options.Scope == HackScope.Network;
+
+        // 「当前节点」模式下真的连着机器时，同样剔除**已控**的 —— 那台机器是会话现状，
+        // 玩家点 START 并不等于要重打一台已经拿下的机器（旧行为：照样重打、照样重排演出）。
+        // 唯一豁免的是白名单回退那条路（见 ConnectedPool）：那是玩家在地图上显式点击的
+        // 节点，与 here、点名同级，按刻意选择放行。
+        var skipOwned = options.SkipOwned
+            && (sweep || (options.Scope == HackScope.Connected && os.connectedComp != null));
         var result = new List<Computer>(pool.Length);
         var skipped = new List<Computer>();
         var skippedOwned = 0;
@@ -467,7 +474,7 @@ internal static class HackEngine
 
             if (sweep)
             {
-                if (options.SkipOwned && IsOwned(comp, os))
+                if (skipOwned && IsOwned(comp, os))
                 {
                     skippedOwned++;
                     skipped.Add(comp);

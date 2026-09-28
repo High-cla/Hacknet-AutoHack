@@ -175,9 +175,9 @@ internal static class HackOverlay
 
         // 单写者：两条运行会同时 connect/disconnect 同一个 os.connectedComp，
         // 互相把对方的目标换掉。已在跑的运行先跑完。
-        if (PendingRuns.BusyFor(_os))
+        if (PendingRuns.BusyFor(_os) || IsRunning)
         {
-            _os.write("[autohack] A headless run is still in progress - wait for it to finish.");
+            _os.write("[autohack] A run is already in progress - wait for it to finish.");
             return;
         }
 

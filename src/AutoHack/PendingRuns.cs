@@ -43,8 +43,8 @@ internal static class PendingRuns
     [HarmonyPatch(typeof(OS), "Update")]
     private static void OnOSUpdate(OS __instance, GameTime gameTime)
     {
-        // 演出队列独立于运行推进：跑完收尾后仍要把排着的动画播完。
-        NativeExes.Tick(__instance);
+        // 演出队列的泵由 HackOverlay 的补丁独家负责 —— 两个补丁同挂 OS.Update，
+        // 都调 NativeExes.Tick 就是同一帧挂两个动画（见 NativeExes.Tick 的一帧一个约束）。
 
         if (!Pending.TryGetValue(__instance, out var entry))
         {

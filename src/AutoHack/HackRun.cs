@@ -228,6 +228,15 @@ internal sealed class HackRun
             return 0f;
         }
 
+        // 反追踪同理不吃节流：它只把 traceTracker.active 置假并回正速度系数
+        // （TraceTracker.cs:116-120），纯内存、无 IO、无动画；未激活时
+        // HackEngine.KillTrace 直接返回 false，连一行都不输出。
+        // 正因为零成本，才敢在每个端口后都插一次（见 BuildSteps）。
+        if (kind == HackStepKind.KillTrace)
+        {
+            return 0f;
+        }
+
         // 脚本自带 delay 行时以它为准（游戏 HackerScript 的 config 第 4 参同义），
         // 否则回到 speed 档位 —— 两者正交：档位管「多快」，脚本管「什么次序」。
         if (_script?.StepDelay is { } scripted)
@@ -709,6 +718,25 @@ internal sealed class HackRun
             foreach (var port in ports)
             {
                 steps.Add(new HackStep(HackStepKind.OpenPort, target, port, HackEngine.CrackCommand(port)));
+
+                // 每个端口后立刻清一次追踪（用户定的行为；此前只在每台末尾清一次）。
+                //
+                // 计时上两者都安全，不是缺陷修复：traceTime = max(10 - security, 3) * 15，
+                // 最小 45 秒（Computer.cs:224），而单台的端口步总耗时 = 端口数 × PortDelay，
+                // 量级是秒 —— 每台清一次就已经比倒计时快一个数量级。
+                // 每端口一次的实际差别是「追踪状态在端口之间也归零」：演出 exe 的构造体
+                // 会调 hostileActionTaken()（PacificPortExe.cs:26、SSHCrackExe.cs:90、
+                // SMTPoverflowExe.cs:61 等），traceTime > 0 时即
+                // os.traceTracker.start → os.warningFlash()（Computer.cs:300、
+                // TraceTracker.cs:110）—— 每端口清一次，跑的过程中就不会出现常亮的
+                // 追踪条与闪屏。
+                //
+                // 成本为零：KillTrace 不吃节流（见 DelayFor），且未激活时
+                // HackEngine.KillTrace 直接返回 false、连一行输出都没有。
+                //
+                // 脚本模式不插这一步 —— 那份次序由玩家显式书写，killtrace 是脚本可写的
+                // 动作（HackScript.cs:81），末尾也已有兜底，不该由插件改写脚本语义。
+                steps.Add(new HackStep(HackStepKind.KillTrace, target, default, null));
             }
 
             // 防火墙必须在 porthack 之前解 —— 游戏自己的门禁要求

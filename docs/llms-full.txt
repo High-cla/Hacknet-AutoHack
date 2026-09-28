@@ -1,0 +1,2960 @@
+---
+url: /extension-tutorial.md
+---
+# Hacknet Extension 教程
+
+> \[!WARNING]
+> 本教程目前处于早期开发阶段，可能存在错误、内容缺失或表述不当之处。如需查阅相对完整的教程，请暂时访问 [Hacknet-Extension-Tutorial](https://github.com/FBIKdot/Hacknet-Extension-Tutorial) 或 [Old.Hacknet.wiki](https://old.hacknet.wiki)。
+
+Hacknet Extension 是玩家为 Hacknet 制作的扩展内容，主要由媒体文件和特定格式的文本（以 XML 为主）构成。
+
+学习 Hacknet Extension 开发的知识门槛较低，只需掌握 XML 基本语法并对 Hacknet 游戏内容有大致了解即可。其主要难点在于理解 Hacknet 游戏的内部机制与 XML 格式规范之间的对应关系。
+
+本教程默认读者已具备 XML 基础语法知识并熟悉 Hacknet 游戏内容。如需学习 XML 基础知识，可参考 [Runoob XML 教程](https://www.runoob.com/xml/xml-tutorial.html)。
+
+本教程旨在帮助读者入门 Hacknet Extension 开发，介绍其基本组成部分。某些组件包含多种功能，教程不会逐一详述。每章末尾均附有 [参考文档](../reference/index.md)，供查阅完整功能列表。
+
+本教程仅涉及 Extension 开发，不包含 Mod 相关内容。如不清楚两者的区别，请参阅 [FAQ：Extension 与 Mod 的区别](../hnfaq.md#difference-between-ext-and-mod)。
+
+## 参考资料
+
+教程会主要参考以下权威内容。
+
+官方资源：
+
+* IntroExtension
+* [Hacknet Extensions Guide (Official)](https://steamcommunity.com/sharedfiles/filedetails/?id=914587661)
+* \#extensions\_infodump channel in [Hacknet\_Extensions (Discord)](https://discord.gg/7cHhVT9)
+
+游戏实现：
+
+* Hacknet 游戏文件
+* [OpenHacknet](https://github.com/UnHacknet/OpenHacknet)
+
+## 社区资源
+
+本教材也参考了一部分这些资源。Hacknet.wiki 还在持续更新中，在阅读本教程的过程中，如果遇到 Hacknet.wiki 没有覆盖或者没解释清楚的内容，你可以先去翻阅这些资源。
+
+社区资源：
+
+* [Hacknet-Extension-Tutorial](https://github.com/FBIKdot/Hacknet-Extension-Tutorial) / [Old.Hacknet.wiki](https://old.hacknet.wiki)：本站的前生
+* 《Hacknet 扩展制作指南 – 入门》 by Pitiedwzr & Err0r233
+* 《Hacknet 主机编辑指南》 by Cyl18
+
+---
+
+---
+url: /extension-tutorial/preparing.md
+---
+# 准备工作
+
+你需要准备：
+
+* 一台可以运行最新版 Hacknet 的电脑。
+* 一个文本编辑器。
+
+> \[!NOTE]
+> 推荐使用 [Visual Studio Code/VSCode](https://code.visualstudio.com/) 或任何基于 VSCode(Code OSS) 的 IDE 来进行 Hacknet Extension 开发。
+>
+> VSCode 能提供 XML 的高亮、语法检查与格式化等功能，方便修改 XML 文件，借助于插件。
+>
+> 你需要在 VSCode 中安装 [XML](https://marketplace.visualstudio.com/items?itemName=redhat.vscode-xml) 插件来获得 XML 语法检查等功能。
+>
+> 在后续通过 [AutumnRivers/hacknet-vscode](https://github.com/AutumnRivers/hacknet-vscode) 和 [fengxu-30338/HacknetExtensionEditor](https://github.com/fengxu-30338/HacknetExtensionEditor) 插件可以进一步提高 VSCode 的扩展开发效率。这两个插件需要对 Hacknet Extension 有一定了解，会在后续章节介绍，暂时不需要安装。
+
+## 创建项目
+
+### 通过 `BlankExtension` 创建项目
+
+`BlankExtension` 是游戏自带的扩展结构模板，我们可以通过复制 `BlankExtension` 来创建一个新的 Extension 项目。
+
+首先找到 Hacknet 游戏的根目录。如果你不清楚怎么找到它，可以查看 [Q: 如何找到 Hacknet 游戏的根目录？](../hnfaq.md#q-how-to-find-hacknet-root)。此处用 `Hacknet/` 举例。
+
+复制 `Hacknet/Extensions/BlankExtension/` 并将其重命名（下文以 `MyFirstExtension` 为例），然后将副本中的 `EDIT_ME_ExtensionInfo.xml` 改名为 `ExtensionInfo.xml`。
+
+```cmd
+; 注：这只是 cmd 命令的示例，你可以使用自己习惯的方式来创建项目。
+cd Hacknet\Extensions\
+cp -r BlankExtension MyFirstExtension
+cd MyFirstExtension
+rename EDIT_ME_ExtensionInfo.xml ExtensionInfo.xml
+```
+
+打开 `Hacknet/Extensions/MyFirstExtension/` 目录，编辑 `ExtensionInfo.xml`：修改 `Name` 元素的内容（以下以 `MyFirstExtension` 为例），然后添加一个 `Language` 元素，内容为 `zh-cn`。
+
+```xml
+<ExtensionInfo>
+  <!-- Max name length is 128 characters -->
+  <Name>Blank Extension</Name> <!-- [!code del] -->
+  <Name>MyFirstExtension</Name> <!-- [!code add] -->
+  <Language>zh-cn</Language> <!-- [!code add] -->
+  <AllowSaves>true</AllowSaves>
+  
+  ...
+</ExtensionInfo>
+```
+
+> \[!NOTE]
+> 扩展的名称不能超过 128 个字符，且必须是英文字符。
+
+（其他内容暂时保持原样）
+
+### 验证扩展创建成功
+
+启动 Hacknet，点击 Extensions 按钮，在扩展列表中看看是否有 `MyFirstExtension` 这个扩展。如果有，说明扩展创建成功。
+
+打开 `MyFirstExtension`，可以看到扩展已经可以启动了。
+
+> \[!NOTE]
+> 后续 `MyFirstExtension` 将成为我们的工作目录，在没有特殊说明的情况下，所有操作都在这个目录下进行。
+
+### 修复一个 `BlankExtension` 的 bug
+
+如果你在刚刚的扩展页面点击 `Run Verfication Tests`，会发现扩展报错了。
+
+```
+Errors Found. Writing report to Extensions/MyFirstExtension/report.txt
+
+Load Error:
+System.NullReferenceException 
+ 
+Faction introfacnot found for setFaction action! 
+```
+
+这是因为 `BlankExtension` 有一个小 bug，我们需要手动修复它。
+
+打开 `MyFirstExtension/Actions/StartingActions.xml` 文件。编辑第五行，将 `introfac` 改为 `startingfac`。
+
+```xml
+<ConditionalActions>
+  
+  <Instantly>
+    <AddAsset FileName="RTSPCrack.exe" FileContents="#RTSP_EXE#" TargetComp="playerComp" TargetFolderpath="bin" />
+    <RunFunction FunctionName="setFaction:introfac" FunctionValue="0" /> <!-- [!code del] -->
+    <RunFunction FunctionName="setFaction:startingfac" FunctionValue="0" /> <!-- [!code add] -->
+    
+  </Instantly>
+
+</ConditionalActions>
+```
+
+再次点击 `Run Verfication Tests`，扩展将不再报错。恭喜你完成了扩展的准备工作。
+
+```
+Testing...
+All tests complete
+O Errors Found
+```
+
+> \[!NOTE]
+> Verfication Tests 是确保扩展正常运行的重要工具。定期运行 `Run Verfication Tests` 可以及时发现扩展中的错误。在扩展开发中，你可能会遇到各种各样的错误，遇到时不必惊慌，根据错误提示来尝试解决即可。
+
+## 完成
+
+到这里，你已经完成了扩展的准备工作。接下来，你可以在 `MyFirstExtension` 目录下开始编写自己的扩展内容了。
+
+> \[!NOTE]
+> 在后续内容中，我们将默认以扩展目录作为当前工作目录 (`/`)，以 `Hacknet/` 目录作为游戏根目录。
+>
+> 我们可能会使用来自 `BlankExtension/` 或 `IntroExtension/` 两个内置目录的文件作为模板，它们的位置都在 `Hacknet/Extensions/` 目录下。
+> 虽然本节使用的 `MyFirstExtension` 是从 `BlankExtension/` 复制而来，已包含 `BlankExtension/` 中的文件，但为防止歧义，后续内容中的模板路径将统一使用 `BlankExtension/` 来表示位置。
+
+---
+
+---
+url: /extension-tutorial/structure.md
+---
+# Extension 项目结构
+
+`IntroExtension` 是游戏自带的介绍 Extension，具有完整的项目结构。在 `Hacknet/Extensions/IntroExtension` 目录下可以看到：
+
+```
+IntroExtension/
+├── Actions/
+├── Docs/
+├── Factions/
+├── HackerScripts/
+├── Missions/
+├── Music/
+├── Nodes/
+├── People/
+├── Themes/
+├── Web/
+├── Logo.png
+├── WorkshopLogo.png
+├── Intro.txt
+└── ExtensionInfo.xml
+```
+
+Extension 的主要组成部分已按文件夹分类：`Actions`、`Docs`、`Factions`、`HackerScripts`、`Missions`、`Music`、`Nodes`（`Computer`）、`People`、`Themes`、`Web` 以及图片等资源文件。
+
+无需刻意记忆这些内容，后续教程会逐一介绍每个组成部分的作用和使用方法。
+
+---
+
+---
+url: /extension-tutorial/XMLNotice.md
+---
+# XML 注意事项
+
+Hacknet 内使用的 XML 解析器有一定问题，有以下几点需要注意。
+
+## 编码与编码声明
+
+XML 文件首行的 `<?xml version="1.0" encoding="UTF-8"?>` 声明是可选的。根据 Hacknet 源码与 w3c 标准，通常已经默认使用 UTF-8 编码。
+
+建议所有内容均使用 UTF-8 编码（不推荐 UTF-8 with BOM 或其他编码），以避免潜在的兼容性问题。
+
+## 标签间隔
+
+Hacknet 的 XML 解析器无法处理紧贴的标签（`<root><foo></foo><bar></bar></root>` 等情况）。
+
+为了防止解析错误，建议尽量保持不同标签之间至少有一个空格、换行符或缩进符。
+
+```xml
+<root>
+  <foo></foo>
+  <bar></bar>
+
+  <foo></foo> <bar></bar>
+</root>
+```
+
+---
+
+---
+url: /extension-tutorial/Mission.md
+---
+# Mission （任务）
+
+在本章节中，我们将介绍 Hacknet 中的 Mission（任务）功能。在 Hacknet 中，Mission 通过 XML 文件进行定义。
+
+Mission 的主要作用是引导玩家完成特定操作。它由 Goal（目标）、MissionFunction（函数）、NextMission（下一个 Mission）、BranchMissions（分支 Mission）等元素组成。
+
+本章我们将尝试逐步还原 Hacknet 中 *甲虫计划* Mission 的一个简化版本。*甲虫计划* 的 Mission 涵盖了所有 Mission 功能，你可以在下方先预览一下。
+
+::: details *甲虫计划* 简化版
+
+```xml
+<mission id="hubSet09">
+  <goals>
+    <goal type="HasFlag" target="E_Whit:DEAD" />
+  </goals>
+  
+  <missionStart val="9">changeSong</missionStart>
+  <missionEnd val="1">junebugComplete</missionEnd>
+  
+  <nextMission>Missions/BitAdv_Intro.xml</nextMission>
+  
+  <branchMissions>
+    <branch>Missions/PacemakerSet_Deny_Branch.xml</branch>
+  </branchMissions>
+  
+  <posting title="甲虫计划" reqs="dechead, decypher,csecRankingS2Pass">
+这是一项极其棘手的任务, 我们需要一位能为自己的行为负责的, 在外活动的, 资深的匿名黑客, 使用极端手段来帮助一位痛不欲生的人. 
+  </posting>
+  
+  <email>
+    <sender>CSEC Hub Services</sender>
+    <subject>甲虫计划</subject>
+    <body>
+你好黑客, 
+这次的任务很不寻常, 请谨慎对待. 
+回复"deny"(放弃), 你就可以放弃这项任务. 
+    </body>
+    <attachments>
+      <link comp="medical" />
+      <note title="任务细节">
+目标: Elliot Whit
+</note>
+    </attachments>
+  </email>
+</mission>
+```
+
+:::
+
+## 通过模板创建一个 Mission 文件
+
+`BlankExtension/Missions/StartingMission.xml` 是一个简单的 Mission 文件模板。这个模板内只有被注释的元素是可选的，没有被注释的元素都是必须的，不能省略。你可以在此基础上编写 Mission。
+
+```xml
+<mission id="startingMission">
+  <goals>
+    <!-- Goals here -->
+  </goals>
+  <!-- 
+  Add your mission start and end items here
+  missionStart val="0">loadConditionalActions:Actions/TestActions.xml</missionStart>
+  missionEnd val="1">addRank</missionEnd> 
+  -->
+  <nextMission>NONE</nextMission>
+  <!-- 
+  <posting title="startingMission">This would be the post on a message board if it was on them.</posting>
+  -->
+  <email>
+    <sender>SENDER NAME HERE</sender>
+    <subject>This is an example email for Blank Extension</subject>
+    <body>You should add the body of the email here.
+Multiple lines etc.
+</body>
+    <attachments>
+      <!-- Add attachments like links and notes here -->
+    </attachments>
+  </email>
+</mission>
+```
+
+## Mission 的根元素
+
+Mission 的根元素 `<mission>` 中属性都是非必需的。
+
+```xml
+<mission id="missionid" activeCheck="false" shouldIgnoreSenderVerification="false">
+  ...
+</mission>
+```
+
+Mission 的 id 没有被直接使用，即使大部分都有 `id` 属性。甲虫计划的 Mission 的 id 是 `hubSet09`。
+
+`activeCheck` 会影响 Goal 的检查方式，在后续 Goal 会具体介绍。
+
+`shouldIgnoreSenderVerification` 默认为 `false`。为 `true` 时，Mission 会忽略发送者验证，一般不常用。
+
+---
+
+---
+url: /extension-tutorial/MissionEmail.md
+---
+# MissionEmail
+
+Mission 开始时会发送邮件。如果是从 DHS 领取的任务，Email 内容则会变成 DHS 中显示的任务详情。
+
+```xml
+<mission>
+  ...
+  <email>
+    <sender>SENDER NAME HERE</sender>
+    <subject>This is an example email for Blank Extension</subject>
+    <body>You should add the body of the email here.
+Multiple lines etc.</body>
+    <attachments>
+      <!-- Add attachments like links and notes here -->
+    </attachments>
+  </email>
+</mission>
+```
+
+Hacknet 中有多种 Email，Mission 中的 Email 是其中一种。为了区分，后续会使用 MissionEmail 特指 Mission 中的 Email。
+
+## Email 撰写
+
+简化版 *甲虫计划* 中邮件的大致内容如下：
+
+* 发送者：CSEC Hub Services
+* 主题：甲虫计划
+* 内容：你好黑客, 这次的任务很不寻常, 请谨慎对待. 回复"deny"(放弃), 你就可以放弃这项任务.
+
+MissionEmail 内容比较简单，我们直接参照内容，根据模板格式填写即可。
+
+简化版 *甲虫计划* 中 `<email>` 内容部分大概如下：
+
+```xml
+<email>
+  <sender>CSEC Hub Services</sender>
+  <subject>甲虫计划</subject>
+  <body>你好黑客, 这次的任务很不寻常, 请谨慎对待. 回复"deny"(放弃), 你就可以放弃这项任务.</body>
+  <attachments>
+    <!-- Add attachments like links and notes here -->
+  </attachments>
+</email>
+```
+
+## 附件
+
+MissionEmail 中可以添加附件。附件种类有：
+
+* note（笔记）
+* link（ip地址）
+* account（账号密码）
+
+格式如下：
+
+```xml
+<attachments>
+  <note title="An example note">example note</note>
+  <link comp="missionTestNode" />
+  <account comp="missionTestNode" user="TestUser" pass="testpass" />
+  ...
+</attachments>
+```
+
+附件的格式与普通 Email 中附件相同，`<attachments>` 标签中可以包含多个 `<attachment>` 标签。
+
+*甲虫计划* 中有两个附件：
+
+* 一个“任务细节” note，内容是 `目标: Elliot Whit`，
+* 医疗数据库 “通用医疗” 的 ip 地址。“通用医疗” 的 Computer ID 是 `medical`。
+
+参考格式，补充附件后，简化版 *甲虫计划* 的 MissionEmail 如下：
+
+```xml
+<email>
+  <sender>CSEC Hub Services</sender>
+  <subject>甲虫计划</subject>
+  <body>你好黑客, 这次的任务很不寻常, 请谨慎对待. 回复"deny"(放弃), 你就可以放弃这项任务.</body>
+  <attachments>
+    <!-- Add attachments like links and notes here --> //[!code del]
+    <link comp="medical" /><!-- [!code add] -->
+    <note title="任务细节">目标: Elliot Whit</note><!-- [!code add] -->
+  </attachments>
+</email>
+```
+
+## MissionEmail 参考
+
+更多具体细节见 [参考：MissionEmail](../reference/MissionEmail.md)
+
+---
+
+---
+url: /extension-tutorial/Goal.md
+---
+# Goal （目标）
+
+Goal 用于定义 Mission 的完成条件。由 `<goals>` 包裹着的 `<goal>` 便是 Goal。Goal 种类繁多，上方的 `FileDeletion` 便是是其中的一种。
+
+```xml
+<mission>
+  <goals>
+    <goal type="filedeletion" target="playerComp" file="SecurityTracer.exe" path="bin" />
+  </goals>
+  ...
+</mission>
+```
+
+在 *初次联系* 中，任务目标是去删除玩家电脑中 `bin` 目录下的 `SecurityTracer.exe` 文件。上方的 `FileDeletion` Goal 其实就是 *初次联系* 的 Goal。
+
+一个任务可以有多个 Goal。
+
+```xml
+<goals>
+  <goal type="clearfolder" target="advExamplePC" path="home"/>
+  <goal type="delay" time="10.0"/>
+</goals>
+```
+
+## Goal 的完成检测
+
+在默认情况下，Goal 的检测会在玩家回复邮件时进行。Mission 根元素有一个属性 `activeCheck` 可以将它改为持续，此时不一定需要回复邮件，任务只要 Goals 都满足了就会直接完成。
+
+原版的 *初次联系* 中，删除后需要回复邮件。如果改为持续检测，玩家不需要回复邮件，只要删除 `SecurityTracer.exe` 文件（当然，其实是只要让那个地方没有 `SecurityTracer.exe` 文件就行），则任务就会直接完成。
+
+```xml
+<mission activeCheck="true">
+  <goals>
+    <goal type="filedeletion" target="playerComp" file="SecurityTracer.exe" path="bin" />
+  </goals>
+  ...
+</mission>
+```
+
+## 简化版 *甲虫计划* 的 Goal
+
+在 Hacknet 本体中，起搏器过载后，会赋予玩家一个 Flag `E_Whit:DEAD`。*甲虫计划* 通过检查玩家是否具有这个 Flag 来判断是否完成任务。
+
+```xml
+<mission id="hubSet09">
+  <goals>
+    <goal type="HasFlag" target="E_Whit:DEAD" />
+  </goals>
+  ...
+</mission>
+```
+
+## Goal 参考
+
+你可以在 [参考：Goal](../reference/Goal.md) 中查看所有的 Goal 类型。
+
+---
+
+---
+url: /extension-tutorial/NextMission.md
+---
+# NextMission （下一个任务）
+
+指定任务完成后，加载的下一个任务。
+
+```xml
+<mission>
+  ...
+  <nextMission>NONE</nextMission>
+  ...
+</mission>
+```
+
+`<nextMission>` 元素的内容是下一个任务对于扩展来说的相对路径，没有则用 `NONE` 表示。
+
+我们假设下一个任务的路径是 `Missions/BitAdv_Intro.xml`。那么简化版 *甲虫计划* 的 `nextMission` 部分就是：
+
+```xml
+<nextMission>Missions/BitAdv_Intro.xml</nextMission> 
+```
+
+## Mission 静默加载
+
+`<nextMission>` 元素有一可选属性 `isSilent`，用于指定是否静默加载 **当前** 任务。
+
+如果一个 Mission 的 `isSilent` 属性为 `true`，则这个 Mission 在被加载后不会发送邮件。这种 Mission 通常用于充当 “跳板” 角色。
+
+这是一个不会发送邮件，10秒后加载 Missions/NextMission.xml 的 Mission。
+
+```xml
+<mission activeCheck="true">
+  <goals>
+    <goal type="delay" time="10.0"/>
+  </goals>
+  <nextMission isSilent="true">Missions/NextMission.xml</nextMission>
+  ...
+</mission>
+```
+
+## NextMission 参考
+
+见 [参考：Mission#nextmission](../reference/Mission.md#nextmission)
+
+---
+
+---
+url: /extension-tutorial/Posting.md
+---
+# Posting（文章）
+
+Posting 是 Mission 中的可选部分。
+
+## 作为任务简介
+
+如果 Mission 在任务中心，那么 Posting 会作为任务中心里面的任务简介。
+
+任务中心有 MissionListingServer、MissionHubServer 和 DHS。
+
+```xml
+<mission id="startingMission">
+  ...
+  <posting title="startingMission">This would be the post on a message board if it was on them.</posting>
+  ...
+</mission> 
+```
+
+## 作为文章
+
+新闻服务器的文章也是用 Mission 写的。如果 Mission 是新闻服务器中的文章，那么 Posting 会作为文章的内容。
+
+```xml
+<mission> <goals></goals> <nextMission>NONE</nextMission>
+<posting title="New Macrosoft Phone: About as bad as you expecte">巨硬公司发布新款手机 : 要多烂有多烂
+
+看起来巨硬公司的开发脚步根本停不下来. 我们的员工有幸得到一台最新的样品机"Waterfall", 然而经过我们的测试, 已经发现了很多严重的安全漏洞. 
+</posting>
+<email> <sender></sender> <subject></subject> <body></body> <attachments> </attachments> </email> </mission>
+```
+
+新闻服务器其实是 VariableMissionListingServer，在 Hacknet 本体中 Slashbot 新闻服务器和 Kellis 帮助服务器就是 VariableMissionListingServer。
+
+## Posting 参考
+
+见 [参考：Mission#posting](../reference/Mission.md#posting)
+
+---
+
+---
+url: /extension-tutorial/MissionFunction.md
+---
+# MissionFunction / Function
+
+Function 也可以实时改变游戏中的部分内容。一部分与 “全局的状态” 相关的功能主要通过 Function 更改。
+
+Function 通过 Mission 中的 `missionStart` 或 `missionEnd` 元素使用。这两个在 Mission 中都是可选元素。
+
+在后续也可以通过 Action 的 [RunFunction](../reference/Action.md#runfunction) 来使用，暂时不需要了解。
+
+Mission 开始时执行：
+
+```xml
+<missionStart val="7">changeSong</missionStart>
+```
+
+Mission 结束时执行：
+
+```xml
+<missionEnd>addRank</missionEnd>
+```
+
+参数的传递方法有在 Function 名称后面跟 `:[文本]` 和传递 值 使用。以下为在 Mission 中 使用文本参数和值参数的例子：
+
+```xml
+<!-- 值 参数 -->
+<missionStart val="7">changeSong</missionStart>
+<!-- 文本 参数 -->
+<missionEnd>setFaction:Entropy</missionEnd>
+```
+
+在简化版 *甲虫计划* 中，任务开始时游戏将 BGM 改为了《Broken Boy》，然后在任务结束时候运行了一个专用 Function `junebugComplete`。根据[参考：MissionFunction#changeSong](../reference/MissionFunction.md#changesong)，Broken Boy 在 `changeSong` 对应的参数为 `9`。
+
+```xml
+<missionStart val="9">changeSong</missionStart>
+<missionEnd val="1">junebugComplete</missionEnd>
+```
+
+## 关于 "MissionFunction"
+
+有理由认为 Function 最早是用来给 Mission 使用的，游戏中有一部分 Function (比如上方的 `junebugComplete`) 也只是给 Hacknet 本体使用的（不是为 Extension 准备的），而且在 Hacknet 的源码中相关类就叫 `MissionFunctions` 。
+
+参考：[MissionFunctions.cs](https://github.com/UnHacknet/OpenHacknet/blob/main/MissionFunctions.cs)
+
+## Function 参考
+
+见 [参考：MissionFunction](../reference/MissionFunction.md)
+
+---
+
+---
+url: /extension-tutorial/BranchMissions.md
+---
+# BranchMissions（分支任务功能）
+
+BranchMissions 让一个任务可以产生多种结果——当满足不同 Goal(s) 时，跳转到不同的 `nextMission`。
+
+以下以 Hacknet 中的*甲虫计划*为例（已简化非关键内容与任务路径）：
+::: code-group
+
+```xml [HubSet09.xml]
+<mission id="hubSet09">
+  <goals>
+    <goal type="HasFlag" target="E_Whit:DEAD" /> <!--[!code highlight]-->
+  </goals>
+  ...
+  <nextMission>Missions/BitAdv_Intro.xml</nextMission> <!--[!code highlight]-->
+  <branchMissions>
+    <branch>Missions/Deny_Branch.xml</branch> <!--[!code highlight]-->
+  </branchMissions>
+  ...
+  <email>
+    <sender>CSEC Hub Services</sender>
+    <subject>甲虫计划</subject>
+    <body>...
+回复"deny"(放弃), 你就可以放弃这项任务. 
+...</body>
+    ...
+  </email>
+</mission>
+```
+
+```xml [Deny_Branch.xml]
+<mission id="pacemakerSetReplyBranch">
+  <goals>
+    <goal type="getstring" target="deny"/> <!--[!code highlight]-->
+  </goals>
+  ...
+  <nextMission>Missions/Deny_Reply.xml</nextMission> <!--[!code highlight]-->
+  ...
+</mission>
+```
+
+```xml [Deny_Reply.xml]
+<mission id="bitHubSet01" activeCheck="true">
+  ...
+  <email>
+    <sender>CSEC Hub Services</sender>
+    <subject>Re: 甲虫计划</subject>
+    <body>
+我们完全能理解. 
+感谢你抽出宝贵的时间. 
+让你在这件事上慎重考虑了那么久, 真是麻烦你了. 
+-CSEC 管理员
+    </body>
+    ...
+  </email>
+</mission>
+```
+
+```xml [BitAdv_Intro.xml]
+<mission id="bit02_Intro">
+  ...
+  <email>
+    <sender> V </sender>
+    <subject>Bit -- 初章</subject>
+    ...
+  </email>
+</mission>
+```
+
+:::
+*甲虫计划*中有两种走向：
+
+| Goal | NextMission |
+| :--- | :--- |
+| 获得 flag `E_Whit:DEAD` | “Bit -- 初章” |
+| 回复 `deny` | “Re: 甲虫计划” |
+
+相比不设分支时只需一个 Mission，现在每增加一种结果就需要多写一个 Branch Mission。
+
+> \[!NOTE]
+> 为了防止歧义，此处 BranchMissions 只指这个功能。
+
+## 通过 Branch（分支）为不同 Goal(s) 设置不同 NextMission
+
+BranchMissions 的本质是：同时加载多个 Mission，满足其中某个任务的 Goal(s) 时，使用该任务的 `nextMission`。
+
+Branch 便是用于记录次要 Goal(s) 与对应 `nextMission` 的特殊 Mission。每需要一种新的 Goal 组合，就需要多一个 Branch。
+
+只取*甲虫计划*相关 Mission 的文件名（比 ID 更易识别）、Goal 与 NextMission，整理如下：
+
+| 文件名 | Goal's type | Goal's target | NextMission |
+| --- | --- | --- | --- |
+| HubSet09.xml | HasFlag | `E_Whit:DEAD` | BitAdv\_Intro.xml |
+| BitAdv\_Intro.xml |...|...|...|
+| Deny\_Branch.xml | GetString | `deny` | Deny\_Reply.xml |
+| Deny\_Reply.xml |...|...|...|
+
+可以看到，获得 flag 的 Goal 写在 HubSet09.xml 里面，而回复的 Goal 写在 Deny\_Branch.xml 里面。
+
+```xml
+<nextMission>Missions/BitAdv_Intro.xml</nextMission> 
+<branchMissions>
+  <branch>Missions/Deny_Branch.xml</branch> 
+</branchMissions>
+```
+
+Deny\_Branch.xml 作为 HubSet09.xml 的 Branch，让两个不同的 Goal 在同一个任务中共存，各自对应不同的 NextMission。
+
+## 关于对相关 Mission 的称呼建议
+
+建议用以下方法称呼相关的不同 Mission，以防止歧义：
+
+* Main Mission：主任务
+* Branch：分支任务
+* Main Mission's NextMission：主任务的下一个任务
+* Branch's NextMission：分支任务的下一个任务
+* BranchMissions：分支任务功能
+
+BranchMissions 究竟指 Branch，还是指 Branch's NextMission？为避免混淆，建议将 BranchMissions 限定为"分支任务功能"这一整体概念。
+
+---
+
+---
+url: /extension-tutorial/Flag.md
+---
+# Flag（标志）
+
+Flag 是一类玩家可以“拥有”的字符串。
+
+游戏内有一个全局的字符串集合，用于存储玩家拥有的 Flags。
+
+Function 可以添加和移除玩家拥有的 Flags，Action、Goal 等可以通过检查玩家是否拥有 Flag 来判断玩家的所处状态。
+
+```python
+# 伪代码，图一乐
+player_flags: set[str] = set()
+
+def AddFlags(*flags: str):
+    player_flags.update(flags)
+
+def RemoveFlags(*flags: str):
+    player_flags.difference_update(flags)
+
+def HasFlag(flag: str) -> bool:
+    return flag in player_flags
+```
+
+---
+
+---
+url: /extension-tutorial/Action.md
+---
+# Action（行为）
+
+在本章节中，我们将介绍 Hacknet Extension 中的 Action（行为），以及使用 Action 的两种方法：ConditionalActions 和 Faction。
+
+Action 可以实时改变游戏中的部分内容，例如向玩家的电脑添加一个文件、向 IRC 服务器发送一条消息、切换游戏的主题等。
+
+> \[!NOTE]
+> ConditionalActions 与 Action 有时都会被简称为 "Action"。为了区分，在本站中 Action 特指一个个具体的行为，不代指 ConditionalActions。
+
+## 认识 Action
+
+Action 的种类非常多，按功能大致可以分为：
+
+* 文件操作：`AddAsset`、`DeleteFile`、`CopyAsset`、`AppendToFile` 等
+* Node 相关：`ShowNode`、`HideNode`、`ChangeIP`、`CrashComputer` 等
+* 消息与界面：`AddIRCMessage`、`ChangeAlertIcon`、`StartScreenBleedEffect` 等
+* 流程控制：`LoadMission`、`AddConditionalActions`、`RunFunction` 等
+
+本教程不会对 Action 逐一详述。你可以把本章当作 Action 的"使用说明"，具体的 Action 列表和属性请查阅 [参考：Action](../reference/Action.md)。
+
+Action 不能独立存在，它总是依附于某种"容器"被游戏执行。在 Hacknet Extension 中有两种方法使用 Action：
+
+* 通过 ConditionalActions
+* 通过 Faction
+
+下面分别介绍。
+
+## ConditionalActions（条件行为）
+
+ConditionalActions 是使用 Action 的一种方法。它会使用 Condition（条件）给 Action 设置触发条件：ConditionalActions 被游戏加载后，Condition 满足时就会执行其中的 Action。
+
+描述 ConditionalActions 的 XML 结构如下：
+
+```xml
+<ConditionalActions>
+
+    <!-- Condition -->
+    <Instantly needsMissionComplete="false">
+
+        <!-- Action -->
+        <SaveGame DelayHost="delayNode" Delay="0"/>
+        ...
+    </Instantly>
+
+    ...
+</ConditionalActions>
+```
+
+ConditionalActions 可以在游戏开始、Mission 中或者 Action 中加载，非常方便：
+
+* 游戏开始时加载的 ConditionalActions 就是 `Actions/StartingActions.xml`。
+* Mission 可以通过 [MissionFunction](./MissionFunction.md) `loadConditionalActions` 加载 ConditionalActions。
+* Action 可以通过 `AddConditionalActions` 加载另一个 ConditionalActions，实现连锁加载。
+
+常见的 Condition 有以下几种，你可以在 [参考：ConditionalActions](../reference/ConditionalActions.md) 中查看所有的 Condition：
+
+| Condition       | 触发时机                                    |
+| --------------- | ------------------------------------------- |
+| `Instantly`     | ConditionalActions 被加载后立即触发         |
+| `OnConnect`     | 连接到目标 Node 后触发                      |
+| `OnDisconnect`  | 从目标 Node 断开连接后触发                  |
+| `OnAdminGained` | 获取目标 Node 的管理员权限后触发            |
+| `HasFlags`      | 玩家拥有所有指定的 [Flag](./Flag.md) 时触发 |
+
+### 动手试试
+
+在[准备工作](./preparing.md)中，我们已经见过 `BlankExtension/Actions/StartingActions.xml`，并修复了它的一个 bug。它是 Extension 启动时最先被加载的 ConditionalActions。打开它：
+
+```xml
+<ConditionalActions>
+  
+  <Instantly>
+    <AddAsset FileName="RTSPCrack.exe" FileContents="#RTSP_EXE#" TargetComp="playerComp" TargetFolderpath="bin" />
+    <RunFunction FunctionName="setFaction:startingfac" FunctionValue="0" />
+    
+  </Instantly>
+
+</ConditionalActions>
+```
+
+`Instantly` 是 Condition，表示在 ConditionalActions 被加载后立即触发。也就是说，Extension 一启动，其中的两个 Action 就会执行：
+
+* `AddAsset` 向玩家电脑的 `bin` 文件夹添加了 `RTSPCrack.exe`。
+* `RunFunction` 运行了 Function `setFaction:startingfac`。
+
+我们尝试在 `<Instantly>` 中添加一个新的 Action，让 Extension 启动时给玩家的电脑留下一段欢迎信息。
+
+```xml
+<Instantly>
+  ...
+  <AddAsset FileName="Welcome.txt" FileContents="Welcome to MyFirstExtension!" TargetComp="playerComp" TargetFolderpath="home" /> <!-- [!code add] -->
+</Instantly>
+```
+
+保存后启动 Extension，在终端中使用 `ls` 查看 `home` 文件夹，再用 `cat Welcome.txt` 查看内容。如果能看到我们写入的文字，说明这个 Action 已经成功执行。
+
+> \[!NOTE]
+> `StartingActions` 在 Extension 启动时加载。如果你已经有一个进行中的存档，建议删除存档并重新开始 Extension，以便观察 `Instantly` 中的 Action 的执行效果。
+
+### 延迟执行（Delay）
+
+部分 Action 支持通过 `Delay` 和 `DelayHost` 延迟执行。Delay 的细节以及哪些 Action 支持延迟（标有 ），见 [参考：Action#Delay](../reference/Action.md#delay)。
+
+## Faction（阵营）
+
+Faction 是使用 Action 的另一种方法。与 ConditionalActions 的区别主要在于**条件不同**。
+
+Faction 会使用 FactionAction 给 Action 设置条件。FactionAction 可以根据玩家在该 Faction 中的 Rank（排名，游戏内又叫做 Point（积分））来决定是否执行它的 Action。
+
+描述 Faction 的 XML 结构如下：
+
+```xml
+<CustomFaction name="Faction Name" id="Faction_ID" playerVal="0">
+
+    <!-- FactionAction -->
+    <Action ValueRequired="1">
+
+        <!-- Action -->
+        <SaveGame DelayHost="delayNode" Delay="0"/>
+        ...
+    </Action>
+    ...
+
+</CustomFaction>
+```
+
+FactionAction 类似一个特殊的 Condition：
+
+```xml
+<Action ValueRequired="1" Flags="flag1,flag2"></Action>
+```
+
+* `ValueRequired`：`int`，Rank > `ValueRequired` 时会执行 Action。默认值为 `10`。
+* *`Flags`*?：`string`，描述需要满足的 flags。多个 flags 之间用逗号 `,` 分隔。
+
+在 BlankExtension 中出现的 `<RunFunction FunctionName="setFaction:startingfac" FunctionValue="0" />` 执行了一个用于指定当前 Faction 的 Function。如果 Faction 没有被指定，Mission 的 `requiredRank` 功能会无法正常工作。
+
+### 与 ConditionalActions 的区别
+
+* ConditionalActions 可以随时加载（游戏开始、Mission 中、Action 中）；Faction 不可以随时加载，而只能在游戏开始的时候加载。
+* ConditionalActions 的触发条件是 Condition（连接节点、获得管理员权限、拥有 Flag 等）；FactionAction 的触发条件是玩家在该 Faction 中的 Rank。
+
+Rank 可以通过 Function 改变，例如 `addRank` / `addRankSlient` 会给玩家当前的 Faction 增加 Rank。玩家当前属于哪个 Faction，则可以用 Function `setFaction` 切换——`StartingActions.xml` 中的 `setFaction:startingfac` 就是在设置玩家的初始 Faction。
+
+Faction 的完整说明见 [参考：Faction](../reference/Faction.md)。
+
+## 参考
+
+* [参考：Action](../reference/Action.md)
+* [参考：ConditionalActions](../reference/ConditionalActions.md)
+* [参考：Faction](../reference/Faction.md)
+
+---
+
+---
+url: /extension-tutorial/ExtensionInfo.md
+---
+# ExtensionInfo（扩展信息）
+
+`ExtensionInfo.xml` 是每个 Extension 都包含的描述文件，位于扩展根目录下。游戏通过它来识别和加载一个扩展：如果目录下没有 `ExtensionInfo.xml`，游戏就不会把它当作一个有效的 Extension。
+
+在[准备工作](./preparing.md)中，我们把 `EDIT_ME_ExtensionInfo.xml` 改名为 `ExtensionInfo.xml`，并填写了名称和语言。本章我们来看看这个文件里还能写些什么。
+
+## 基本结构
+
+`ExtensionInfo.xml` 的根元素是 `<HacknetExtension>`，其中的每个子元素描述扩展的一项配置：
+
+```xml
+<HacknetExtension>
+  <Name>MyFirstExtension</Name>
+  <Language>zh-cn</Language>
+  <AllowSaves>true</AllowSaves>
+  <Description> --- Blank Extension ---
+Edit this with your own extension info and start building!</Description>
+  ...
+</HacknetExtension>
+```
+
+其中最基础的几个元素：
+
+* `Name`（必填）：扩展的名称，会显示在扩展列表中。最大长度 128 个字符，且必须包含至少一个字母或数字。
+* `Language`：扩展的语言。默认值为 `en-us`，中文扩展一般填写 `zh-cn`。
+* `AllowSaves`：是否允许玩家存档。默认值为 `true`。
+* `Description`：扩展的描述，显示在扩展列表中。
+
+## 起始内容
+
+以下元素决定了扩展启动时加载的内容，它们与我们前面章节介绍的内容一一对应：
+
+* `StartingMission`：启动时加载的 [Mission](./Mission.md) 的路径。不需要时设为 `NONE` 或删除该元素。
+* `StartingActions`：启动时加载的 ConditionalActions 的路径，也就是我们见过的 `Actions/StartingActions.xml`。不需要时设为 `NONE` 或删除该元素。
+* `StartingVisibleNodes`：启动时默认可见的 Node 列表，多个 Computer ID 之间用逗号分隔。
+* `Faction`：扩展中使用的 Faction 文件路径。可以写多个 `Faction` 元素。
+
+`BlankExtension` 的 `ExtensionInfo.xml` 中就有这样一段：
+
+```xml
+<StartingVisibleNodes></StartingVisibleNodes>
+<StartingMission>Missions/StartingMission.xml</StartingMission>
+<StartingActions>Actions/StartingActions.xml</StartingActions>
+<Faction>Factions/StartingFaction.xml</Faction>
+```
+
+## 外观与声音
+
+* `StartingTheme`：初始主题。可以是自定义主题文件的路径，也可以是内置主题的名称（如 `HacknetBlue`）。
+* `HasIntroStartup`：启动时是否播放标准的重启启动序列。默认值为 `true`，`BlankExtension` 将其设为了 `false`。如果扩展项目目录下存在 `Intro.txt`，还会在首次启动后逐字展示它的内容。
+* `StartsWithTutorial`：是否以教程模式启动。默认值为 `False`。
+* `IntroStartupSong`：启动时播放的音乐。可以引用原版音乐的文件名，也可以引用扩展内 `.ogg` 文件的路径。
+* `IntroStartupSongDelay`：启动音乐延迟播放的时间（秒）。
+
+## 动手试试
+
+打开 `MyFirstExtension/ExtensionInfo.xml`，把 `Description` 改成自己的描述，再把 `HasIntroStartup` 改为 `true`：
+
+```xml
+<Description> --- Blank Extension --- <!-- [!code del] -->
+Edit this with your own extension info and start building!</Description> <!-- [!code del] -->
+<Description>我的第一个 Hacknet 扩展！</Description> <!-- [!code add] -->
+
+<HasIntroStartup>false</HasIntroStartup> <!-- [!code del] -->
+<HasIntroStartup>true</HasIntroStartup> <!-- [!code add] -->
+```
+
+保存后启动 Hacknet，打开 Extensions 页面，可以看到 `MyFirstExtension` 的描述已经更新。启动扩展后，还能看到一段重启启动序列。
+
+你还可以在 `MyFirstExtension/` 根目录下修改 `Intro.txt`，写上你的欢迎语：
+
+```txt
+Welcome to MyFirstExtension!
+```
+
+启动扩展后，这段文字会在首次启动后逐字展示。`IntroExtension` 的根目录下就附带了一个 `Intro.txt`，可以作为参考。
+
+> \[!WARNING]
+> `Name` 是必填元素且只能显示 ASCII 字符，缺少它，或者名称中只存在非法文件名字符（`<>:"/\|?*` 及控制字符等），都会导致扩展加载失败。
+
+## 参考
+
+`ExtensionInfo.xml` 中还包含 Sequencer（序列器）、Steam 创意工坊（Workshop）等进阶元素，本章不再赘述。
+
+你可以在 [参考：ExtensionInfo](../reference/ExtensionInfo.md) 中查看所有元素的完整说明。
+
+---
+
+---
+url: /extension-tutorial/ESequencer.md
+---
+# ESequencer
+
+Sequencer 是 Hacknet 本体终局阶段使用的特殊机制，其变体 ESequencer 被专门用于扩展中。
+
+让 ESequencer 模仿原版 Sequencer 的效果需要 [ExtensionInfo](./ExtensionInfo.md) 与 [ConditionalActions](./Action.md#conditionalactions条件行为) 搭配一起使用。
+
+## 修改 ExtensionInfo
+
+```xml
+<HacknetExtension>
+  ...
+  <SequencerTargetID>advExamplePC</SequencerTargetID>
+  <SequencerSpinUpTime>10.5</SequencerSpinUpTime>
+  <SequencerFlagRequiredForStart>testFlag</SequencerFlagRequiredForStart>
+  <ActionsToRunOnSequencerStart>Actions/ThemeSwapActions.xml</ActionsToRunOnSequencerStart>
+  ...
+</HacknetExtension>
+```
+
+* `SequencerTargetID`：ESequencer 的目标 Node 的 Computer ID。必填，缺失时激活 ESequencer 会导致游戏崩溃。
+* *`SequencerSpinUpTime`*?：ESequencer 的启动时间（秒）。默认值为 `17`。
+* *`SequencerFlagRequiredForStart`*?：ESequencer 启动所需的 Flag。缺失时跳过 Flag 检查，ESequencer 始终可用。
+* `ActionsToRunOnSequencerStart`：ESequencer 启动时执行的 ConditionalActions 的文件路径。必填，缺失时激活 ESequencer 会导致游戏崩溃。
+
+## 使用 ConditionalActions 添加 ScreenBleed 效果
+
+通过 Action `StartScreenBleedEffect` 添加 ScreenBleed （红屏）效果。
+
+```xml
+<ConditionalActions>
+    <Instantly>
+        <StartScreenBleedEffect 
+        AlertTitle="Sequencer Attack"
+        CompleteAction="Actions/ScreenBleedFailed.xml" 
+        TotalDurationSeconds="200" 
+        DelayHost="delayNode" 
+        Delay="0">Break into the Moonshine servers
+Delete all files and backups
+Get out of there!</StartScreenBleedEffect>
+    </Instantly>
+</ConditionalActions>
+```
+
+* `AlertTitle`：提示标题。缺失时会导致游戏黑屏。
+* *`CompleteAction`*?：`ScreenBleed` 结束后加载的 ConditionalActions 的文件路径。
+* *`TotalDurationSeconds`*?：总持续时间（秒）。默认值为 `200`。
+* *`DelayHost`*?：延迟执行的宿主 Node 的 Computer ID。
+* *`Delay`*?：延迟执行的时间（秒）。
+* 内容：左下角的提示内容。最多三行。
+
+> \[!NOTE]
+> 需要注意的是，一般玩家是需要玩家在 ScreenBleed 覆盖前完成任务。
+>
+> 这种情况下 **CompleteAction 不是指任务完成后加载的ConditionalActions，而是失败后加载的**。
+>
+> 所以也需要额外通过Action处理取消 ScreenBleed 的逻辑，比如说任务完成后加载的 ConditionalActions。
+
+```xml
+<CancelScreenBleedEffect DelayHost="delayNode" Delay="0"/>
+```
+
+## 参考
+
+你可以在以下页面中找到更多细节：
+
+* [参考：ExtensionInfo#ESequencer 相关](../reference/ExtensionInfo.md#esequencer-相关)
+* [参考：Action](../reference/Action.md)：[StartScreenBleedEffect](../reference/Action.md#startscreenbleedeffect) [CancelScreenBleedEffect](../reference/Action.md#cancelscreenbleedeffect)
+
+---
+
+---
+url: /extension-tutorial/Logo.md
+---
+# Logo
+
+`BlankExtension` 和 `IntroExtension` 的根目录下都附带了一个 `Logo.png`，它就是显示在 Hacknet 扩展列表中的那个图标。
+
+`MyFirstExtension` 是从 `BlankExtension` 复制而来的，根目录下也有一个 `Logo.png`。我们来试着把它换成自己的 Logo。
+
+## 动手试试
+
+准备一张自己的 Logo 图片，命名为 `Logo.png`，替换掉 `MyFirstExtension/Logo.png`。
+
+保存后启动 Hacknet，打开 Extensions 页面，可以看到扩展的 Logo 已经更新。
+
+> \[!NOTE]
+> Logo 图片必须是名为 `Logo.png` 的 PNG 文件。虽然源码也会检查 `Logo.jpg`，但由于一个 bug，实际上只有 `Logo.png` 能正常工作；如果把 GIF 图片改名为 `Logo.png`，可以渲染，但只会显示第一帧，没有动态效果。
+
+## 参考
+
+Logo 的完整加载机制见 [参考：Logo](../reference/Logo.md)。
+
+---
+
+---
+url: /reference.md
+---
+# Hacknet 参考
+
+这里主要是 Hacknet Extension 的参考，也会包括 Hacknet 本身的参考。
+
+---
+
+---
+url: /reference/ExtensionInfo.md
+---
+# ExtensionInfo（扩展信息）
+
+`ExtensionInfo.xml` 是每个 Extension 必须包含的描述文件，位于扩展根目录下。游戏通过它来识别和加载一个扩展。
+
+如果扩展目录下不存在 `ExtensionInfo.xml`，游戏不会将其识别为有效的 Extension。
+
+## 根元素
+
+```xml
+<HacknetExtension>
+  ...
+</HacknetExtension>
+```
+
+根元素为 `<HacknetExtension>`，其中包含多个子元素来描述扩展的各项配置。
+
+## 所有元素
+
+### `Name`（必填）
+
+```xml
+<Name>MyFirstExtension</Name>
+```
+
+扩展的名称。
+
+* 最大长度为 128 个字符，且必须包含至少一个字母或数字。在游戏中只能显示 ASCII 字符。
+
+在生成存档目录的时候名称中的空格会被替换为 `_`，非法文件名字符会被移除。
+
+> \[!WARNING]
+> 缺少 `Name` 或或者名称中只存在非法文件名字符时（`<>:"/\|?*` 及控制字符等）会导致扩展加载失败。
+
+### `Language`
+
+```xml
+<Language>zh-cn</Language>
+```
+
+扩展的语言。默认值为 `en-us`。
+
+可用语言：
+
+| 语言 | 值 |
+| --- | --- |
+| English | `en-us` |
+| German | `de-de` |
+| French | `fr-be` |
+| Russian | `ru-ru` |
+| Spanish | `es-ar` |
+| Korean | `ko-kr` |
+| Japanese | `ja-jp` |
+| Chinese, simplified | `zh-cn` |
+
+### `AllowSaves`
+
+```xml
+<AllowSaves>true</AllowSaves>
+```
+
+是否允许玩家在该扩展中存档。默认值为 `true`。
+
+### `StartingVisibleNodes`
+
+```xml
+<StartingVisibleNodes>node1,node2,node3</StartingVisibleNodes>
+```
+
+游戏开始时默认可见的 Node 列表。多个 Computer ID 之间可以用逗号 `,`、空格、制表符、换行或 `/` 分隔。
+
+默认值为空（没有初始可见的 Node）。
+
+### `StartingMission`
+
+```xml
+<StartingMission>Missions/StartingMission.xml</StartingMission>
+```
+
+扩展启动时加载的 Mission 的文件路径。
+
+* 如果不需要起始 Mission，可以设为 `NONE` 或删除该元素。
+
+> \[!WARNING]
+> 如果 `StartingMission` 指定的文件不存在，扩展验证会报错。
+
+### `StartingActions`
+
+```xml
+<StartingActions>Actions/StartingActions.xml</StartingActions>
+```
+
+扩展启动时加载的 ConditionalActions 的文件路径。用于初始化，例如给玩家程序、设置 Faction 等。
+
+* 如果不需要，可以设为 `NONE` 或删除该元素。
+
+### `Description`
+
+```xml
+<Description>这是一个示例扩展的描述。</Description>
+```
+
+扩展的描述文本，会显示在 Hacknet 的扩展列表中。默认值为空。
+
+### `Faction`
+
+```xml
+<Faction>Factions/StartingFaction.xml</Faction>
+<Faction>Factions/SecondFaction.xml</Faction>
+```
+
+扩展中使用的 Faction 文件路径。可以有多个 `Faction` 元素。
+
+默认没有 Faction。
+
+### `StartsWithTutorial`
+
+```xml
+<StartsWithTutorial>False</StartsWithTutorial>
+```
+
+扩展是否以教程模式启动。默认值为 `False`。
+
+### `HasIntroStartup`
+
+```xml
+<HasIntroStartup>false</HasIntroStartup>
+```
+
+扩展启动时是否播放标准的重启启动序列（bootup sequence）。默认值为 `true`。
+
+如果项目目录下存在 Intro.txt，那么会在首次启动后逐字展示它。
+
+### `StartingTheme`
+
+```xml
+<StartingTheme>Themes/ExampleTheme.xml</StartingTheme>
+```
+
+扩展的初始主题。可以是自定义主题的文件路径，也可以是内置主题的名称。
+
+内置主题名称：`TerminalOnlyBlack`、`HacknetBlue`、`HacknetTeal`、`HacknetYellow`、`HackerGreen`、`HacknetWhite`、`HacknetPurple`、`HacknetMint`
+
+默认值为 `HacknetBlue`。
+
+### `IntroStartupSong`
+
+```xml
+<IntroStartupSong>The_Quickening</IntroStartupSong>
+```
+
+扩展启动时播放的音乐。
+
+* 引用原版音乐：直接写文件名（不含路径），适用于 `Content/Music` 和 `Content/DLC/Music`（需要 Labyrinths DLC）中的音乐。
+* 引用自定义音乐：写扩展内的相对路径，例如 `Music/MySong.ogg`。文件格式为 `.ogg`。
+
+默认值为 `null`（不播放）。
+
+### `IntroStartupSongDelay`
+
+```xml
+<IntroStartupSongDelay>2.0</IntroStartupSongDelay>
+```
+
+启动音乐的延迟播放时间（秒）。默认值为 `0`。
+
+### ESequencer 相关
+
+Sequencer 是 Hacknet 本体终局阶段使用的特殊机制，其变体 ESequencer 被专门用于扩展中。以下元素可以控制 ESequencer 的行为。
+
+#### `SequencerTargetID`
+
+```xml
+<SequencerTargetID>advExamplePC</SequencerTargetID>
+```
+
+ESequencer 的目标 Node 的 Computer ID。
+
+#### `SequencerSpinUpTime`
+
+```xml
+<SequencerSpinUpTime>10.5</SequencerSpinUpTime>
+```
+
+ESequencer 的启动时间（秒）。默认值为 `17`。
+
+#### `SequencerFlagRequiredForStart`
+
+```xml
+<SequencerFlagRequiredForStart>testFlag</SequencerFlagRequiredForStart>
+```
+
+ESequencer 启动所需的 Flag。
+
+#### `ActionsToRunOnSequencerStart`
+
+```xml
+<ActionsToRunOnSequencerStart>Actions/ThemeSwapActions.xml</ActionsToRunOnSequencerStart>
+```
+
+ESequencer 启动时执行的 ConditionalActions 的文件路径。
+
+### Workshop 相关
+
+以下元素用于 Steam 创意工坊发布。如果不需要发布到创意工坊，可以忽略。
+
+#### `WorkshopDescription`
+
+```xml
+<WorkshopDescription>这是显示在 Steam 创意工坊上的描述。最多 8000 个字符。</WorkshopDescription>
+```
+
+创意工坊页面的描述文本。最大 8000 个字符，支持换行。
+
+#### `WorkshopLanguage`
+
+```xml
+<WorkshopLanguage>English</WorkshopLanguage>
+```
+
+创意工坊条目的语言。
+
+#### `WorkshopVisibility`
+
+```xml
+<WorkshopVisibility>2</WorkshopVisibility>
+```
+
+创意工坊条目的可见性。默认值为 `2`。
+
+| 值 | 可见性 |
+| -- | ------ |
+| `0` | 公开 |
+| `1` | 仅好友可见 |
+| `2` | 仅自己可见 |
+
+#### `WorkshopTags`
+
+```xml
+<WorkshopTags>Extension</WorkshopTags>
+```
+
+创意工坊条目的标签，以逗号分隔。目前 Hacknet 创意工坊只有 "Extension" 一个分类，保持默认即可。
+
+#### `WorkshopPreviewImagePath`
+
+```xml
+<WorkshopPreviewImagePath>Logo.png</WorkshopPreviewImagePath>
+```
+
+创意工坊预览图的文件路径。
+
+* 必须位于扩展文件夹内。
+* 必须为 16:9 比例，且小于 1MB。
+* 支持 `.png`、`.jpg`、`.gif` 格式。
+
+#### `WorkshopPublishID`
+
+```xml
+<WorkshopPublishID>NONE</WorkshopPublishID>
+```
+
+创意工坊发布 ID。首次发布时由 Steam 自动填充。
+
+> \[!WARNING]
+> 不要手动修改此值。如果丢失该 ID，再次发布会被视为新条目，导致丢失所有订阅者。仅当值为 `NONE` 时才会生成新的 ID。
+
+扩展根目录下的 Logo 图片不属于 `ExtensionInfo.xml` 的一部分，见 [参考：Logo](./Logo.md)。
+
+## 参考
+
+参考：[ExtensionInfo.cs](https://github.com/UnHacknet/OpenHacknet/blob/main/Extensions/ExtensionInfo.cs)
+
+---
+
+---
+url: /reference/Logo.md
+---
+# Logo
+
+除了 `ExtensionInfo.xml`，扩展根目录下还可以包含一个 Logo 图片，由游戏加载，显示在 Hacknet 的扩展列表中。
+
+游戏加载扩展时会依次检查 `Logo.png`、`Logo.jpg`，并将找到的文件作为扩展的 Logo 图片。
+
+> \[!WARNING]
+> 源码中存在一个 bug：当 `Logo.png` 不存在而 `Logo.jpg` 存在时，代码仍然会以 `.png` 的路径打开文件，导致抛出异常。因此实际上只有 `Logo.png` 能正常工作。
+>
+> 如果把 GIF 图片改名为 `Logo.png`，可以正常渲染，但只会显示第一帧，没有动态效果。
+>
+> 参考：[ExtensionInfo.cs#L173-L191](https://github.com/UnHacknet/OpenHacknet/blob/main/Extensions/ExtensionInfo.cs#L173-L191)
+
+## 相关
+
+如果想在 Steam 创意工坊使用不同的预览图，可以通过 `WorkshopPreviewImagePath` 设置，见 [参考：ExtensionInfo#WorkshopPreviewImagePath](./ExtensionInfo.md#workshoppreviewimagepath)。
+
+---
+
+---
+url: /reference/Action.md
+---
+# Action（行为）
+
+Action 可以 实时改变游戏中的部分内容。
+
+在 Hacknet Extension 中有两种方法使用 Action：
+
+* 通过 ConditionalAction
+* 通过 Faction
+
+> \[!NOTE]
+> ConditionalActions 与 Action 都可以被称为 Action。Hacknet.wiki 认为 Action 是 ConditionalActions 的一部分。为了以示区别，方便理解他们之间的关系，本章节均不会使用 Action 来代指 ConditionalActions。
+
+## Delay
+
+部分可以被 Delay 的 Action 可以通过设置 `Delay` 和 `DelayHost` 延迟执行。Hacknet 中 Action 的延迟执行需要借助 DelayHost 来实现。DelayHost 是任意一个拥有 `FastActionHost` Daemon 的 Node。`Delay` 和 `DelayHost`皆为选填属性。
+
+* *`Delay`*?：`float`，延迟执行的时间。默认值为 `0.0`。
+* *`DelayHost`*?：`string`，用于辅助延迟执行的 DelayHost。
+
+Action `AddIRCMessage` 的 Delay 不需要 DelayHost，而是借助它的目标 Node 实现延迟执行。
+
+除了 `AddIRCMessage` 的 Delay 小于 `0` 有特殊作用外，其他类型的 Action 的 Delay 小于等于 `0` 相当于立即执行。
+
+示范中包含了 `Delay` 和 `DelayHost` 的 Action 是可以延迟执行的 Action。
+在此也使用  作为能够被 Delay 的提示。
+
+如果你想要延迟执行一个无法被 Delay 的 Action，你需要另写一个未被加载的 ConditionalActions 或使用 Faction 来实现。因为能延迟加载 ConditionalActions，所以能延迟执行其中的 Action。
+
+## 所有 Action
+
+### `LoadMission`
+
+```xml
+<LoadMission MissionName="Missions/MyMission.xml"/>
+```
+
+加载一个 Mission
+
+* `MissionName`：`string`，Mission 的路径。
+  参考：[SALoadMission.cs](https://github.com/UnHacknet/OpenHacknet/blob/main/SALoadMission.cs)
+
+### `AddConditionalActions`&#x20;
+
+```xml
+<AddConditionalActions Filepath="Actions/NextAction.xml" DelayHost="delayNode" Delay="0"/>
+```
+
+加载 ConditionalActions。
+
+* `Filepath`：`string`，加载的 ConditionalActions 的文件路径。
+
+### `RunFunction`&#x20;
+
+```xml
+<RunFunction FunctionName="changeSong" FunctionValue="2" DelayHost="delayNode" Delay="1.0"/>
+```
+
+运行一个 Function
+
+* `FunctionName`：`string`，Function 的名称。
+* *`FunctionValue`*?：`string`，Function 的参数。
+
+参考：[SARunFunction.cs](https://github.com/UnHacknet/OpenHacknet/blob/main/SARunFunction.cs)
+
+### `LaunchHackScript`&#x20;
+
+```xml
+<LaunchHackScript Filepath="Scripts/HackerScript.txt" DelayHost="delayNode" Delay="0" SourceComp="SourceComp" TargetComp="TargetComp" RequireLogsOnSource="false" RequireSourceIntact="true"/>
+```
+
+执行 HackerScript。
+
+* `Filepath`：`string`，HackerScript 文件的路径。
+* *`SourceComp`*?：`string`，攻击源 Node 的 Computer ID。
+* *`TargetComp`*?：`string`，目标 Node 的 Computer ID。
+* *`RequireLogsOnSource`*?：`bool`，目标 Node 是否需要在攻击源节点上留下日志。默认值为 `false`。
+* *`RequireSourceIntact`*?：`bool`，攻击源 Node 系统文件 `netcfgx.dll` 是否需要完好无损。默认值为 `false`。
+
+> \[!WARNING]
+> 选填项的选填规则较为特殊。详情见：（WIP）HackerScript
+>
+> 当 HackerScript 作为立即执行的 StartingActions（ `Condition` 为 `Instantly`、不使用 Delay 或 Delay 时间为 `0`），会导致游戏内终端出现 `NullReferenceException`。
+
+具体使用详情见：（WIP）HackerScript
+
+参考：[SALaunchHackScript.cs](https://github.com/UnHacknet/OpenHacknet/blob/main/SALaunchHackScript.cs)
+
+### `AddMissionToHubServer`
+
+```xml
+<AddMissionToHubServer MissionFilepath="Missions/MyMission.xml" TargetComp="missionHub" AssignmentTag="Kaguya" StartsComplete="true"/>
+```
+
+将一个 Mission 添加到 MissionHub/DHS 的任务列表中。
+
+* `MissionFilepath`：`string`，Mission 的文件路径。
+* `TargetComp`：`string`，HubServer 的 Computer ID。
+* *`AssignmentTag`*?：`string`，分配Tag。如果是给 MissionHub 添加任务，用 `"top"` 就会使任务置顶。给 DHS 添加，就会提示分配给了谁。
+* *`StartsComplete`*?：`bool`，是否开始完成。默认值为 `false`。
+
+> \[!NOTE]
+> MissionHub 是拥有 `missionListingServer` 或 `missionHubServer` Daemon 的 Node，在游戏中作为“任务中心”。DHS 此处代指有 `DHSDaemon` Daemon 的 Node。
+
+> \[!NOTE]
+> 通过此 Action 加入的任务，其 `missionStart` 在**加载时不会执行**（扩展模式下未显式设置 `suppress="false"` 时，该属性默认为 `true`），而是在玩家**接取**该任务时执行。详见 [Mission](Mission.md) 的 `missionStart` 一节。
+
+参考：[SAAddMissionToHubServer.cs](https://github.com/UnHacknet/OpenHacknet/blob/main/SAAddMissionToHubServer.cs)
+
+### `RemoveMissionFromHubServer`
+
+```xml
+<RemoveMissionFromHubServer MissionFilepath="Missions/HubMission.xml" TargetComp="missionHub"/>
+```
+
+将一个 Mission 从 HubServer 移除
+
+* `MissionFilepath`：`string`，Mission 的文件路径。
+* `TargetComp`：`string`，HubServer 的 Computer ID。
+
+> \[!NOTE]
+> HubServer 是拥有 `missionListingServer`, `missionHubServer` 或 `DHSDaemon` Daemon 的 Node，在游戏中作为“任务中心”。
+
+参考：[SARemoveMissionFromHubServer.cs](https://github.com/UnHacknet/OpenHacknet/blob/main/SARemoveMissionFromHubServer.cs)
+
+### `AddThreadToMissionBoard`
+
+```xml
+<AddThreadToMissionBoard ThreadFilepath="Docs/Thread.txt" TargetComp="elSec"/>
+```
+
+将一个 Thread 添加到 MessageBoard（虽然 Action 的名称里面是 MissionBoard）。MessageBoard 服务器是拥有 `messageBoard` Daemon 的 Node。
+
+* `ThreadFilepath`：`string`，Thread 的文件路径。
+* `TargetComp`：`string`，MessageBoard 服务器的 Computer ID。
+
+参考：[SAAddThreadToMissionBoard.cs](https://github.com/UnHacknet/OpenHacknet/blob/main/SAAddThreadToMissionBoard.cs)
+
+### `AddIRCMessage`&#x20;
+
+```xml
+<AddIRCMessage Author="Kaguya" TargetComp="ircNode" Delay="1">HI</AddIRCMessage>
+```
+
+将一条 IRC 消息发送到指定的 IRC 服务器。IRC 服务器是拥有 `IRCDaemon` 或 `DHSDaemon` Daemon 的 Node。
+
+* *`Author`*?：`string`，消息的发送者。默认为 `""`。
+* `TargetComp`：`string`，IRC 服务器的 Computer ID。
+* *`Delay`*?：`float`，延迟执行的时间。默认值为 `0.0`。
+  * AddIRCMessage 不需要通过 `DelayHost` 延迟执行。
+  * 如果 `Delay` 为负数，消息会立即发送，时间会是 Delay 绝对值之后的时间。
+* 内容：消息的内容。
+
+> \[!WARNING]
+> 内容不能为空。
+
+> \[!IMPORTANT]
+> 根据源码，游戏原本意图让负数的 `Delay` 显示过去的时间，但代码存在错误，实际显示的时间为 “当前时间 + |Delay|”（Delay 是负数，减去一个负数相当于加上它的绝对值）。参考 [SAAddIRCMessage.cs#L34-L47](https://github.com/UnHacknet/OpenHacknet/blob/main/SAAddIRCMessage.cs#L34-L47)
+
+消息内容支持添加附件。
+
+添加 note 附件：
+
+```xml
+<AddIRCMessage Author="Kaguya" TargetComp="ircNode" Delay="1">!ATTACHMENT:note#%#Note Title#%#Note Content line1
+Note line 2
+Note line 3</AddIRCMessage>
+```
+
+添加 link 附件：
+
+```xml
+<AddIRCMessage Author="Kaguya" TargetComp="ircNode" Delay="1">!ATTACHMENT:link#%#enemyNode#%#123.123.123.123</AddIRCMessage>
+```
+
+添加 account 附件：
+
+```xml
+<AddIRCMessage Author="Kaguya" TargetComp="ircNode" Delay="1">!ATTACHMENT:account#%#enemyNode#%#123.123.123.123#%#username#%#password</AddIRCMessage>
+```
+
+参考：[SAAddIRCMessage.cs](https://github.com/UnHacknet/OpenHacknet/blob/main/SAAddIRCMessage.cs)
+
+### `AddAsset`
+
+```xml
+<AddAsset FileName="test" FileContents="test" TargetComp="playerComp" TargetFolderpath="home"/>
+```
+
+向目标 Node 添加一个 Asset
+
+* `FileName`：`string`，Asset 的文件名。
+* `FileContents`：`string`，Asset 的内容。无法换行。
+* `TargetComp`：`string`，目标 Node 的 Computer ID。
+* `TargetFolderpath`：`string`，目标 Node 的文件夹路径。
+
+> \[!WARNING]
+> Hacknet 不会判断 `FileName` 或 `FileContents` 是否存在。`FileName` 或 `FileContents` 没填会导致 `NullReferenceException`。
+
+参考：[SAAddAsset.cs](https://github.com/UnHacknet/OpenHacknet/blob/main/SAAddAsset.cs)
+
+### `AppendToFile`&#x20;
+
+```xml
+<AppendToFile TargetComp="companyWhitelist" TargetFolderpath="Whitelist" TargetFilename="list.txt" DelayHost="delayNode" Delay="0">#PLAYER_IP#</AppendToFile>
+```
+
+向文件追加内容。
+
+* `TargetComp`：`string`，目标 Node 的 Computer ID。
+* `TargetFolderpath`：`string`，目标文件的路径。
+* `TargetFilename`：`string`，目标文件的文件名。
+* 内容：追加到文件的内容。
+
+> \[!WARNING]
+> Hacknet 没有判断 `TargetComp`, `TargetFolderpath`, `TargetFilename` 是否存在。如果这些 attributes 不存在，会导致 `NullReferenceException`。
+
+参考：[SAAppendToFile.cs](https://github.com/UnHacknet/OpenHacknet/blob/main/SAAppendToFile.cs)
+
+### `DeleteFile`&#x20;
+
+```xml
+<DeleteFile TargetComp="playerComp" FilePath="home" FileName="deleteme.txt" DelayHost="delayNode" Delay="0"/>
+```
+
+删除文件。
+
+* `TargetComp`：`string`，目标 Node 的 Computer ID。
+* `FilePath`：`string`，文件路径。
+* `FileName`：`string`，文件名。
+
+> \[!WARNING]
+> `FilePath` 不填会导致 `NullReferenceException`。
+
+参考：[SADeleteFile.cs](https://github.com/UnHacknet/OpenHacknet/blob/main/SADeleteFile.cs)
+
+### `CopyAsset`
+
+```xml
+<CopyAsset DestFilePath="home" DestFileName="copycat.txt" DestComp="playerComp" SourceComp="assetNode" SourceFileName="source.txt" SourceFilePath="home/copy"/>
+```
+
+复制文件。
+
+* `DestFilePath`：`string`，目标文件路径。
+* *`DestFileName`*?：`string`，目标文件的文件名。默认用 `SourceFileName` 的值。
+* `DestComp`：`string`，目标 Node 的 Computer ID。
+* `SourceComp`：`string`，源 Node 的 Computer ID。
+* `SourceFileName`：`string`，源文件的文件名。
+* `SourceFilePath`：`string`，源文件的路径。
+
+参考：[SACopyAsset.cs](https://github.com/UnHacknet/OpenHacknet/blob/main/SACopyAsset.cs)
+
+### `KillExe`&#x20;
+
+```xml
+<KillExe DelayHost="delayNode" Delay="0" ExeName="*"/>
+```
+
+结束指定进程。
+
+* *`ExeName`*?：`string`，进程名。默认值为 `""`。`""` 和 `"*"` 都表示结束所有进程。
+
+参考：[SAKillExe.cs](https://github.com/UnHacknet/OpenHacknet/blob/main/SAKillExe.cs)
+
+### `CrashComputer`&#x20;
+
+```xml
+<CrashComputer TargetComp="playerComp" CrashSource="enemyNode" DelayHost="delayNode" Delay="0"/>
+```
+
+使目标 Node 被 Forkbomb
+
+* `TargetComp`：`string`，目标 Node 的 Computer ID。
+* `CrashSource`：`string`，攻击者 Node 的 Computer ID。
+
+> \[!NOTE]
+> 其实 `TargetComp` 和 `CrashSource` 都是选填，当 `TargetComp` 存在时 `CrashSource` 必填。不填 `TargetComp` 啥也不发生。
+
+参考：[SACrashComputer.cs](https://github.com/UnHacknet/OpenHacknet/blob/main/SACrashComputer.cs)
+
+### `ChangeAlertIcon`&#x20;
+
+```xml
+<ChangeAlertIcon Target="mainHub" Type="irchub" DelayHost="delayNode" Delay="0"/>
+```
+
+更改 AlertIcon（右上角的图标）以及其关联的 Node。
+
+* `Target`：`string`，关联的 Node 的 Computer ID。
+* `Type`：`"mail" | "irc" | "irchub" | "board"`，AlertIcon 的类型，需要与关联的 Node 类型相同。默认值为 `""`。`""` 表示不更改 AlertIcon。
+
+类型与关联的 Node 所使用的 Daemon 的对应关系：
+| Type | Daemon |
+| ---- | ------ |
+| `"mail"` | `mailServer` |
+| `"irc"` | `IRCDaemon` |
+| `"irchub"` | `DHSDaemon` |
+| `"board"` | `messageBoard` |
+
+> \[!WARNING]
+> Hacknet 没有判断 `Target` 是否存在。如果 `Target` 不存在，会导致 `NullReferenceException`。
+>
+> Hacknet 也没有判断 Type 类型是否与关联的 Node 类型相同。如果 Type 类型与关联的 Node 类型不同，可能会导致游戏内 AlertIcon 无法正常使用。
+>
+> 如果 ChangeAlertIcon 作为立即执行的 StartingActions（ `Condition` 为 `Instantly`、不使用 Delay 或 Delay 时间为 `0`），会导致 `NullReferenceException`。
+
+参考：[SAChangeAlertIcon.cs](https://github.com/UnHacknet/OpenHacknet/blob/main/SAChangeAlertIcon.cs)
+
+### `ShowNode`&#x20;
+
+```xml
+<ShowNode DelayHost="delayNode" Delay="0" Target="storageServer"/>
+```
+
+显示指定的 Node。
+
+* `Target`：`string`，目标 Node 的 Computer ID。
+
+参考：[SAShowNode.cs](https://github.com/UnHacknet/OpenHacknet/blob/main/SAShowNode.cs)
+
+### `HideNode`&#x20;
+
+```xml
+<HideNode DelayHost="delayNode" Delay="0" TargetComp="companySecurity"/>
+```
+
+隐藏指定的 Node。
+
+* `TargetComp`：`string`，目标 Node 的 Computer ID。
+
+参考：[SAHideNode.cs](https://github.com/UnHacknet/OpenHacknet/blob/main/SAHideNode.cs)
+
+### `HideAllNodes`&#x20;
+
+```xml
+<HideAllNodes DelayHost="delayNode" Delay="0"/>
+```
+
+隐藏所有 Node。
+
+参考：[SAHideAllNodes.cs](https://github.com/UnHacknet/OpenHacknet/blob/main/SAHideAllNodes.cs)
+
+### `ChangeNetmapSortMethod`&#x20;
+
+```xml
+<ChangeNetmapSortMethod Method="scatter" DelayHost="delayNode" Delay="0" />
+```
+
+切换 Netmap 排序方式。
+
+* *`Method`*?: 值与对应排序方式如下：
+
+| Method | 排序方式 |
+| --- | --- |
+| `scatter` | 散点图 |
+| `grid` / 默认 | 网格图 |
+| `seqgrid` / `scangrid` / `sequencegrid` / `sequence grid` | 扫描序列网格 |
+| `chaos` | 混乱 |
+
+### `SwitchToTheme`&#x20;
+
+```xml
+<SwitchToTheme ThemePathOrName="Themes/ExampleTheme.xml" FlickerInDuration="2.0" DelayHost="delayNode" Delay="0"/>
+```
+
+切换到指定的主题，可以有新旧主题来回交替的闪烁效果。
+
+* *`ThemePathOrName`*?：`string`，主题的路径或名称。默认为默认主题。
+* *`FlickerInDuration`*?：`float`，主题切换时的闪烁时间。默认值为 `2.0`。
+
+主题名称见：（WIP）Theme.md
+
+参考：[SASwitchToTheme.cs](https://github.com/UnHacknet/OpenHacknet/blob/main/SASwitchToTheme.cs)
+
+### `SetLock`&#x20;
+
+```xml
+<SetLock DelayHost="delayNode" Delay="0" Module="terminal" IsLocked="true" IsHidden="false"/>
+```
+
+设置 Hacknet 指定 UI 模块的锁定状态。
+
+* `Module`：`"terminal" | "ram" | "netmap" | "display"`，模块名。
+* *`IsLocked`*?：`bool`，是否锁定。默认值为 `false`。
+* *`IsHidden`*?：`bool`，是否隐藏。默认值为 `false`。
+
+参考：[SASetLock.cs](https://github.com/UnHacknet/OpenHacknet/blob/main/SASetLock.cs)
+
+### `StartScreenBleedEffect`&#x20;
+
+```xml
+<StartScreenBleedEffect AlertTitle="Sequencer Attack" CompleteAction="Actions/ScreenBleedFailed.xml" TotalDurationSeconds="200" DelayHost="delayNode" Delay="0">Break into the Moonshine servers
+Delete all files and backups
+Get out of there!</StartScreenBleedEffect>
+```
+
+开始 `ScreenBleed` 效果。与紧急恢复模式下的相似效果互不干扰。
+
+* `AlertTitle`：`string`，提示标题。在 Hacknet 中用于显示标题的字体，字母大小写的形态不同。大写字母是英文字母，部分小写字母像是西里尔字母。如果你发现标题包含了不像是英文的字母，可能是因为用了小写字母。
+* *`CompleteAction`*?：`string`，`ScreenBleed` 结束后加载的 ConditionalActions 的文件路径。被 Action `CancelScreenBleedEffect` 取消时不会加载。
+* *`TotalDurationSeconds`*?：`float`，总持续时间（秒）。默认值为 `200`。
+* 内容：左下角的提示内容。最多三行。
+
+> \[!WARNING]
+> 没填 `AlertTitle` 会导致游戏黑屏。
+
+参考：[SAScreenBleedEffect.cs](https://github.com/UnHacknet/OpenHacknet/blob/main/SAScreenBleedEffect.cs)
+
+### `CancelScreenBleedEffect`&#x20;
+
+```xml
+<CancelScreenBleedEffect DelayHost="delayNode" Delay="0"/>
+```
+
+取消 `ScreenBleed` 效果。
+
+参考：[SACancelScreenBleedEffect.cs](https://github.com/UnHacknet/OpenHacknet/blob/main/SACancelScreenBleedEffect.cs)
+
+### `GivePlayerUserAccount`&#x20;
+
+```xml
+<GivePlayerUserAccount DelayHost="delayNode" Delay="0" TargetComp="teamHub" Username="#PLAYERNAME#"/>
+```
+
+给予玩家某节点的账号。可以在登录页面直接使用。
+
+* `TargetComp`：`string`，目标 Node 的 Computer ID。
+* `Username`：`string`，用户名。
+
+参考：[SAGivePlayerUserAccount.cs](https://github.com/UnHacknet/OpenHacknet/blob/main/SAGivePlayerUserAccount.cs)
+
+### `ChangeIP`&#x20;
+
+```xml
+<ChangeIP  DelayHost="delayNode" Delay="0" TargetComp="finalNode" NewIP="123.123.123.123"/>
+```
+
+更改指定 Node 的 IP 地址。
+
+* `TargetComp`：`string`，目标 Node 的 Computer ID。
+* *`NewIP`*?：`string`，新的 IP 地址。如果不填、为空或者以`#RANDOM`开头，会随机生成一个 IP 地址。
+
+参考：[SAChangeIP.cs](https://github.com/UnHacknet/OpenHacknet/blob/main/SAChangeIP.cs)
+
+### `SaveGame`&#x20;
+
+```xml
+<SaveGame DelayHost="delayNode" Delay="0"/>
+```
+
+保存游戏。
+
+参考：[SASaveGame.cs](https://github.com/UnHacknet/OpenHacknet/blob/main/SASaveGame.cs)
+
+---
+
+---
+url: /reference/ConditionalActions.md
+---
+# ConditionalActions（条件行为）
+
+ConditionalActions 是使用 Action 的一种方法。
+
+ConditionalActions 会使用 Condition 给 Action 设置条件。ConditionalActions 被游戏加载后，Condition 会在满足后执行它的 Action。
+
+ConditionalActions 可以在游戏开始，Mission 中或者 Action 中加载，非常方便。
+
+描述 ConditionalActions 的 XML 结构如下：
+
+```xml
+<ConditionalActions>
+
+    <!-- Condition -->
+    <Instantly needsMissionComplete="false">
+
+        <!-- Action -->
+        <SaveGame DelayHost="delayNode" Delay="0"/>
+        ...
+    </Instantly>
+
+    ...
+</ConditionalActions>
+```
+
+## 所有 Condition
+
+### `Instantly`
+
+```xml
+<Instantly needsMissionComplete="false"></Instantly>
+```
+
+`Instantly` 会在 `Action` 被加载后立即触发。
+
+* *`needsMissionComplete`*?：`bool`，描述是否需要处于任务完成状态才能触发。默认值为 `false`。
+
+参考：[SCInstantly.cs](https://github.com/UnHacknet/OpenHacknet/blob/main/SCInstantly.cs)
+
+### `OnConnect`
+
+```xml
+<OnConnect target="targetComp" needsMissionComplete="false" requiredFlags="flag1,flag2"></OnConnect>
+```
+
+OnConnect 会在连接到目标 Node 后触发。
+
+* `target`：`string`，描述目标 Node 的 Computer ID。
+* *`needsMissionComplete`*?：`bool`，描述是否需要处于任务完成状态才能触发。默认值为 `false`。
+* *`requiredFlags`*?：`string`，描述需要满足的 flags 。多个 flags 之间用逗号 `,` 分隔。与 `HasFlags` 不同，为空或不填则不检查Flags。
+
+参考：[SCOnConnect.cs](https://github.com/UnHacknet/OpenHacknet/blob/main/SCOnConnect.cs)
+
+### `OnDisconnect`
+
+```xml
+<OnDisconnect target="targetComp"></OnDisconnect>
+```
+
+OnDisconnect 会在从目标 Node 断开连接后触发。
+
+* `target`：`string`，描述目标 Node 的 Computer ID。
+
+> \[!WARNING]
+> `target` 如果填 `playerComp`，那么在连接到 `playerComp` 时也会触发。因为 `disconnect` 的本质，其实就是连接到 `playerComp`。
+
+参考：[SCOnDisconnect.cs](https://github.com/UnHacknet/OpenHacknet/blob/main/SCOnDisconnect.cs)
+
+### `HasFlags`
+
+```xml
+<HasFlags requiredFlags="flag1,flag2"></HasFlags>
+```
+
+HasFlags 会在满足所有 flags 时触发。
+
+* *`requiredFlags`*?：`string`，描述需要满足的 flags 。多个 flags 之间用逗号 `,` 分隔。为空或不填则立即执行。
+
+参考：[SCHasFlags.cs](https://github.com/UnHacknet/OpenHacknet/blob/main/SCHasFlags.cs)
+
+### `OnAdminGained`
+
+```xml
+<OnAdminGained target="targetComp"></OnAdminGained>
+```
+
+OnAdminGained 会在获取目标 Node 的管理员权限后触发。
+
+* `target`：`string`，描述目标 Node 的 Computer ID。
+
+参考：[SCOnAdminGained.cs](https://github.com/UnHacknet/OpenHacknet/blob/main/SCOnAdminGained.cs)
+
+## 注意事项
+
+你可能在一些地方见到过 Condition `DoesNotHaveFlags`。它确实在 Hacknet 中有相关代码，但是没有在 Hacknet 中实装。
+
+参考：[SCDoesNotHaveFlags.cs](https://github.com/UnHacknet/OpenHacknet/blob/main/SCDoesNotHaveFlags.cs) [SerializableCondition.cs#L50-L55](https://github.com/UnHacknet/OpenHacknet/blob/main/SerializableCondition.cs#L50-L55)
+
+---
+
+---
+url: /reference/Faction.md
+---
+# Faction（阵营）
+
+Faction 是使用 Action 的一种方法。与 ConditionalActions 的区别主要在于**条件不同**。
+
+Faction 在一些参考资料里面也被翻译为 派系 。阵营更直观一些，故在本站采取 阵营 翻译。
+
+Faction 会使用 FactionAction 给 Action 设置条件。FactionAction 可以根据玩家在该 Faction 中的 Rank（排名，游戏内又叫做 Point（积分））来决定是否执行它的 Action。
+
+与 ConditionalActions 不同，Faction 不可以随时加载，而只能在游戏开始的时候加载。
+
+描述 Faction 的 XML 结构如下：
+
+```xml
+<CustomFaction name="Faction Name" id="Faction_ID" playerVal="0">
+
+    <!-- FactionAction -->
+    <Action ValueRequired="1">
+
+        <!-- Action -->
+        <SaveGame DelayHost="delayNode" Delay="0"/>
+        ...
+    </Action>
+    ...
+
+</CustomFaction>
+```
+
+## FactionAction
+
+```xml
+<Action ValueRequired="1" Flags="flag1,flag2"></Action>
+```
+
+FactionAction 类似一个特殊的 Condition。
+
+* `ValueRequired`：`int`，Rank > `ValueRequired` 时会执行 Action。默认值为 `10`。
+* *`Flags`*?：`string`，描述需要满足的 flags 。多个 flags 之间用逗号 `,` 分隔。
+
+参考：[CustomFactionAction.cs](https://github.com/UnHacknet/OpenHacknet/blob/main/Factions/CustomFactionAction.cs)
+
+---
+
+---
+url: /reference/Mission.md
+---
+# Mission （任务）
+
+教程见 [教程：Mission](../extension-tutorial/Mission.md)
+
+描述 Mission 的 XML 结构大致如下：
+
+```xml
+<mission id="testMission" activeCheck="true" shouldIgnoreSenderVerification="false">
+
+  <!-- Goal -->
+  <goals>...</goals>
+
+  <!-- MissionStart & MissionEnd -->
+  <missionStart val="7">changeSong</missionStart>
+  <missionEnd>addRank</missionEnd>
+
+  <!-- NextMission -->
+  <nextMission IsSilent="false">NONE</nextMission>
+
+  <!-- BranchMission -->
+  <branchMissions>...</branchMissions>
+
+  <!-- Posting -->
+  <posting title="Post Title">Post Content</posting>
+
+  <!-- Email -->
+  <email>...</email>
+</mission>
+```
+
+> \[!NOTE]
+> 不要修改 `<mission>` 元素 的 子元素 的顺序。
+
+```xml
+<mission id="testMission" activeCheck="true" shouldIgnoreSenderVerification="false"></mission>
+```
+
+Mission 的根元素。
+
+* *`id`*?：`string`, 任务的标识符。似乎不填不会影响扩展正常进行。
+* *`activeCheck`*?：`bool`, 是否持续检查任务状态。一般玩家尝试回复任务时才会检查任务是否完成。
+* *`shouldIgnoreSenderVerification`*?：`bool`, 是否忽略发送者验证，默认 `false`。为 `true` 时，玩家可以回复任意邮件来完成任务，而不是必须是任务当前的邮件。
+
+## `goals`
+
+见 [Goal](Goal.md)
+
+## *`missionStart`*?&#x20;
+
+```xml
+<missionStart val="7" suppress="true">changeSong</missionStart>
+```
+
+任务被加载后执行的 Function。不使用可以把 `<missionStart>` 元素删除。
+
+* *`val`*?：`int`，Function 的参数。默认值为 `0`。
+* *`suppress`*?：`bool`，默认值取决于运行模式：**扩展模式下为 `true`，主游戏模式下为 `false`**。
+  * ⚠️ 因此在扩展中**不写该属性等同于 `suppress="true"`**。
+  * `true`：加载时仅记录、不执行，等到「激活时机」才执行，包括：
+    * 通过 `nextMission` 进入的任务
+    * 扩展启动时的起始任务
+    * 在 MissionHubServer / MissionListingServer / DLCHubServer 等节点**接取**任务时 —— 激活由接取动作直接触发，**不以发送任务邮件为条件**（DHS 的接取不调用 `sendEmail`；另两者会调用，但是否真正发出取决于本任务的 `IsSilent`，见下文 `nextMission` 一节）
+    * ⚠️ 通过 [`LoadMission`](Action.md) Action 加载的任务不在上述路径中，其 `missionStart` **不会执行**；有需要时应显式写 `suppress="false"`
+  * `false`：任务文件**每次被解析时都会执行**。解析发生在任务的各种加载路径上，例如：
+    * 存读档 / 新游戏时的任务加载
+    * **DHS（`DLCHubServer`）每次连接**：`navigatedTo` → `ReadActiveMissions` → `MissionSerializer.restoreMissionFromFile` → 重新解析任务 XML
+    * 玩家接取 DHS 任务时（`PlayerAcceptMission` 中会再次解析任务文件）
+    * 注意 `MissionHubServer` / `MissionListingServer` 的任务恢复发生在 `loadInit`（随存档加载），**不随每次连接重载**
+  * 因此 hub / DHS 中的任务应使用 `suppress="true"`（**扩展模式下**可省略该属性；主游戏模式下省略等同于 `false`）
+
+::: details (官方介绍)
+官方是这么介绍的：
+
+```
+If suppress is set to true, it will only activate when the mission email is sent - 
+otherwise it will activate when it is loaded. This is very important to remember when 
+writing missions designed for use in a hub server - those missions are loaded when the save game is loaded
+or a new game is started.
+```
+
+实测补充：向 MissionHub 添加的 Mission 若**省略 `suppress` 属性**，其 `missionStart` 不会在加载时执行 —— 因为扩展模式下该属性默认为 `true`（任务被抑制，需等玩家接取时才激活）。显式写 `suppress="false"` 时，如上文所述，任务文件每次被解析都会执行。
+
+参考：[ComputerLoader.cs](https://github.com/UnHacknet/OpenHacknet/blob/main/ComputerLoader.cs)、[MissionSerializer.cs](https://github.com/UnHacknet/OpenHacknet/blob/main/MissionSerializer.cs)、[ActiveMission.cs](https://github.com/UnHacknet/OpenHacknet/blob/main/ActiveMission.cs)、[MissionHubServer.cs](https://github.com/UnHacknet/OpenHacknet/blob/main/MissionHubServer.cs)
+:::
+
+## *`missionEnd`*?&#x20;
+
+```xml
+<missionEnd val="1">addRank</missionEnd>
+```
+
+任务完成后执行的 Function。不使用可以把 `<missionEnd>` 元素删除。
+
+* *`val`*?：`int`，函数的参数。默认值为 `0`。
+
+## `nextMission`
+
+```xml
+<nextMission IsSilent="false">Missions/NextMission.xml</nextMission>
+```
+
+任务完成后加载的下一个 Mission。
+
+* *`IsSilent`*?：`bool`，默认值为 `false`。`true` 时 **当前** Mission 加载的时候不会发送邮件，而不是下一个 Mission。
+
+> \[!IMPORTANT]
+> `IsSilent` 为 `true` 时 **当前** Mission 加载的时候不会发送邮件，而不是下一个 Mission。
+
+## `branchMissions`
+
+见 [BranchMissions](BranchMissions.md)
+
+## *`posting`*?&#x20;
+
+```xml
+<posting title="Do the Extension Test Mission" reqs="Flags1,Flags2" requiredRank="3" >
+This is the body text of the posting that will appear when the mission is clicked on. It should contain a basic outline, with any warnings the player needs.
+Once accepted, the email should contain full details.
+</posting>
+```
+
+当 Mission 添加进 MissionListingServer、MissionHubServer 或 DHS 的任务列表中会显示的内容。
+
+* *`title`*?：`string`，任务的标题。
+* *`reqs`*?：`string`，描述需要满足的 flags 。多个 flags 之间用逗号 `,` 分隔。
+* *`requiredRank`*?：`int`，需要达到的 Rank。如果玩家当前不属于任何 `Faction`，则无用。
+* 内容：任务的描述。
+
+如果你不写 posting 元素，任务列表中会显示这个任务标题是 `UNKNOWN`，内容是 `UNKNOWN`。
+
+## `email`
+
+见 [MissionEmail](MissionEmail.md)
+
+---
+
+---
+url: /reference/Goal.md
+---
+# Goal （目标）
+
+教程见 [教程：Goal](../extension-tutorial/Goal.md)
+
+Goal 描述 Mission 的完成条件。
+
+所有 Goal 都是 `<goals>` 的子元素。XML 结构示范如下：
+
+```xml
+<mission>
+  
+  <goals>
+    <!-- Goal -->
+    <goal type="clearfolder" target="advExamplePC" path="home"/>
+    <goal type="delay" time="10.0"/>
+    ...
+  </goals>
+
+  ...
+</mission>
+```
+
+不使用 Goal 可以留空：
+
+```xml
+<goals></goals>
+```
+
+## 所有 Goal
+
+所有 Goal 都有 `type` 属性，类型为 `string`，用于表示 Goal 的类型。
+
+### `FileDeletion`
+
+```xml
+<goal type="filedeletion" target="advExamplePC" file="asdf.txt" path="home"/>
+```
+
+删除目标文件。目标文件必须存在。
+
+* `target`：`string`, 目标 Node 的 Computer ID。
+* `file`：`string`, 目标文件的路径。
+* `path`：`string`, 目标文件所在目录。
+
+### `FileDownload`
+
+```xml
+<goal type="filedownload" target="advExamplePC" file="downloadFile.txt" path="home"/>
+```
+
+下载目标文件。目标文件必须存在。
+
+* `target`：`string`, 目标 Node 的 Computer ID。
+* `file`：`string`, 目标文件的路径。
+* `path`：`string`, 目标文件所在目录。
+
+### `FileChange`
+
+```xml
+<goal type="filechange" target="advExamplePC" file="changeFile.txt" path="home" keyword="data" removal="true" caseSensitive="true"/>
+```
+
+修改目标文件。
+
+* `target`：`string`, 目标 Node 的 Computer ID。
+* `file`：`string`, 目标文件的路径。
+* `path`：`string`, 目标文件所在目录。
+* `keyword`：`string`, 关键词。
+* *`removal`*?：`bool`, 要求是否是删除关键词，还是添加关键词。默认 `false`。为 `true` 时要求删除关键词；为 `false` 时要求添加关键词。
+* `caseSensitive`：`bool`, 是否区分大小写。默认 `false`。
+
+如果你想实现 替换，你可以写两个 Goal 来分别要求删除某关键词和添加某关键词。 例如 `extension` → `data`：
+
+```xml
+<goal type="filechange" target="advExamplePC" file="changeFile.txt" path="home" keyword="extension"/>
+<goal type="filechange" target="advExamplePC" file="changeFile.txt" path="home" keyword="data" removal="true" caseSensitive="true"/>
+```
+
+### `ClearFolder`
+
+```xml
+<goal type="clearfolder" target="advExamplePC" path="home"/>
+```
+
+清空目标文件夹。
+
+* `target`：`string`, 目标 Node 的 Computer ID。
+* `path`：`string`, 目标文件夹的路径。
+
+### `GetAdmin`
+
+```xml
+<goal type="getadmin" target="advExamplePC"/>
+```
+
+获取目标 Node 的管理员权限并且保持登陆状态。
+
+* `target`：`string`, 目标 Node 的 Computer ID。
+
+> \[!IMPORTANT]
+>
+> 这其实是要求节点处于管理员登陆状态。某些情况下（比如 Node 设置了 `<admin type="fast" resetPassword="true">`），玩家断开连接后会失去管理员登陆状态。此时不会满足该 Goal。
+
+### `GetString`
+
+```xml
+<goal type="getstring" target="password" />
+```
+
+要求回复字符串。
+
+* `target`：`string`, 要求回复的字符串。
+
+### `Delay`
+
+```xml
+<goal type="delay" time="10.0"/>
+```
+
+延迟执行。
+
+* `time`：`float`, 延迟时间，单位为秒。
+
+### `HasFlag`
+
+```xml
+<goal type="hasflag" target="flagName"/>
+```
+
+要求目标 Node 具有指定的 Flag。
+
+* `target`：`string`, 目标 Flag。不能一个 Goal 填多个。
+
+### `FileUpload`
+
+```xml
+<goal type="fileupload" target="advExamplePC" file="asdf2.dec" path="home" destTarget="introFactionHomeNode" destPath="home" decrypt="true" decryptPass="password"/>
+```
+
+上传目标文件。
+
+* `target`：`string`, 源文件所在 Node 的 Computer ID。
+* `file`：`string`, 源文件名。
+* `path`：`string`, 源文件所在目录。
+* `destTarget`：`string`, 上传到的目标位置所在 Node 的 Computer ID。
+* `destPath`：`string`, 目标位置目录。
+* *`decrypt`*?：`bool`, 是否解密上传的文件。默认 `false`。为 `true` 时认为要解密文件并且上传。
+* *`decryptPass`*?：`string`, 解密密码。如果解密上传的文件且这个文件有密码，必须填写密码。
+
+### `AddDegree`
+
+```xml
+<goal type="AddDegree" owner="John Stalvern" degree="Masters in Digital Security" uni="Manchester University" gpa="3.0"/>
+```
+
+添加学位。学位的所有者的定义基于名字 —— 在 People 中定义相关人物信息，并在此处通过名字进行引用。
+
+* `owner`：`string`, 学位的所有者。
+* `degree`：`string`, 学位的名称。
+* `uni`：`string`, 学位的学校。
+* `gpa`：`float`, 学位的 GPA。
+
+> \[!IMPORTANT]
+>
+> 该 Goal 要求存在一个学术服务器，并满足以下要求：
+>
+> 1. Computer ID 必须是 `"academic"`。
+> 2. 必须拥有 `academicDatabase` Daemon。
+
+### `WipeDegrees`
+
+```xml
+<goal type="wipedegrees" owner="John Stalvern"/>
+```
+
+删除目标人物的所有学位。
+
+* `owner`：`string`, 目标人物的名字。
+
+> \[!IMPORTANT]
+>
+> 该 Goal 要求存在一个学术服务器，并满足以下要求：
+>
+> 1. Computer ID 必须是 `"academic"`。
+> 2. 必须拥有 `academicDatabase` Daemon。
+
+### `SendEmail`
+
+```xml
+<goal type="sendemail" mailServer="jmail" recipient="mailuser123" subject="Email Subject!" body="Email Body!"/>
+```
+
+发送邮件到某邮箱。一般是玩家从医疗数据库中发送的医疗数据。
+
+* `mailServer`：`string`, 邮件服务器的 Computer ID。
+* `recipient`：`string`, 收件人。
+* `subject`：`string`, 邮件主题。
+* *`body`*?：`string`, 邮件内容。默认空字符串。
+
+### `GetAdminPasswordString` DLC Required
+
+```xml
+<goal type="getadminpasswordstring" target="advExamplePC"/>
+```
+
+要求回复目标 Node 的管理员密码。
+
+* `target`：`string`, 目标 Node 的 Computer ID。
+
+> \[!IMPORTANT]
+> 玩家必须安装了 Hacknet Labyrinths DLC 才可以使用
+
+---
+
+---
+url: /reference/MissionEmail.md
+---
+# MissionEmail
+
+MissionEmail 在 `<email>` 标签中定义。XML 大致结构如下：
+
+```xml
+<mission>
+  ...
+
+  <email>
+    <sender>SomeSender</sender>
+    <subject>I'm Subject</subject>
+    <body>I'm Body</body>
+
+    <attachments>
+      <note title="An example note">example note</note>
+      ...
+    </attachments>
+  </email>
+  
+</mission>
+```
+
+* `<sender>`内容：发件人
+
+* `<subject>`内容：主题
+
+* `<body>`内容：正文
+
+## `attachments`
+
+附件。
+
+```xml
+<attachments>
+  <note title="An example note">example note</note>
+  <link comp="missionTestNode" />
+  <account comp="missionTestNode" user="TestUser" pass="testpass" />
+  ...
+</attachments>
+```
+
+### `note`
+
+```xml
+<note title="An example note">example note</note>
+```
+
+Note 附件，玩家可以快捷把内容添加到 Notes 中。
+
+* `title`：`string`, Note 标题。
+* 内容：Note 内容。
+
+### `link`
+
+```xml
+<link comp="missionTestNode" />
+```
+
+IP 附件，玩家可以快捷将对应 Node 添加到 Netmap 中。
+
+* `comp`：`string`, Computer ID。
+
+### `account`
+
+```xml
+<account comp="missionTestNode" user="TestUser" pass="testpass" />
+```
+
+Account 附件，添加后在该 Node 中的登陆界面会有对应的账号信息，可以一键登录。
+
+* `comp`：`string`, Computer ID。
+* `user`：`string`, 用户名。
+* `pass`：`string`, 账密码。
+
+---
+
+---
+url: /reference/BranchMissions.md
+---
+# BranchMissions （分支任务功能）
+
+教程见 [教程：BranchMissions](../extension-tutorial/BranchMissions.md)
+
+BranchMissions 用于关联分支任务。
+
+BranchMissions 在 Mission 中的 XML 结构如下：
+
+```xml
+<mission id="hubSet09">
+  ...  
+  <branchMissions>
+    <branch>/Missions/BranchMission1.xml</branch>
+    <branch>/Missions/BranchMission2.xml</branch> 
+  </branchMissions>
+  ...
+</mission>
+```
+
+```xml
+<branch>/Missions/BranchMission1.xml</branch>
+```
+
+用于描述该 Mission 关联的 Branch。`<branch>` 元素是 `BranchMissions` 的子元素。
+
+* 内容：Branch 的路径。
+
+---
+
+---
+url: /reference/MissionFunction.md
+---
+# MissionFunction / Function
+
+本章的所有 Function 使用示范均使用 Action [RunFunction](./Action.md#runfunction) 来演示。
+
+## 所有公开 Function
+
+这里的“公开 Function”是指在 Hacknet 官方的 IntroExtension 中列举的所有 Function。在 Extension 中可以正常使用。
+
+部分 Function 需要玩家安装了 Labyrinth DLC 才能使用，在此使用  提示。
+
+### `setFaction`
+
+```xml
+<RunFunction FunctionName="setFaction:Entropy"/>
+```
+
+将玩家的 Faction 设置为指定的 Faction。
+
+* 文本参数：指定的 Faction 的 ID。
+
+### `addRank`
+
+```xml
+<RunFunction FunctionName="addRank" FunctionValue="2"/>
+```
+
+给玩家当前的 Faction 增加 Rank。会发一个报告邮件。
+
+* 值参数：增加的 Rank 值。
+
+### `addRankSilent`
+
+```xml
+<RunFunction FunctionName="addRankSilent" FunctionValue="2"/>
+```
+
+同 [`addRank`](#addrank)，但是不会发报告邮件。
+
+* 值参数：增加的 Rank 值。
+
+### `addRankFaction`
+
+```xml
+<RunFunction FunctionName="addRankFaction" FunctionValue="2"/>
+```
+
+给指定的 Faction 增加 Rank。会发一个报告邮件。
+
+* 文本参数：指定的 Faction 的 ID。
+* 值参数：增加的 Rank 值。
+
+### `addFlags`
+
+```xml
+<RunFunction FunctionName="addFlags:flag1,flag2"/>
+```
+
+添加 Flags。
+
+* 文本参数：Flags 名称。多个 flags 之间用 `,` 分隔。
+
+### `removeFlags`
+
+```xml
+<RunFunction FunctionName="removeFlags:flag1,flag2"/>
+```
+
+移除 Flags。
+
+* 文本参数：Flags 名称。多个 flags 之间用 `,` 分隔。
+
+### `changeSong`
+
+```xml
+<RunFunction FunctionName="changeSong" FunctionValue="2"/>
+```
+
+改变当前播放的歌曲，用于播放 Hacknet 本体自带 BGM。
+
+* *值参数*?：歌曲的 ID。填不存在的或者不填则使用默认歌曲。
+
+ID 与 歌曲文件名 关系如下。歌曲的文件路径在 `Hacknet/Content/Music/[文件名].ogg`。
+
+| ID | 文件名 |
+| ------- | -------- |
+| 默认 | `Revolve` |
+| `2` | `The_Quickening` |
+| `3` | `TheAlgorithm` |
+| `4` | `Ryan3` |
+| `5` | `Bit(Ending)` |
+| `6` | `Rico_Puestel-Roja_Drifts_By` |
+| `7` | `out_run_the_wolves` |
+| `8` | `Irritations` |
+| `9` | `Broken_Boy` |
+| `10` | `Ryan10` |
+| `11` | `tetrameth` |
+
+### `loadConditionalActions`
+
+```xml
+<RunFunction FunctionName="loadConditionalActions:Actions/MyConditionalActions.xml"/>
+```
+
+加载 ConditionalActions。
+
+* 文本参数：ConditionalActions 文件的路径。
+
+### `setHubServer`
+
+```xml
+<RunFunction FunctionName="setHubServer:hubComp"/>
+```
+
+设置 HubServer。会改变该节点在 netmap 中的图标。只能设置一个。
+
+* 文本参数：Computer ID。
+
+### `setAssetServer`
+
+```xml
+<RunFunction FunctionName="setAssetServer:assetComp"/>
+```
+
+设置 AssetServer。会改变该节点在 netmap 中的图标。只能设置一个。
+
+* 文本参数：Computer ID。
+
+### `playCustomSong`
+
+```xml
+<RunFunction FunctionName="playCustomSong:Musics/CustomSong.ogg"/>
+```
+
+渐进播放自定义歌曲。歌曲类型必须是 `OGG Vorbis`。
+
+* 文本参数：歌曲文件的路径。
+
+> \[!IMPORTANT]
+> 游戏使用 XNA branch 时无法使用。
+
+### `playCustomSongImmediatley`
+
+```xml
+<RunFunction FunctionName="playCustomSongImmediatley:Musics/CustomSong.ogg"/>
+```
+
+立即播放自定义歌曲。歌曲类型必须是 `OGG Vorbis`。
+
+* 文本参数：歌曲文件的路径。
+
+> \[!IMPORTANT]
+> 游戏使用 XNA branch 时无法使用。
+
+> \[!WARNING]
+> 是错误拼写 `Immediatley` 而不是 `Immediately`。
+
+### `changeSongDLC`&#x20;
+
+```xml
+<RunFunction FunctionName="changeSongDLC" FunctionValue="2"/>
+```
+
+改变当前播放的歌曲，用于播放 Hacknet Labyrinth DLC 自带 BGM。
+
+* *值参数*?：歌曲的 ID。填不存在的或者不填则使用默认歌曲。
+
+ID 与 歌曲文件名 关系如下。歌曲的文件路径在 `Hacknet/Content/DLC/Music/[文件名].ogg`。
+
+| ID | 文件名 |
+| ------- | -------- |
+| 默认 | `Remi2` |
+| `2` | `snidelyWhiplash` |
+| `3` | `Slow_Motion` |
+| `4` | `World_Chase` |
+| `5` | `HOME_Resonance` |
+| `6` | `Remi_Finale` |
+| `7` | `RemiDrone` |
+| `8` | `DreamHead` |
+| `9` | `Userspacelike` |
+| `10` | `CrashTrack` |
+
+## 非公开 Function
+
+Hacknet 也有很多 主线/DLC 专用 Function，他们很多是给Hacknet主线/DLC使用的专用功能，使用他们也可能会有条件。
+
+参考：[MissionFunctions.cs](https://github.com/UnHacknet/OpenHacknet/blob/main/MissionFunctions.cs)
+
+---
+
+---
+url: /reference/HackerScripts.md
+---
+# HackerScripts (黑客脚本)
+
+HackerScript 用于描述黑客行为, 比如入侵, 文件操作等等. 它可以通过行为标签`<LaunchHackScript>`执行.
+
+HackerScript 的执行具有实时性. HackerScript内的任何间隔与行为标签的`delay`原理不同. 因此退出重进Hacknet将会使正在执行中的HackerScript停止. HackerScript被执行后的效果与玩家有部分相似之处, 比如会留下日志.
+
+以下为HackerScript的大致结构:
+
+```
+# 指定目标
+config playerComp advExamplePC 0.2 $#%#$
+
+# 行为
+connect $#%#$
+disconnect $#%#$
+
+# 这里的"注释"是不规范写法, 因为没有对应命令不会被执行. 官方没有为HackerScript提供注释
+```
+
+HackerScript的内容可以大致分为:
+
+* 指定目标
+* 行为
+
+# 指定目标
+
+config用于指定了目标，源电脑，每一行执行之间的间隔，格式如下如下:
+
+```
+config [目标电脑ID] [源电脑ID] [每一行执行的延迟] $#%#$
+```
+
+如果你想要通过标签来选择目标于源电脑的话, 可以原封不动这么写ID, 然后在标签中声明相应属性:
+
+```
+config [TARGET_COMP] [SOURCE_COMP] 0 $#%#$
+```
+
+一个HackerScript可以指定多个目标, 但是不是同时攻击.
+
+```
+config TARGET_COMP1 SOURCE_COMP1 0 $#%#$
+...
+config TARGET_COMP2 SOURCE_COMP1 0 $#%#$
+...
+```
+
+# 行为
+
+可以使用行为语句来描述行为, 行为语句相应的行为将会被执行.
+
+行为语句大致如下:
+
+```
+[行为类型] [...参数] $#%#$
+```
+
+行为类型与`$#%#$`为必须内容, 部分行为不需要参数.
+
+行为类型如下:
+
+| 行为类型 | 功能 | 参数个数 | 参数用途 |
+| --- | --- | --- | --- |
+| `connect` | 源电脑向目标电脑建立连接 | 无 | |
+| `delay` | 用来延迟一段时间 | 一个 | 延迟时间，单位为秒 |
+| `openPort` | 打开目标电脑的端口 | 一个 | 要开启的端口 |
+| `clearTerminal` | 清屏目标电脑终端 | 无 | |
+| `hideNetMap` | 隐藏目标电脑的netmap网络地图 | 无 | |
+| `hideRam` | 隐藏目标电脑的RAM区域 | 无 | |
+| `hideDisplay` | 隐藏目标电脑的显示Display区域 | 无 | |
+| `hideTerminal` | 隐藏目标电脑的终端 | 无 | |
+| `showNetMap` | 显示目标电脑的netmap网络地图 | 无 | |
+| `showRam` | 显示目标电脑的RAM区域 | 无 | |
+| `showDisplay` | 显示目标电脑的显示Display区域 | 无 | |
+| `showTerminal` | 显示目标电脑的终端 | 无 | |
+| `trackseq` | 改变玩家被forkbomb成功的结果 | 无 | 如果有CSEC flag并且没有防御成功forkbomb，则进入紧急恢复模式(不会蓝屏) |
+| `instanttrace` | 立即使目标电脑进入紧急恢复模式 | 无 | |
+| `forkbomb` | 为目标电脑执行forkbomb | 无 | |
+| `flash` | 让目标电脑的UI闪烁一下 | 无 | |
+| `delete` | 删除目标电脑上的文件 | 两个 | 目标文件所在路径和目标文件名 |
+| `setAdminPass` | 设置目标电脑上的管理员密码 | 一个 | 要设定的新管理员密码 |
+| `makeFile` | 在目标电脑上新建一个文件 | 三个 | 1.要创建的文件所在目录，2.要创建的文件名，3.文件内容 |
+| `openCDTray` | 打开目标电脑的光驱 | 无 | |
+| `closeCDTray` | 关闭目标电脑上的光驱 | 无 | |
+| `disconnect` | 断开目标电脑 | 无 | |
+| `write` | 在目标电脑终端中输出字符，但不换行 | 一个 | 要输出的字符串 |
+| `writel` | 在目标电脑终端中输出字符并换行 | 一个 | 要输出的字符串 |
+| `writel_silent` | 在目标电脑终端中输出字符并换行，但不会使目标UI变红闪烁一下 | 一个 | 要输出的字符串 |
+
+---
+
+---
+url: /reference/Placeholder.md
+---
+# 自替换占位符
+
+**自替换占位符**是指在Hacknet中会被自动替换成特定内容的标识
+
+自替换占位符的结构为:#<标识符,不包含尖括号>#,如#BINARY#
+
+可用的标识符有:
+
+* `BINARY` 垃圾二进制内容(2000字符)
+* `BINARYSMALL` 较少的垃圾二进制内容(1000字符)
+* `PLAYER_IP` 玩家IP地址
+* `PLAYERNAME` 玩家名
+* `RANDOM_IP` 一个随机的IP
+
+以及一些文件的标识符:
+
+* `SSH_CRACK` SSHCrack程序
+* `FTP_CRACK` 原版FTP破解程序
+* `WEB_CRACK` Web(80)破解程序
+* `SMTP_CRACK` SMTP破解程序
+* `SQL_CRACK` SQL破解程序
+* `HEXCLOCK_EXE` HexClock.exe程序
+* `CLOCK_PROGRAM` Clock.exe程序
+* `DECYPHER_PROGRAM` DEC解密程序
+* `DECHEAD_PROGRAM` DEC获取头信息程序
+* `MEDICAL_PROGRAM` KBT(104)端口破解程序
+* `THEMECHANGER_EXE` 主题更改器,ThemeChanger.exe
+* `EOS_SCANNER_EXE` eos设备扫描程序
+* `SECURITYTRACER_PROGRAM` 开局的SecurityTracer.exe(好东西,可以很快地停止trace)
+* `TRACEKILL_EXE` Vapor给你的TraceKill.exe
+* `EXT_SEQUENCER_EXE` 在扩展中可以使用的Sequencer.exe,在ExtensionInfo.xml中定义其属性
+
+DLC特供:
+
+* `TORRENT_EXE` Torrent(6881)破解程序
+* `SSL_EXE` SSL(443)破解程序
+* `FTP_FAST_EXE` DLC更快的FTP破解程序
+* `SIGNAL_SCRAMBLER_EXE` SignalScrambler.exe,占用内存来延长trace的程序
+* `MEM_FORENSICS_EXE` 内存转储查看程序
+* `MEM_DUMP_GENERATOR` 内存转储生成工具
+* `PACIFIC_EXE` 飞机端口(192)破解程序
+* `NETMAP_ORGANIZER_EXE` netmap排列程序
+* `SHELL_CONTROLLER_EXE` 原版不存在的Comshell.exe,快速操作shell的程序
+* `NOTES_DUMPER_EXE` 能从本地文件读取笔记的程序
+* `DLC_MUSIC_EXE` DLC调音乐程序
+* `CLOCK_V2_EXE` 下文主题中显示的ClockV2
+* `SHELL_OPENER_EXE` 原版不存在,快速打开shell的程序
+
+一些主题附上图片:\
+`WHITE_THEME` :\
+![](./assets/White_Theme.png)
+
+`GREEN_THEME` :\
+![](./assets/Green_Theme.png)
+
+`YELLOW_THEME` :\
+![](./assets/Yellow_Theme.png)
+
+`TEAL_THEME` :\
+![](./assets/Teal_Theme.png)
+
+`BASE_THEME` :\
+![](./assets/Base_Theme.png)
+
+`PURPLE_THEME` :\
+![](./assets/Purple_Theme.png)
+
+`MINT_THEME` :\
+![](./assets/Mint_Theme.png)
+
+---
+
+---
+url: /index.md
+---
+
+# Hacknet.wiki
+
+Hacknet 文档中心
+
+## 目录
+
+### [渐进式 Extension 教程(Beta)](./extension-tutorial/index.md)
+
+循序渐进的 Extension 教程，助你快速入门 Hacknet 扩展开发。
+
+### [Extension 参考(Beta)](./reference/index.md)
+
+详细解析 Hacknet 与 Hacknet Extension 的核心概念和功能并且提供格式参考。
+
+### [常见问题](./hnfaq.md)
+
+汇总与 Hacknet 游戏本身相关的常见问题与解决方案。
+
+### Awesome
+
+https://hacknet.wiki/awesome/
+
+构建自 [UnHacknet/awesome-hacknet](https://github.com/UnHacknet/awesome-hacknet)
+
+## 关于
+
+Hacknet.wiki 旨在搭建以内容为主，社区驱动的 Hacknet 文档中心，致力于为 Hacknet 玩家与开发者提供开放、持续更新的文档内容。
+
+本站由 VitePress 构建，所有文档均以 **Markdown** 编写，结构清晰，便于阅读、编辑和扩展。\
+欢迎任何人参与修订与补充——详细指引请参阅[贡献指南](https://github.com/UnHacknet/hacknet-wiki/blob/master/contributing.md)。
+
+全站内容已在 GitHub 上开源（[github.com/UnHacknet/hacknet-wiki](https://github.com/UnHacknet/hacknet-wiki)），你可直接克隆仓库获取完整副本，离线浏览所有页面。\
+此外，网站还支持 [llms.txt](https://llmstxt.org/)，方便大语言模型或自动化工具高效索引与调用。
+
+*Adapted from xkcd [#927](https://xkcd.com/927/) by Randall Munroe*
+
+---
+
+---
+url: /reference/Node.md
+---
+# Node （节点）
+
+WIP
+
+![icon参考](./assets/computerIcon.webp)
+
+---
+
+---
+url: /hnfaq.md
+---
+# 常见问题
+
+## Hacknet 常见问题
+
+汇总与 Hacknet 游戏本身相关的常见问题与解决方案。
+
+### 玩 Hacknet 算入门黑客吗？{#q-can-i-be-hacker}
+
+::: details 答案（点击展开）
+不算
+:::
+
+### 现实中存在类似 PortHack 的工具吗？{#q-port-hack-exists}
+
+::: details 答案（点击展开）
+没有
+:::
+
+### 如何找到 Hacknet 游戏的根目录？ {#q-how-to-find-hacknet-root}
+
+如果你的 Hacknet 是从 Steam 上下载的，在 Steam 库中找到 Hacknet 游戏，右键点击它，选择“管理”，然后找到“浏览本地文件”按钮，点击它即可打开游戏根目录。通常是 `[盘符]:\Program Files (x86)\Steam\steamapps\common\Hacknet` 或 `[盘符]:\SteamLibrary\steamapps\common\Hacknet`。
+
+如果不是，你可以想办法找到 Hacknet 的快捷方式，或者启动 Hacknet 后在任务栏的 Hacknet 处右键——右键Hacknet——属性，然后查看目标或者“打开文件所在位置”。
+
+### 游戏打开黑屏/崩溃/慢 {#common-problem-from-steam}
+
+见：https://steamcommunity.com/app/365450/discussions/0/451850849198782888/ 或它的中文翻译 https://steamcommunity.com/app/365450/discussions/0/343788552553568633/
+
+### Extension 和 Mod 的区别 {#difference-between-ext-and-mod}
+
+Extension 和 Mod 的关系很像《我的世界》中地图与模组的关系。
+
+Hacknet 是一款**数据驱动**的游戏。游戏程序本身只是一个执行引擎，核心机制通过代码实现，而任务、剧情等内容则通过**数据**来定义。Extension（扩展）是玩家依据执行引擎的规则自制的"数据"，Steam Workshop 上分享的内容本质上也是"数据"。
+
+Mod 是 Modification（修改）的缩写，中文译为**模组**。Hacknet 社区中最常用的模组框架是 [Hacknet-Pathfinder](https://github.com/Arkhist/Hacknet-Pathfinder)，它为开发者提供了通过编写代码来修改或增强游戏程序的工具，主要针对**执行引擎**进行改动。
+
+由于 Extension 不涉及代码修改，仅对"数据"进行调整，因此通常认为 Extension 不属于 Mod 的范畴；而通过 Pathfinder 加载的自定义代码等，才被视为真正的 Mod。
+
+Extension 与 Mod 的关系是相辅相成的：Mod 提供新的功能，Extension 则提供具体的内容。
+
+部分中国 Hacknet 交流群会对混淆 Extension 和 Mod 概念的人进行处罚。在这些社区讨论相关内容时，请务必先弄清楚两者的区别。
+
+## Hacknet Extension 常见问题
+
+汇总了与 Hacknet Extension 相关的常见问题与解决方案。

@@ -35,7 +35,7 @@
 | `rg` | winget（MSVC） | ❌ | ✅ |
 | `fd` | winget | ❌ | ✅ |
 | `bat` | winget | ❌ | ✅ |
-| `jq` | winget | ❌ | ✅ |
+| `jq` | **已换 MSYS 版** | ✅ | ✅ |
 | `grep` `sed` `awk` `diff` | Git for Windows（MSYS） | ✅ | ✅ |
 | `tree` `strings` `xmllint` `zstd` `bc` | 本文档新装（MSYS） | ✅ | ✅ |
 | `gh` `dotnet` | 原生，自己处理路径 | ✅ | ✅ |
@@ -46,14 +46,99 @@
 rg: /d/git/HacknetMod/src: IO error for operation on /d/git/HacknetMod/src: 系统找不到指定的路径。 (os error 3)
 ```
 
-**对策**：给 `rg` / `fd` / `bat` / `jq` 一律传 Windows 形态（`D:/git/HacknetMod/src`，正斜杠即可），
+**对策**：给 `rg` / `fd` / `bat` 传 Windows 形态（`D:/git/HacknetMod/src`，正斜杠即可），
 或在仓库内用相对路径。`grep` 不受影响，但既然 `rg` 更快，改路径比换工具省事。
+
+**想彻底解决？** 三条适配路线（换 MSYS 版 / 传 Windows 路径 / wrapper 自动转换）
+与「为什么不能直接取消这个变量」见下文 [为什么不能直接取消 `MSYS2_ARG_CONV_EXCL`]。
 
 ⚠ **这也是坑 5 的真正根因** —— `sg` 拒收 `/d/...` 形态的 `--rule` 路径不是 ast-grep 的怪癖，而是这个变量。
 
 ⚠ **连带教训**：路径形态不对时 `rg` 报的是 **`os error 3`（退出码非 0）**，不是「无匹配」。
 外面套 `2>/dev/null || echo '(无匹配)'` 就会把「路径错了」读成「文件里没有」——
 本次会话真的这样误判过一次（见坑 11）。
+
+### 为什么不能直接取消 `MSYS2_ARG_CONV_EXCL`
+
+看到「全局禁用路径转换」的第一反应是取消它。**不行** —— 它保护的是**正则参数**。
+
+实测（用外部程序打印真实 argv；`echo` 是 bash 内建、不走转换，不能用来测）：
+
+```bash
+MSYS2_ARG_CONV_EXCL='*' python -c "import sys;print(sys.argv[1:])" '^/AutoHack/' '/AutoHack/'
+# ['^/AutoHack/', '/AutoHack/']                     ← 原样
+
+MSYS2_ARG_CONV_EXCL=    python -c "import sys;print(sys.argv[1:])" '^/AutoHack/' '/AutoHack/'
+# ['^C:/Program Files/Git/AutoHack/', 'C:/Program Files/Git/AutoHack/']   ← 被毁
+```
+
+MSYS 的启发式规则把**任何以 `/` 开头的参数**当路径转换。正则 `/AutoHack/` 于是变成
+`C:/Program Files/Git/AutoHack/` —— 实测 `rg -c '/AutoHack/'` 在有 24 处匹配的文件上返回**空**。
+
+所以这是个**二选一**：要么路径参数能写 `/d/...`（正则全毁），要么正则安全（路径必须写 `D:/...`）。
+本机选了后者。
+
+### 三条适配路线（实测）
+
+| 路线 | 适用 | 结论 |
+|---|---|---|
+| **换 MSYS 版** | `jq` | ✅ **已换**，见下 |
+| **传 Windows 路径** | `rg` `fd` `bat` | ✅ 首选，零成本 |
+| **wrapper 自动转换** | 需要频繁写 `/d/` 时 | ⚠ 可用但有边界，见下 |
+
+#### 1) 换 MSYS 版：`jq` 已换
+
+MSYS2 的 **msys 仓库**里 `jq` 是 MSYS 版（认 `/c/`）；而 `ripgrep` `fd` `bat` **只在 mingw64 仓库**，
+那套同样是原生 Windows 版，换了也一样不认 `/c/`。官方 release 也只有 `pc-windows-msvc`，无 MSYS 构建。
+
+```bash
+curl -sSL -o jq.zst https://repo.msys2.org/msys/x86_64/jq-1.8.2-1-x86_64.pkg.tar.zst
+curl -sSL -o o.zst  https://repo.msys2.org/msys/x86_64/oniguruma-6.9.10-1-x86_64.pkg.tar.zst
+zstd -q -d -c jq.zst | tar -xf - && zstd -q -d -c o.zst | tar -xf -
+cp usr/bin/jq.exe usr/bin/msys-onig-5.dll ~/.local/bin/   # 依赖必须一并拷
+```
+
+`~/.local/bin` 在 PATH 中排在 winget 之前，装上即生效。winget 版仍保留在原位，可随时回退。
+⚠ 换完 `jq --version` 从 1.8.1 变 **1.8.2** —— 版本号会变，别以为是装错了。
+
+#### 2) 传 Windows 路径（`rg` `fd` `bat` 的正解）
+
+```bash
+rg -c HarmonyPatch D:/git/HacknetMod/src        # ✅
+rg -c HarmonyPatch /d/git/HacknetMod/src        # ❌ os error 3
+```
+
+**正斜杠即可**，不必写反斜杠。在仓库内用相对路径更省事，且不受这个变量影响。
+
+#### 3) wrapper 自动转换（可用，但有边界）
+
+只转换**确实存在的路径**参数，正则原样透传：
+
+```bash
+rg() {
+  local args=() a afterdd=0
+  for a in "$@"; do
+    if [ "$afterdd" = 1 ]; then args+=("$a"); continue; fi
+    case "$a" in
+      --) args+=("$a"); afterdd=1; continue ;;
+      -*) args+=("$a"); continue ;;
+    esac
+    if [ "${a#/}" != "$a" ] && [ -e "$a" ]; then
+      args+=("$(cygpath -m "$a")")
+    else
+      args+=("$a")
+    fi
+  done
+  command rg "${args[@]}"
+}
+```
+
+实测三种输入都对：`rg -c P /d/git/...` 正常工作、`rg '/AutoHack/'` 正则不被破坏、`rg x /nope/` 照常报错。
+
+⚠ **边界**：靠 `[ -e "$a" ]` 判断「是不是路径」——
+若路径**不存在**（拼错、还没创建），该参数不会被转换，`rg` 仍会报 `os error 3`；
+若正则恰好等于某个存在的文件名，则会被误转成路径。
+**这是启发式，不是解析器。** 日常够用，脚本里建议还是写死 `D:/...`。
 
 ## ast-grep（`sg`）
 
@@ -314,8 +399,6 @@ sed '1s/encoding="utf-16"/encoding="utf-8"/' "$SAVE" | xmllint --xpath 'count(//
 
 `sed` 还会把 CRLF 转成 LF（实测少 37990 字节）—— 存档是 CRLF，`file` 确认。
 
-
-
 命令执行、文件读写搜索的统一入口。**参数集与内置 bash 不同**：
 
 | | fastctx `run` | 内置 bash |
@@ -350,13 +433,14 @@ expected one of `command`, `cwd`, `timeout_ms`, `login_shell`, `encoding`
 | 9 | 用「符号是否存在」判索引新鲜度 | 新文件在重建前不在图里，会误判成过期；用 `artifact.json` 的 `commit` 与 HEAD 比对 |
 | 10 | `replace` 的 replacement 含 `$N` | 会被当成捕获组引用而报 `undefined capture group`；整文件重写更省事 |
 | 11 | **rg 报 os error 3 被当成「无匹配」** | 路径形态不对时 `rg` 退出码非 0、stderr 报 `IO error ... (os error 3)`。套上 `2>/dev/null || echo '(无匹配)'` 就变成假结论 —— 本次真的据此误判「存档无非 ASCII 字节」（真值 4015 行含非 ASCII）。**这是坑 1 的第二次复发** |
-| 12 | 原生 Windows 工具不认 `/c/` `/d/` 路径 | 根因 `MSYS2_ARG_CONV_EXCL=*`（HKCU 用户环境变量）。`rg` `fd` `bat` `jq` 中招，`grep` `tree` `strings` `xmllint` 不受影响。给前四个传 `D:/...` |
+| 12 | 原生 Windows 工具不认 `/c/` `/d/` 路径 | 根因 `MSYS2_ARG_CONV_EXCL=*`（HKCU 用户环境变量）。`rg` `fd` `bat` 中招（已无 MSYS 版可换）；`jq` 已换 MSYS 版解决；`grep` `tree` `strings` `xmllint` 本就不受影响。三条适配路线见上文 |
 | 13 | `rg -c` 当匹配数 | 它数**行**。单行 3 个匹配时 `rg -c` 得 1，`--count-matches` 得 3 |
 | 14 | 存档声明 `utf-16` 实际 `utf-8` | 直接喂解析器报 `encoding specified in XML declaration is incorrect`；`tail -n +2 | xmllint -` 即可 |
 | 15 | 用 `sed` 改存档声明 | 会连内嵌的 9 个 `.rec` 一起改（那是玩家数据），还把 CRLF 转 LF。必须 `1s/...` 限定首行，或用二进制替换 `count=1` |
 | 16 | `fastctx replace` 的 replacement 里 `$N` | `literal: true` **只作用于 pattern**，replacement 照样解析 `$SAVE` `$1` 并报 undefined capture group。字面 `$` 要写 `$$` |
 | 17 | 往 `/usr/bin` 装东西 | `[ -w /usr/bin ]` 返回真但 `cp` 被拒（Unix mode bit 与 Windows ACL 不同步）。装 `~/.local/bin` |
-
+| 18 | **取消 `MSYS2_ARG_CONV_EXCL` 来「修复」路径** | 会把**正则参数**当路径转换：`'/AutoHack/'` → `'C:/Program Files/Git/AutoHack/'`。实测 `rg -c '/AutoHack/'` 在有 24 处匹配的文件上返回空。这是个二选一，不能两全 |
+| 19 | 用 `echo` 测 MSYS 路径转换 | `echo` 是 bash 内建，**不走**参数转换，测不出任何东西。要用外部程序（`python -c "import sys;print(sys.argv[1:])"`） |
 
 > 坑 1、6、7、11 都是**曾经写错的结论**，记录于此以免重犯。早期版本的本文档曾把
 > 「`-l cs` 静默失败」「`--no-ignore vcs` 必需」写成坑，实测证明均不成立 ——
@@ -366,6 +450,48 @@ expected one of `command`, `cwd`, `timeout_ms`, `login_shell`, `encoding`
 > 只是换了个工具（`rg` 而非 `sg`）。教训不是「记住这个坑」，而是
 > **不要在诊断命令外面套 `|| echo`** —— 要么看退出码，要么让 stderr 直接冒出来。
 
+## 坑怎么避免
+
+上面每一条坑都对应一个**可执行的规避动作**。分两类：能在环境里一次性根除的，和只能靠习惯约束的。
+
+### 能一次性根除的
+
+| 坑 | 规避动作 | 代价 |
+|---|---|---|
+| 12 路径形态 | `jq` 换 MSYS 版（已做）；`rg` `fd` `bat` 用相对路径或 `D:/...` | 无 |
+| 5 `sg --rule` 路径 | 用相对路径；或 `.tmp/` 放仓库内 | 无 |
+| 17 `/usr/bin` 权限 | 一律装 `~/.local/bin` | 无 |
+| 16 `replace` 的 `$` | 字面 `$` 写 `$$`；或改用 `write` 整文件重写 | 无 |
+| 14/15 存档编码 | 统一用 `tail -n +2 \| xmllint -`，不落盘、不 sed | 无 |
+| 9 索引新鲜度 | 看 `artifact.json` 的 `commit`，不看符号有无 | 无 |
+| 4/13 计数 | 记住 `--json \| jq length`（sg）、`--count-matches`（rg） | 无 |
+
+### 只能靠习惯的（真正的根因）
+
+**坑 1 与坑 11 是同一个错，犯了两次** —— 在诊断命令外面套 `|| echo`，
+把非 0 退出码（工具报错）读成了「无匹配」（正常结果）。
+
+这不是知识问题，是**动作习惯**问题。三条硬规则：
+
+1. **诊断阶段不写 `|| echo` 兜底。** 要看工具是否报错，直接看**退出码与 stderr**。
+   `||` 只该用在「失败也没关系」的地方，不能用在「我要靠这个输出下结论」的地方。
+2. **下结论前先让数字自己说话。** 说「文件里没有 X」之前，必须有一条**独立路径**的验证
+   （换个工具、换个计数方式），而不是只看一条命令的空输出。
+3. **小样本异常不当规律。** 坑 7 就是这么来的：单次崩溃写成了「约 1/10」。
+
+**坑 2/3（ast-grep pattern）** 的规避：写 pattern 前先 `--debug-query=pattern` 看它解析成什么节点；
+要「所有类/方法/特性」直接用 `kind:` 规则式，别拼 pattern。
+
+**坑 6（忽略规则）** 的规避：**要确认就直接试扫**，别用 `git check-ignore` 推断另一个工具的忽略行为。
+
+**坑 8（fastctx 参数）** 的规避：它和内置 bash 参数集不同，看表；传错是**硬报错**，不会静默忽略。
+
+### 一句话总结
+
+> 绝大多数坑不是「不知道」，而是**验证方式本身不可靠** ——
+> 兜底文案吞掉报错、用行数当匹配数、拿一个工具的行为推另一个、
+> 拿单次现象当规律。**换工具解决不了这个，改验证习惯才行。**
+
 ## 环境
 
 | 工具 | 版本 | 路径形态 |
@@ -374,7 +500,7 @@ expected one of `command`, `cwd`, `timeout_ms`, `login_shell`, `encoding`
 | dotnet | 10.0.301 | 都行 |
 | ast-grep | 0.42.3 | 见坑 5 |
 | ripgrep | 15.1.0 | **必须 Windows** |
-| jq | 1.8.1 | **必须 Windows** |
+| jq | 1.8.2 | 都行（**已换 MSYS 版**） |
 | gh | 2.96.0 | 都行 |
 | bc / dc | 1.08.2 | 都行（MSYS） |
 | xmllint | 2.15.4 | 都行（MSYS） |
@@ -388,5 +514,6 @@ expected one of `command`, `cwd`, `timeout_ms`, `login_shell`, `encoding`
 - `git.exe` 是原生 Windows 版：**必须 `cd` 后调用，不能用 `git -C /d/...`**（报 cannot change to）
 - `ilspycmd` 需 Windows 形态路径（`D:/steam/...`，非 `/d/steam/...`）
 - `rg` 没有 `--include`（那是 `grep` 的参数），用 `-g`
-- 新装的 MSYS2 工具都在 `~/.local/bin`（`bc` `dc` `xmllint` `zstd` `tree` `strings`）；
-  `/usr/bin` 需管理员，别往那儿装（坑 17）
+- 新装的 MSYS2 工具都在 `~/.local/bin`（`bc` `dc` `xmllint` `zstd` `tree` `strings`，
+  以及替换 winget 版的 `jq`）；`/usr/bin` 需管理员，别往那儿装（坑 17）
+- `~/.local/bin` 在 PATH 中排在 `WinGet/Links` 之前，同名工具以 `~/.local/bin` 为准

@@ -3,7 +3,7 @@
 > Hacknet 的 BepInEx / Pathfinder 插件：用游戏自身的原生机制一键入侵全网，带控制面板与脚本驱动。
 > 本文件面向要理解或修改本仓库的编码 agent。规范见 https://llmstxt.org
 
-当前 v1.32.7。构建产物直投游戏插件目录，无需手动拷贝：
+当前 v1.32.8。构建产物直投游戏插件目录，无需手动拷贝：
 
 ```
 D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
@@ -21,7 +21,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    **绝不下载 Release 附件回来比对** —— 需要确认部署新鲜度时只看构建输出目录那份。
 3. **`gh release create` 绝不自动执行** —— 等用户显式发令。`git push` 可以直接做。
 
-**三十六条最容易踩的坑 / 最该知道的机制**（都带行号，可直接 grep）
+**三十七条最容易踩的坑 / 最该知道的机制**（都带行号，可直接 grep）
 
 1. `Computer.portsOpen` 恒为 0 —— Pathfinder 用 Harmony Prefix 接管 `openPort`/`openPorts`
    并 `return false`，状态改存 `PortState.Cracked`。任何读 `portsOpen` 的判断都是错的，
@@ -151,6 +151,11 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     （`OS.cs:2003-2154`，静默空操作）；443 的入口解引用 `args.Length`（`SSLPortExe.cs:44`，传 null 必崩）；
     211 的 `Completed()` 开的是 21 而非 211（`FTPFastExe.cs:60`，开错端口）。
     数据必须一并传 —— `launchExecutable` 靠 data 反查 exe 类型（`OS.cs:2000`），只给名字匹配不上。
+    但本 mod **不走 `launchExecutable`**，而是自己 `new` 出 exe 再 `OS.addExe`：
+    它的定位算法（`OS.cs:1898-1903`，`ram.bounds.Y + contentStartOffset` 再逐个加
+    `exes[i].bounds.Height`）**只在面板为空时正确**，而演出队列恰恰是「已挂着一个、再挂下一个」
+    的场景，算出来的 Y 会叠在上一个 exe 身上。addExe 不碰位置，交给 `OS.Update`
+    的布局循环（`OS.cs:840-851`）统一排才是权威。详见坑 37。
 
 22. **`Computer.links` 是**有向图**，且原生 `scan` 的三处行为都不该抄** ——
     `<link target=X>`（`ComputerLoader.cs:344-356`）与 `<dlink target=X>`（`:357-373`）
@@ -389,6 +394,28 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     `CreateState(..., cracked:false)`（SaveLoader.cs:384），所以**读档后端口必然是未破解**。
     运行时看到的 `: OPEN` 只活在内存里，读档即复原。`unbreakable` 因此只改 `PortState.PortNumber`
     （显示端口号，49152-65535 随机、互不重复），不碰 `Cracked` —— 加固不是「把 15 个端口全开」。
+
+37. **演出动画的并发数由 RAM 决定，不是 1；且存活时长要算上淡出** —— 单 exe 占 190~400mb
+    （PacificPortExe 190 / HTTPExploitExe 208 / FTPBounceExe 210 / SSHCrackExe 242 /
+    SQLExploitExe 350 / SMTPoverflowExe 356 / TorrentPortExe 360 / RTSPPortExe 360 /
+    MedicalPortExe 400），而 `totalRam = 800 - (21 + 2) - 16 = 761`（`OS.cs:74`，
+    `RamModule.contentStartOffset = 16`）。
+    **旧实现必然溢出**：破一个端口就地挂一个，而端口步只等 `PortDelay`（缺省 0.6s），
+    单个动画却活 8~33 秒 → 峰值并发 37 个 ≈ 11001mb，超容量 14.5 倍，
+    `OS.addExe`（`OS.cs:2169`）必然走 else 刷 "Insufficient Memory"。
+    修法是队列 + 每帧泵，**直接用游戏自己重算的 `os.ramAvaliable`** 当预算 ——
+    它在 `OS.cs:840-859` 每帧 `= totalRam` 后逐个扣 `exes[i].ramCost`，
+    正是 `addExe` 用的同一道门，故预判与放行永远一致，不必自己复算。
+    **每帧只挂一个**：`addExe` 只扣 `exes` 累计值、**不回写** `os.ramAvaliable`，
+    同帧连挂多个会拿同一个尚未扣减的值反复判断，挂出预算之外。
+    调度按「内存小 → 时间短 → 随机」排序（代价升序贪心装箱 = 最大化并发个数）。
+    存活时长**不是动画名义时长**，还要加收尾停顿与淡出 2 秒
+    （`fade` 从 1 到 0 需 `1 / FADEOUT_RATE`，`ExeModule.cs:9/:76`）：
+    RTSPCrack 实为 `IDLE_TIME 30.5 + 2 = 32.5s`（`RTSPPortExe.cs:10`），不是 6.3s；
+    KBT_PortTest 为 `RUNTIME 22 + COMPLETE_TIME 2 + 2 = 26s`（`MedicalPortExe.cs:7-9`）。
+    另：exe 必须在**入队时**构造，不能推迟到播放 —— 其 `targetIP` 在构造时定成当前连接目标
+    （坑 21），队列跨目标存活，延迟构造会让 `Completed()` 给一台本不该开端口的机器开端口。
+
 ## README 已精简掉的内容（原样保留于此）
 
 README 在 v1.32.6 之后被刻意精简过一轮（删了 94 行），只留使用者需要的东西。

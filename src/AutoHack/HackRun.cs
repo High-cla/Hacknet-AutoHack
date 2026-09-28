@@ -342,7 +342,8 @@ internal sealed class HackRun
 
                 HackEngine.OpenPort(target, step.Port, os.thisComputer.ip);
 
-                // 状态已写好，这里只是把原版动画挂上 RAM 面板（缺省关）。
+                // 状态已写好，这里只是把原版动画排进演出队列（缺省开）。
+                // 队列串行播、同一时刻至多一个 —— RAM 账见 NativeExes 类注释。
                 if (Options.ShowExes)
                 {
                     NativeExes.Show(os, target, step.Port);

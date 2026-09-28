@@ -48,6 +48,10 @@ internal static class HackOverlay
             var fresh = new HackPanelState();
             PanelSettings.Load(fresh);
             _state = fresh;
+
+            // 同一局内重复开关面板不清队列；换 OS 才清 —— 否则上一局排的动画
+            // 会漏进新一局，且旧 OS 的 exe 引用会卡住串行闸门（见 NativeExes.Tick）。
+            NativeExes.Reset();
         }
 
         _os = os;
@@ -196,6 +200,9 @@ internal static class HackOverlay
     [HarmonyPatch(typeof(OS), "Update")]
     private static void OnOSUpdate(OS __instance, GameTime gameTime)
     {
+        // 演出队列独立于运行推进：跑完收尾后仍要把排着的动画播完。
+        NativeExes.Tick(__instance);
+
         if (_run is not { Finished: false } || __instance != _os)
         {
             return;

@@ -2,7 +2,7 @@
 
 仓库：<https://github.com/High-cla/Hacknet-AutoHack> · 许可：[MIT](LICENSE)
 
-基于 Hacknet + Pathfinder 的自动入侵插件，带**交互式控制面板**。**优先使用游戏原生机制**：每个动作都先把对应指令回显进终端，再走原生 API（`Programs.connect` / `Computer.openPort` / `Computer.giveAdmin` / `makeFile`）执行，行为与真人敲 `connect` / `probe` / `sshcrack 22` / `porthack` 一致。四个游戏机制被显式处理：**管理员反扑**（断开时 `disconnectionDetected` 会关端口并把 `adminIP` 还原成机器自己，故离开前先解除反扑）、**跳板**（`proxyActive` 会拦下破解程序，先过载绕过）、**追踪**（`TraceTracker` 只在连着被追踪目标时推进，跑完即 `dc` 中止）、以及**肉鸡复用**（全网扫描默认跳过 `adminIP` 已是玩家的节点）。
+基于 Hacknet + Pathfinder 的自动入侵插件，带**交互式控制面板**。**优先使用游戏原生机制**：每个动作都先把对应指令回显进终端，再走原生 API（`Programs.connect` / `Computer.openPort` / `Computer.giveAdmin` / `makeFile`）执行，行为与真人敲 `connect` / `probe` / `sshcrack 22` / `porthack` 一致。四个游戏机制被显式处理：**管理员反扑**（断开时 `disconnectionDetected` 会关端口并把 `adminIP` 还原成机器自己，故离开前先解除反扑）、**跳板**（`proxyActive` 会拦下破解程序，先过载绕过）、**追踪**（`TraceTracker` 只在连着被追踪目标时推进，跑完即 `dc` 中止）、以及**强行提权**（porthack 门禁过不了时直接写 `adminIP`，见下）。
 
 ## 安装
 
@@ -50,7 +50,8 @@ autohack -h                                     # 帮助
 | `new IP after run` | 跑完把本机换成新 IP（缺省**开**）—— 游戏原生的「换 IP 保命」，并把全图已控机器的归属迁到新 IP |
 | `NORMAL` / `FAST` / `INSTANT` | 推进节奏：非端口步保留真人间隔（0.35s）/ 压到 0.05s / 合并到**同一帧** |
 | `disconnect when done` | 每个目标跑完是否 `dc`（缺省**关**）—— 断开会终止会话、清空 `navigationPath`，属行为选择。**只管断开**：清追踪已是每轮收尾的恒定动作，不再由开关控制 |
-| `skip owned nodes` | 全网扫描时跳过已拿下的肉鸡，不重复入侵（缺省开） |
+| `skip owned` | 全网扫描时跳过已拿下的肉鸡（缺省**开**）。**只对全网扫描生效** —— 「当前节点」是刻意选择，连上再点 START 就是要打它 |
+| `force escalate` | 门禁过不了时强行提权（缺省**开**）—— 直接给目标写 `adminIP`。防护机（`portsToCrack=9999998`）与端口表凑不够门槛的机器只有这条路拿得下 |
 | — | 永远提不了权的机器（端口表容量 ≤ `portsToCrack`）在全网扫描时一律跳过，见下 |
 | `RUN` | 按当前设置执行 |
 | TOOLS 区 `SCAN NETWORK` / `DEC DECRYPT` / `MEMORY DUMP` / `ALL PROGRAMS` | 单击**立即执行**，无二次确认（见下表） |
@@ -86,7 +87,8 @@ autohack -h                                     # 帮助
 | `direct` | 跳过 connect，直接就地破解（probe 照跑并报告端口，只是不再回显 `probe` 这条指令） |
 | `stay` | 跑完**不**断开连接（**已是缺省**，v1.16.0 起） |
 | `dc` | 每个目标跑完断开（反追踪：追踪只在连着目标时推进） |
-| `redo` | 全网扫描时**连已控节点一起重打**（缺省跳过肉鸡及永远提不了权的机器） |
+| `redo` | 全网扫描时**连已控节点一起重打**（缺省跳过肉鸡） |
+| `noinviolable` | 关掉强行提权，恢复原生门禁语义（门禁过不了就只报一行提示） |
 | `script=文件` | 用一份**动作表**取代内置次序（见「脚本模式」） |
 
 > `allnodes` 与缺省口径的差额实测（同一存档 147 节点）：沿连线广度优先 **7** 个目标，地图全表 **110** 个。

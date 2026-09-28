@@ -77,8 +77,7 @@ internal static class PendingRuns
             }
 
             entry.Run = run;
-            var skippedCount = run.SkippedOwned + run.SkippedHopeless;
-            var skipped = skippedCount > 0 ? $", {skippedCount} node(s) skipped" : string.Empty;
+            var skipped = run.SkippedOwned > 0 ? $", {run.SkippedOwned} already owned" : string.Empty;
             __instance.write($"[autohack] Headless run: {run.Targets.Count} target(s), {run.Total} action(s){skipped}.");
         }
 

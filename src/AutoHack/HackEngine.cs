@@ -154,16 +154,55 @@ internal static class HackEngine
            && (comp.firewall == null || comp.firewall.solved);
 
     /// <summary>
-    /// 该机器理论上能否提权：端口表容量（全开后的攻破数）能否越过门槛。
-    /// 门槛由游戏自身定义：<c>openPortsForSecurityLevel</c> 令
-    /// <c>portsNeededForCrack = security - 1</c>（Computer.cs:200-204）。
-    /// 容量 ≤ 门槛 = 永远开不满 = 永远提不了权 —— 实测存档里既有
-    /// <c>portsToCrack="9999998"</c> 的剧情保护机（EnTech 系列），也有门槛 8/6
-    /// 而端口表只有 4~5 个的机器。这类机器此前每次全网扫描都被连上、逐个破端口、
-    /// 再提权失败，即「每一次判断都是要入侵」。
+    /// 强行提权：越过 porthack 的两道原生门禁，直接把目标机的 <c>adminIP</c>
+    /// 写成玩家自己 —— 与 <c>target.giveAdmin(ip)</c>（Computer.cs:851-855）
+    /// 完全等价，也就是游戏自己提权成功时走的那一步。
+    ///
+    /// <b>为什么必须绕过门禁。</b>porthack 要求「已攻破端口数 &gt;
+    /// <c>portsNeededForCrack</c> 且防火墙已解」（<c>OS.cs:1908-1930</c>）。
+    /// 门槛由 <c>openPortsForSecurityLevel</c> 定为 <c>security - 1</c>
+    /// （Computer.cs:200-204），但有几类机器把它写死在数据里，端口表根本凑不出那么多：
+    ///
+    /// <list type="bullet">
+    /// <item><b>游戏自带的防护机</b>：门槛直接写成 <c>portsToCrack="9999998"</c>。
+    /// 实测存档 9 台（EnTech 中继服务器系列，配 <c>traceTime=500</c>、
+    /// <c>proxyTime=30</c>）。门槛 &gt; 100 时 <c>DisplayModule</c> 走
+    /// <c>INVIOLABILITY ERROR</c> 特效分支（DisplayModule.cs:429/:625/:724）——
+    /// 面板上那行乱码数字就是它。</item>
+    /// <item><b>玩家用 <c>unbreakable</c> 加固后的机器</b>：<see cref="HardenTools"/>
+    /// 写的正是同一个字段（<c>Inviolable = 9999998</c>），故加固出来的机器与游戏防护机
+    /// 在数据上无从区分。</item>
+    /// <item><b>门槛只比端口表多几个的普通机器</b>：实测存档 13 台，门槛 2~8 而端口表
+    /// 只有 1~4 个 —— 破满端口也差 1~6 个，判据同样恒假。</item>
+    /// </list>
+    ///
+    /// 三类合计 22 台，<b>常规路径一台也拿不下</b>。
+    ///
+    /// <b>仍然先按顺序做能做的事</b>：能破的端口照破、防火墙照解。这样即便门槛
+    /// 离谱到拿不下，玩家看到的战果也是真实的（<c>probe</c> 报告与端口状态一致），
+    /// 而不是「什么都没发生就报成功」。
+    ///
+    /// <b>不做的事</b>：不碰 <c>proxyActive</c>（防护机的跳板是对方的防护，
+    /// 拆它等于替对方把门打开 —— 见 <see cref="BypassProxy"/>），
+    /// 不碰 <c>traceTime</c>（那是目标自己的追踪配置，改它属于篡改游戏数据，
+    /// 不是「拿下这台机器」的一部分）。提权只写 <c>adminIP</c>。
     /// </summary>
-    internal static bool CanEverEscalate(Computer comp)
-        => comp != null && Ports(comp).Count > comp.portsNeededForCrack;
+    /// <returns>是否真的提权了（供回显报数）。</returns>
+    internal static bool ForceEscalate(Computer comp, OS os)
+    {
+        if (comp == null || os?.thisComputer == null)
+        {
+            return false;
+        }
+
+        if (comp.adminIP == os.thisComputer.ip)
+        {
+            return false;   // 已经是我们的，不重复写
+        }
+
+        comp.giveAdmin(os.thisComputer.ip);
+        return true;
+    }
 
     /// <summary>
     /// 是否是 EOS 设备（<see cref="Computer.EOS"/> = 5，Computer.cs:21）。
@@ -193,34 +232,6 @@ internal static class HackEngine
     /// <c>while (commandsRun() == num) Thread.Sleep(4)</c> 轮询等玩家敲用户名与密码
     /// （Programs.cs:404-448），在游戏线程调用即卡死。
     /// </summary>
-    /// <summary>
-    /// 目标机上是否存在可尝试的凭据（原生「已知」标记的账号，或 admin 账号）。
-    /// 用于判断「端口表打不通」的机器是否仍有救 —— 有凭据就能绕过端口门槛。
-    /// 注意这只是「可尝试」：密码是否真匹配要到 <see cref="TryLogin"/> 才知道。
-    /// </summary>
-    internal static bool HasAnyCredential(Computer comp)
-    {
-        if (comp?.users == null)
-        {
-            return false;
-        }
-
-        if (comp.adminPass != null)
-        {
-            return true;
-        }
-
-        foreach (var user in comp.users)
-        {
-            if (user.known && user.name != null && user.pass != null)
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
     /// <param name="credential">回传命中的账号名，供终端说明用了哪组凭据。</param>
     /// <returns>是否登录成功（成功即已提权）。</returns>
     internal static bool TryLogin(Computer comp, out string credential)
@@ -418,24 +429,27 @@ internal static class HackEngine
     /// 目标解析结果。<see cref="Targets"/> 是要入侵的机器；<see cref="Skipped"/>
     /// 是被剔除、但仍会被清痕的机器 —— 它们的 /log 里留着此前侦察与入侵的痕迹，
     /// 不因「跳过入侵」而豁免清痕。
+    ///
+    /// 曾还有一个 <c>SkippedHopeless</c>（因端口表凑不够提权门槛而跳过）——
+    /// 那道剔除已删除，字段随之作废。理由见 <see cref="ResolveTargets"/>。
     /// </summary>
     internal readonly record struct TargetPlan(
         List<Computer> Targets,
         List<Computer> Skipped,
-        int SkippedOwned,
-        int SkippedHopeless);
+        int SkippedOwned);
 
     /// <summary>
-    /// 解析目标集合，按可行性与「是否已拿下」过滤。目标串走框架查找表。
-    /// 两类剔除只作用于「全网扫描」；<c>here</c> 与显式点名是刻意选择，一律尊重。
-    /// 被剔除的机器登记进 <see cref="TargetPlan.Skipped"/> 以便补清痕 ——
-    /// 只有 <c>disabled</c> 机器与玩家自己不计入（既没打过，也不该碰）。
+    /// 解析目标集合。目标串走框架查找表。
+    ///
+    /// 两道过滤：无条件跳过 <c>null</c> / <c>disabled</c> / 玩家自己；全网扫描时
+    /// 按 <see cref="HackOptions.SkipOwned"/> 跳过已控机器。其余<b>全部</b>入侵 ——
+    /// 包括端口表凑不够提权门槛的那些（它们由 <see cref="ForceEscalate"/> 拿下）。
     /// </summary>
     internal static TargetPlan ResolveTargets(OS os, HackOptions options)
     {
         if (os == null)
         {
-            return new TargetPlan([], [], 0, 0);
+            return new TargetPlan([], [], 0);
         }
 
         var pool = options.Scope switch
@@ -448,18 +462,15 @@ internal static class HackEngine
                     .ToArray(),
         };
 
+        // 已控剔除**只对全网扫描生效**。「当前节点」与显式点名是刻意选择，一律尊重 ——
+        // 玩家连上某台机器再点 START，就是明确要打它，哪怕它已经是自己的肉鸡。
+        // 白名单回退那条路同理（见 ConnectedPool）。
         var sweep = options.Scope == HackScope.Network;
+        var skipOwned = options.SkipOwned && sweep;
 
-        // 「当前节点」模式下真的连着机器时，同样剔除**已控**的 —— 那台机器是会话现状，
-        // 玩家点 START 并不等于要重打一台已经拿下的机器（旧行为：照样重打、照样重排演出）。
-        // 唯一豁免的是白名单回退那条路（见 ConnectedPool）：那是玩家在地图上显式点击的
-        // 节点，与 here、点名同级，按刻意选择放行。
-        var skipOwned = options.SkipOwned
-            && (sweep || (options.Scope == HackScope.Connected && os.connectedComp != null));
         var result = new List<Computer>(pool.Length);
         var skipped = new List<Computer>();
         var skippedOwned = 0;
-        var skippedHopeless = 0;
 
         // 用哈希集去重，而不是 List.Contains：显式目标串可能重复点名，
         // 而全网遍历的池本身已去重，两者都需要 O(1) 判重。
@@ -467,45 +478,36 @@ internal static class HackEngine
 
         foreach (var comp in pool)
         {
+            // 无条件剔除：拿不到的对象、disabled、以及玩家自己。
             if (comp == null || comp.disabled || ReferenceEquals(comp, os.thisComputer))
             {
                 continue;
             }
 
-            if (sweep)
+            // 已控（adminIP 已是玩家）的机器：全网扫描时按开关跳过。
+            // 玩家此前打过谁不该决定这一轮的结果，故这是**显式开关**（面板 skip owned
+            // 复选框 / 命令行 redo 的反面），而不是一条隐式的「智能」判据。
+            if (skipOwned && IsOwned(comp, os))   // skipOwned 已含 sweep 条件，见上
             {
-                if (skipOwned && IsOwned(comp, os))
-                {
-                    skippedOwned++;
-                    skipped.Add(comp);
-                    continue;
-                }
-
-                // 提权门槛高于端口表容量的机器靠破端口永远打不通，全网扫描剔除
-                // —— 除非能直接用已知凭据登入（那条路不看端口数）。
-                // 显式点名时仍尊重玩家选择。
-                //
-                // EOS 设备是这个判据的例外：它的端口容量天生等于门槛（2 = 2），
-                // 破端口永远出不来，但 adminPass 是公开固定的 "alpine"，
-                // 用凭据一定能进。故对 type=5 放行 login 路径，与 UseCredentials
-                // 开关解耦 —— 那个开关对普通机器是「架空玩法」，对 EOS 却是
-                // 游戏设计的正路（见 IsEosDevice）。
-                var canLogin = HasAnyCredential(comp) && (options.UseCredentials || IsEosDevice(comp));
-                if (!CanEverEscalate(comp) && !canLogin)
-                {
-                    skippedHopeless++;
-                    skipped.Add(comp);
-                    continue;
-                }
+                skippedOwned++;
+                skipped.Add(comp);
+                continue;
             }
 
+            // **这里曾有第二道剔除：「端口表容量 ≤ 提权门槛的不打」。v1.33.1 已删除。**
+            // 它把 22 台机器整个排除在目标池外，其中 9 台是游戏自带的防护机
+            // （portsToCrack=9999998，实测 EnTech 中继服务器系列），另外 13 台是门槛
+            // 2~8 而端口表只有 1~4 个的普通机器 —— 两类都是 porthack 判据恒假
+            // （要求已攻破端口数**严格大于**门槛，OS.cs:1916），**破满端口也差 1~6 个**。
+            // 把它们排除，等于「明明有一个能拿下的办法（强行提权），却装作没有」。
+            // 现在它们进目标池，Escalate 步在门禁不过时走 ForceEscalate 拿下。
             if (seen.Add(comp))
             {
                 result.Add(comp);
             }
         }
 
-        return new TargetPlan(result, skipped, skippedOwned, skippedHopeless);
+        return new TargetPlan(result, skipped, skippedOwned);
     }
 
     /// <summary>

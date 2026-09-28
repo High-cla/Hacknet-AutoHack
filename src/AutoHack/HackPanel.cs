@@ -83,9 +83,6 @@ internal sealed class HackPanelState
     /// </summary>
     internal bool Disconnect { get; set; } = false;
 
-    /// <summary>全网扫描时跳过已拿下的机器（肉鸡），不重复入侵。</summary>
-    internal bool SkipOwned { get; set; } = true;
-
     /// <summary>全网扫描口径：true = 地图全表（含不在连线上的机器），缺省 false = 沿连线广度优先。</summary>
     internal bool AllNodes { get; set; } = false;
 
@@ -104,6 +101,22 @@ internal sealed class HackPanelState
     /// 看得见（原版动画是这游戏的主要反馈）；要安静跑可取消勾选。
     /// </summary>
     internal bool ShowExes { get; set; } = true;
+
+    /// <summary>
+    /// 全网扫描时跳过已拿下的机器（肉鸡），不重复入侵（缺省**开**）。
+    /// **只对全网扫描生效** —— 「当前节点」是刻意选择，连上再点 START 就是要打它。
+    /// </summary>
+    internal bool SkipOwned { get; set; } = true;
+
+    /// <summary>
+    /// 强行提权：忽略 porthack 的门禁，直接给目标写 <c>adminIP</c>（缺省**开**）。
+    ///
+    /// 实测存档里有 22 台机器 porthack 判据恒假（9 台防护机门槛 9999998、
+    /// 13 台普通机器破满端口也差 1~6 个），常规路径一台也拿不下。
+    /// **缺省开**：默认关等于「明明有办法拿下却装作没有」，与「攻破一切机器」的定位冲突。
+    /// 理由与代价见 <see cref="HackOptions.ForceEscalate"/>。
+    /// </summary>
+    internal bool ForceEscalate { get; set; } = true;
 
     /// <summary>
     /// 收尾是否把玩家机换成一个新 IP（缺省**开**）。
@@ -146,6 +159,7 @@ internal sealed class HackPanelState
         bool UseCredentials,
         bool ShowExes,
         bool ResetIP,
+        bool ForceEscalate,
         int X,
         int Y,
         bool Collapsed);
@@ -160,7 +174,7 @@ internal sealed class HackPanelState
     /// <summary>当前设置快照。供 <see cref="HackPanel.Draw"/> 比对是否发生了改动。</summary>
     internal Settings Fingerprint => new(
         Scope, PortDelay, ClearLogs, ClearOwnLogs, UploadMarker, ConnectFirst, Disconnect,
-        SkipOwned, AllNodes, UseCredentials, ShowExes, ResetIP, X, Y, Collapsed);
+        SkipOwned, AllNodes, UseCredentials, ShowExes, ResetIP, ForceEscalate, X, Y, Collapsed);
 
     internal HackOptions ToOptions() => new(
         Scope,
@@ -181,6 +195,7 @@ internal sealed class HackPanelState
         // 命令行仍可用 slow / fast / instant 显式选档（见 HackTypes.Parse）。
         HackSpeed.Normal,
 
+        ForceEscalate,
         Script);
 }
 
@@ -459,6 +474,9 @@ internal static class HackPanel
 
         state.ShowExes = Check(state.IdBase + 24, left, y, ColumnWidth, state.ShowExes, Loc.T("native exes"), c);
         state.ResetIP = Check(state.IdBase + 25, left + ColumnWidth + 8, y, ColumnWidth, state.ResetIP, Loc.T("new IP after run"), c);
+        y += CheckRowHeight;
+
+        state.ForceEscalate = Check(state.IdBase + 26, left, y, ColumnWidth, state.ForceEscalate, Loc.T("force escalate"), c);
         y += CheckRowHeight;
 
         next = y + Gap;

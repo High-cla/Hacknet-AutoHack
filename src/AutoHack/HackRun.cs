@@ -77,7 +77,6 @@ internal sealed class HackRun
         var plan = HackEngine.ResolveTargets(os, options);
         _targets = plan.Targets;
         SkippedOwned = plan.SkippedOwned;
-        SkippedHopeless = plan.SkippedHopeless;
 
         // clearLogs 已开时全体都清，不存在「额外强制」的机器，故那种情况计 0。
         ForcedLogWipe = options.ClearLogs ? 0 : _targets.Count(t => t.HasTracker);
@@ -105,9 +104,6 @@ internal sealed class HackRun
 
     /// <summary>因已控（肉鸡）而跳过的机器数。</summary>
     internal int SkippedOwned { get; }
-
-    /// <summary>因提权门槛高于端口表容量（永远打不通）而跳过的机器数。</summary>
-    internal int SkippedHopeless { get; }
 
     /// <summary>
     /// 因带 <c>tracker="true"</c> 而被强制清痕的机器数（不受 <c>clearLogs</c> 开关约束）。
@@ -390,6 +386,29 @@ internal sealed class HackRun
                 {
                     target.giveAdmin(os.thisComputer.ip);
                 }
+                else if (Options.ForceEscalate && HackEngine.ForceEscalate(target, os))
+                {
+                    // 常规门禁过不了（端口数越不过门槛，如防护机的 9999998），
+                    // 玩家开了强行提权 —— 直接写 adminIP，与原生提权成功的终态一致。
+                    // 必须说出来：静默成功会让玩家以为这台机器是靠破端口拿下的。
+                    os.write("[autohack] " + target.name
+                        + " :: escalation gate not met (needs > " + target.portsNeededForCrack
+                        + " open port(s), have " + HackEngine.OpenPortCount(target)
+                        + ") - forced admin anyway");
+                }
+                else if (HackEngine.OpenPortCount(target) <= target.portsNeededForCrack)
+                {
+                    // 门禁没过、玩家也没开强行提权。这里必须出声 —— 默认的静默会让
+                    // 「为什么这台机器拿不下」无从排查，而恰好有一个开关就是为它准备的。
+                    //
+                    // 只在「端口数不够」时说：门禁的另一半是防火墙未解，那种情况
+                    // SolveFirewall 步已经写过一行 "firewall solved"，再报一遍是重复。
+                    os.write("[autohack] " + target.name + " :: escalation blocked - needs > "
+                        + target.portsNeededForCrack + " open port(s), have "
+                        + HackEngine.OpenPortCount(target)
+                        + ". This machine cannot be cracked by ports; turn on 'force escalate'"
+                        + " (or pass 'inviolable') to take it anyway.");
+                }
 
                 break;
 
@@ -636,21 +655,14 @@ internal sealed class HackRun
             // 目标为 0 是最容易被误读的状态：终端仍会逐台打清痕行，
             // 看着像「每台都重跑了一遍」，实际每台只抹了 log。
             // 必须把原因和出路直接写出来。
-            os.write("[autohack] No targets: all " + (SkippedOwned + SkippedHopeless)
-                + " reachable node(s) were filtered out ("
-                + SkippedOwned + " already owned, " + SkippedHopeless + " cannot escalate).");
-            os.write("[autohack]   'redo' re-hacks owned nodes; 'allnodes' sweeps the whole map.");
+            os.write("[autohack] No targets: all " + SkippedOwned
+                + " reachable node(s) were already owned.");
+            os.write("[autohack]   'redo' includes owned nodes; 'allnodes' sweeps the whole map.");
         }
 
         if (SkippedOwned > 0)
         {
             os.write("[autohack] skipped " + SkippedOwned + " node(s) already owned - 'redo' to include them.");
-        }
-
-        if (SkippedHopeless > 0)
-        {
-            os.write("[autohack] skipped " + SkippedHopeless
-                + " node(s) whose port table cannot reach the escalation threshold.");
         }
 
         if (_refused.Count > 0)

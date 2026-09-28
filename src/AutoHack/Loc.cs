@@ -55,6 +55,7 @@ internal static class Loc
             ["wipe my logs"] = "清除我的日志",
             ["native exes"] = "原生演出",
             ["new IP after run"] = "跑完换 IP",
+            ["force escalate"] = "强行提权",
 
             // TOOLS
             ["TOOLS"] = "工具",

@@ -9,7 +9,7 @@ using Pathfinder.Meta.Load;
 /// 命令与扩展点均通过 Pathfinder 的属性自动扫描注册（AttributeManager 挂载于
 /// HacknetChainloader.LoadPlugin），无需手动调用 Register* API。
 /// </summary>
-[BepInPlugin(Guid, "AutoHack", "1.33.0")]
+[BepInPlugin(Guid, "AutoHack", "1.33.1")]
 // Pathfinder 的属性扫描是 IL hook，在 PathfinderAPIPlugin.Load() 里才安装；
 // 缺此依赖本插件会先加载，扫描覆盖不到，命令静默失效。
 [BepInDependency("com.Pathfinder.API")]
@@ -50,7 +50,8 @@ public sealed class AutoHackPlugin : BepInEx.Hacknet.HacknetPlugin
 
     /// <summary>
     /// autohack                                                      - 开关控制面板
-    /// autohack run [all|here] [目标...] [delay=秒] [logs] [dc] [nomark] - 不开面板，直接执行
+    /// autohack run [all|here] [目标...] [delay=秒] [logs] [dc] [noinviolable] - 不开面板，直接执行
+    ///   （强行提权缺省开：porthack 门禁过不了时直接给目标写 adminIP）
     /// </summary>
     [Command("autohack", addAutocomplete: true, caseSensitive: false)]
     public static void AutoHackCommand(OS os, string[] args)

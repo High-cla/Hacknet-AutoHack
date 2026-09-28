@@ -3,7 +3,7 @@
 > Hacknet 的 BepInEx / Pathfinder 插件：用游戏自身的原生机制一键入侵全网，带控制面板与脚本驱动。
 > 本文件面向要理解或修改本仓库的编码 agent。规范见 https://llmstxt.org
 
-当前 v1.33.0。构建产物直投游戏插件目录，无需手动拷贝：
+当前 v1.33.1。构建产物直投游戏插件目录，无需手动拷贝：
 
 ```
 D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
@@ -21,7 +21,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    **绝不下载 Release 附件回来比对** —— 需要确认部署新鲜度时只看构建输出目录那份。
 3. **`gh release create` 绝不自动执行** —— 等用户显式发令。`git push` 可以直接做。
 
-**三十七条最容易踩的坑 / 最该知道的机制**（都带行号，可直接 grep）
+**三十八条最容易踩的坑 / 最该知道的机制**（都带行号，可直接 grep）
 
 1. `Computer.portsOpen` 恒为 0 —— Pathfinder 用 Harmony Prefix 接管 `openPort`/`openPorts`
    并 `return false`，状态改存 `PortState.Cracked`。任何读 `portsOpen` 的判断都是错的，
@@ -394,6 +394,36 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     `CreateState(..., cracked:false)`（SaveLoader.cs:384），所以**读档后端口必然是未破解**。
     运行时看到的 `: OPEN` 只活在内存里，读档即复原。`unbreakable` 因此只改 `PortState.PortNumber`
     （显示端口号，49152-65535 随机、互不重复），不碰 `Cracked` —— 加固不是「把 15 个端口全开」。
+
+38. **门槛剔除已删；已控剔除保留但只对全网扫描生效** —— `HackEngine.ResolveTargets`
+    现在两道过滤，实测存档 167 台：
+
+    | 口径 | 目标池 | 说明 |
+    |---|---|---|
+    | 全网扫描（缺省 `skip owned` 开） | 83 台 | 剔除 83 台已控 |
+    | 全网扫描 `redo` | 166 台 | 含已控 |
+    | 当前节点 / 显式点名 | 不剔除 | 连上已控机器再点 START 照样打 |
+
+    - **门槛剔除（端口表容量 ≤ 提权门槛的不打）v1.33.1 删除**，它是错的：把 22 台机器
+      整个排除，其中 9 台是游戏自带防护机（`portsToCrack="9999998"`，EnTech 中继服务器
+      系列），13 台是门槛 2~8 而端口表只有 1~4 个的普通机器。**两类都是 porthack 判据
+      恒假**（要求已攻破端口数**严格大于**门槛，`OS.cs:1916`），破满端口也差 1~6 个
+      —— 它们只能靠 `ForceEscalate`，排除它们等于「有办法却装作没有」。
+      随它删除的死代码：`CanEverEscalate`、`HasAnyCredential`、`SkippedHopeless`。
+    - **已控剔除保留**（`skip owned` 复选框缺省开 / `redo` 命令行关掉它），
+      但**只对全网扫描生效**：`skipOwned = options.SkipOwned && sweep`。
+      「当前节点」与显式点名是刻意选择 —— 玩家连上某台机器再点 START，就是明确要打它，
+      哪怕它已经是自己的肉鸡（`ConnectedPool` 同理，白名单回退那条路也不剔除）。
+      被剔除的机器仍登记进 `TargetPlan.Skipped` 补清痕 —— 它们此前进过、破过、
+      侦察过，`/log` 里留着痕迹。
+    - 门槛 > 100 时 `DisplayModule` 走 `INVIOLABILITY ERROR` 特效分支
+      （`DisplayModule.cs:429/:625/:724`）—— 面板上那行乱码数字就是防护机的标志。
+      玩家的 `unbreakable`（`HardenTools.Inviolable = 9999998`）写的是**同一个字段**，
+      故加固出来的机器与游戏防护机在数据上无从区分。
+    - `ForceEscalate`（面板 `force escalate` / 命令行 `inviolable`，**缺省开**）在
+      `CanEscalate` 不过时直接 `giveAdmin`，与原生提权成功的终态一致；
+      要恢复原生门禁语义传 `noinviolable`。门禁不过时终端写一行
+      `escalation gate not met (needs > N open port(s), have M) - forced admin anyway`。
 
 37. **演出动画的并发数由 RAM 决定，不是 1；且存活时长要算上淡出** —— 单 exe 占 190~400mb
     （PacificPortExe 190 / HTTPExploitExe 208 / FTPBounceExe 210 / SSHCrackExe 242 /

@@ -39,12 +39,31 @@ internal sealed record HackOptions(
     bool UploadMarker,
     bool ConnectFirst,
     bool Disconnect,
+
+    /// <summary>全网扫描时跳过已拿下的机器（肉鸡），不重复入侵。缺省**开**。</summary>
     bool SkipOwned,
     bool AllNodes,
     bool UseCredentials,
     bool ShowExes,
     bool ResetIP,
     HackSpeed Speed,
+
+    /// <summary>
+    /// 强行提权：忽略 porthack 的两道原生门禁（端口数 > <c>portsNeededForCrack</c>、
+    /// 防火墙已解），直接给目标写 <c>adminIP</c>。
+    ///
+    /// <b>为游戏自带的防护机而设。</b>实测存档有 9 台 EnTech 中继服务器，
+    /// <c>portsToCrack="9999998"</c>、<c>traceTime=500</c>、<c>proxyTime=30</c> ——
+    /// 门槛 9999998 永远越不过（porthack 要求已攻破端口数<b>严格大于</b>它，
+    /// <c>OS.cs:1916</c>），而 <c>DisplayModule</c> 在门槛 &gt; 100 时直接走
+    /// INVIOLABILITY ERROR 分支（<c>DisplayModule.cs:429/:625/:724</c>）。
+    /// 这类机器按常规路径<b>永远拿不下</b>，此开关是唯一出路。
+    ///
+    /// 面板 <c>force escalate</c> 复选框 / 命令行 <c>inviolable</c>。
+    /// **缺省开**（v1.33.1 起）：默认关等于「明明有办法拿下却装作没有」，
+    /// 与「攻破一切机器」的定位冲突。要恢复原生门禁语义传 <c>noinviolable</c>。
+    /// </summary>
+    bool ForceEscalate,
     string Script)
 {
     // 这里曾有 WantsAntiTrace（从 Disconnect 派生的「收尾是否清追踪」）。
@@ -75,7 +94,6 @@ internal sealed record HackOptions(
     private static readonly string[] DirectAliases = ["direct", "noconnect", "no-connect"];
     private static readonly string[] StayAliases = ["stay", "keepconn", "keep-connection"];
     private static readonly string[] LeaveAliases = ["dc", "leave", "disconnect"];
-    private static readonly string[] RedoAliases = ["redo", "force"];
     private static readonly string[] CredentialAliases = ["creds", "credentials", "login", "known"];
     private static readonly string[] NoCredentialAliases = ["nocreds", "no-login", "brute"];
     private static readonly string[] SlowAliases = ["slow", "normal"];
@@ -85,6 +103,16 @@ internal sealed record HackOptions(
     private static readonly string[] ResetIPAliases = ["newip", "reset-ip", "resetip"];
     private static readonly string[] NoResetIPAliases = ["nonewip", "noknewip", "keep-ip", "keepip"];
     private static readonly string[] NoShowExesAliases = ["noshow", "no-exes", "quiet"];
+
+    /// <summary>把已控机器也纳入全网扫描（见 <see cref="HackOptions.SkipOwned"/>）。</summary>
+    private static readonly string[] RedoAliases = ["redo", "force"];
+
+    /// <summary>强行提权（见 <see cref="HackOptions.ForceEscalate"/>）。
+    /// <c>inviolable</c> 是玩家在游戏里看得见的那个词 —— 防护机的面板上写的正是
+    /// INVIOLABILITY ERROR。</summary>
+    private static readonly string[] ForceEscalateAliases = ["inviolable", "forcecrack", "powerhack"];
+
+    private static readonly string[] NoForceEscalateAliases = ["noinviolable", "noforcecrack"];
 
     /// <summary>
     /// 脚本模式：用一份动作表取代内置次序。<c>script=&lt;文件名&gt;</c>，
@@ -130,6 +158,13 @@ internal sealed record HackOptions(
         // 缺省开时这类任务会莫名其妙进不去，而玩家很难把两件事联系起来。
         // 要换用 newip 显式开启，或直接用面板的 NEW IP 按钮换一次。
         var resetIP = false;
+
+        // 缺省**开**（v1.33.1 起，此前为关）。porthack 的门禁（已攻破端口数严格大于
+        // portsNeededForCrack，OS.cs:1916）对实测存档里 22 台机器恒假 —— 9 台防护机
+        // 门槛 9999998、13 台普通机器破满端口也差 1~6 个。默认关等于「明明有办法
+        // 拿下却装作没有」，与「攻破一切机器」的定位冲突，故缺省开。
+        // 要恢复原生门禁语义传 'noinviolable'。
+        var forceEscalate = true;
         var speed = HackSpeed.Normal;
         string script = null;
 
@@ -151,15 +186,17 @@ internal sealed record HackOptions(
             if (NoOwnLogsAliases.Contains(lower)) { clearOwnLogs = false; continue; }
             if (MarkerAliases.Contains(lower)) { uploadMarker = true; continue; }
             if (NoMarkerAliases.Contains(lower)) { uploadMarker = false; continue; }
+            if (RedoAliases.Contains(lower)) { skipOwned = false; continue; }
             if (AllNodesAliases.Contains(lower)) { allNodes = true; continue; }
             if (DirectAliases.Contains(lower)) { connectFirst = false; continue; }
             if (StayAliases.Contains(lower)) { disconnect = false; continue; }
             if (LeaveAliases.Contains(lower)) { disconnect = true; continue; }
-            if (RedoAliases.Contains(lower)) { skipOwned = false; continue; }
             if (CredentialAliases.Contains(lower)) { useCredentials = true; continue; }
             if (NoCredentialAliases.Contains(lower)) { useCredentials = false; continue; }
             if (ShowExesAliases.Contains(lower)) { showExes = true; continue; }
             if (NoShowExesAliases.Contains(lower)) { showExes = false; continue; }
+            if (ForceEscalateAliases.Contains(lower)) { forceEscalate = true; continue; }
+            if (NoForceEscalateAliases.Contains(lower)) { forceEscalate = false; continue; }
             if (ResetIPAliases.Contains(lower)) { resetIP = true; continue; }
             if (NoResetIPAliases.Contains(lower)) { resetIP = false; continue; }
             if (SlowAliases.Contains(lower)) { speed = HackSpeed.Normal; continue; }
@@ -194,7 +231,7 @@ internal sealed record HackOptions(
 
         return new HackOptions(
             scope, ids, delay, clearLogs, clearOwnLogs, uploadMarker, connectFirst, disconnect, skipOwned,
-            allNodes, useCredentials, showExes, resetIP, speed, script);
+            allNodes, useCredentials, showExes, resetIP, speed, forceEscalate, script);
     }
 }
 

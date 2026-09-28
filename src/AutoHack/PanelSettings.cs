@@ -78,6 +78,7 @@ internal static class PanelSettings
         s.UseCredentials = Entry("use_credentials", s.UseCredentials).Value;
         s.ShowExes = Entry("native_exes", s.ShowExes).Value;
         s.ResetIP = Entry("new_ip", s.ResetIP).Value;
+        s.ForceEscalate = Entry("force_escalate", s.ForceEscalate).Value;
 
         s.X = Entry("panel_x", s.X).Value;
         s.Y = Entry("panel_y", s.Y).Value;
@@ -104,6 +105,7 @@ internal static class PanelSettings
         Entry("use_credentials", s.UseCredentials).Value = s.UseCredentials;
         Entry("native_exes", s.ShowExes).Value = s.ShowExes;
         Entry("new_ip", s.ResetIP).Value = s.ResetIP;
+        Entry("force_escalate", s.ForceEscalate).Value = s.ForceEscalate;
         Entry("panel_x", s.X).Value = s.X;
         Entry("panel_y", s.Y).Value = s.Y;
         Entry("collapsed", s.Collapsed).Value = s.Collapsed;

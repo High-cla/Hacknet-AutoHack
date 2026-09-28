@@ -485,6 +485,7 @@ passcode = 头部第 4 段首个密文数字 - 158485
 - [docs/API.md](docs/API.md): **Pathfinder 框架 + Hacknet 游戏本体的 public API 签名索引**，每条带 `文件:行号` 指向 `decompiled/`。由 `node tools/api-index.ts` 生成，**勿手改**；游戏与框架都不带 XML 注释，故只到签名级，语义按行号读 `decompiled/`
 - [docs/EXTENSIONS.md](docs/EXTENSIONS.md): 游戏自带 `Extensions/` 官方样本的格式参考 —— 节点 XML、占位符、行为系统、任务、阵营、主题
 - [docs/HACKERSCRIPTS.md](docs/HACKERSCRIPTS.md): 自替换占位符全表 + HackerScript 动词表（以游戏实现与官方样本为准，已标出 wiki 错漏处）
+- [docs/TOOLCHAIN.md](docs/TOOLCHAIN.md): 本地工具链 —— ast-grep（`sg`）/ codebase-memory / fastctx / rg 的分工、用法与实测坑。动 `sg` 前先看坑 2、3、4，能省一轮排错
 - [llms.txt](llms.txt): 本文件
 
 ## 源码

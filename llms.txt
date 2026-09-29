@@ -3,7 +3,7 @@
 > Hacknet 的 BepInEx / Pathfinder 插件：用游戏自身的原生机制一键入侵全网，带控制面板与脚本驱动。
 > 本文件面向要理解或修改本仓库的编码 agent。规范见 https://llmstxt.org
 
-当前 v1.35.0。构建产物直投游戏插件目录，无需手动拷贝：
+当前 v1.35.1。构建产物直投游戏插件目录，无需手动拷贝：
 
 ```
 D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
@@ -21,7 +21,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    **绝不下载 Release 附件回来比对** —— 需要确认部署新鲜度时只看构建输出目录那份。
 3. **`gh release create` 绝不自动执行** —— 等用户显式发令。`git push` 可以直接做。
 
-**四十七条最容易踩的坑 / 最该知道的机制**（都带行号，可直接 grep）
+**四十八条最容易踩的坑 / 最该知道的机制**（都带行号，可直接 grep）
 
 1. `Computer.portsOpen` 恒为 0 —— Pathfinder 用 Harmony Prefix 接管 `openPort`/`openPorts`
    并 `return false`，状态改存 `PortState.Cracked`。任何读 `portsOpen` 的判断都是错的，
@@ -751,6 +751,29 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     ⑦ **验证方式**：差分测试镜像新旧谓词，13 个端口样本（原生 / 模组 16 个 / 非法）
     × 2 个 cracked 状态 × 9 组白名单 = **234 用例**：缺省行为逐位不变（0 处不一致）、
     非缺省只增不减（0 处丢原生）、越权新增 0、非正端口被加 0。
+
+48. **端口破够就提权 —— porthack 只看端口总数，不看是哪些端口**（v1.35.1）——
+    门禁是 `OS.cs:1916` 的 `num2 > connectedComp.portsNeededForCrack`；Pathfinder 的
+    `FixPortHack` IL 注入（`ComputerExtensions.cs:486-513`）把游戏那段 `portsOpen` 求和
+    换成了 `CountOpenPorts()`，故 `HackEngine.PortQuotaMet` 与游戏门禁**读同一份数据**。
+
+    ① **实测收益**：存档 169 台，可破端口步 **650 → 487（省 25.1%）**，79 台有节省。
+    ② **门禁零回归**：逐台模拟新旧终态，旧能提权的新的同样能（0 处回归）——
+    这是本改动唯一的正确性判据，别只看省了多少步。
+    ③ **落点**：`HackRun.Tick` 里在 `IsRedundantAfterLogin` 之后加一道
+    `IsPortQuotaMet(step)`，**只对 `OpenPort` 步生效** —— 防火墙步不受影响，
+    因为 porthack 的第二道门禁要求 `firewall.solved`（`OS.cs:1920-1927`）。
+    ④ **跳过不触发「端口步每帧一步」那道闸门**（闸门在循环末尾、按 `step.Kind` 判），
+    故一帧内就能跳完全部剩余端口步，零额外耗时 —— 与「跳过的步不 `Apply`」是两件事。
+    ⑤ **边界三类都照常破满**：EOS 设备（门槛 = 端口容量，`2 > 2` 恒假）、
+    防护机（门槛 `9999998`）、门槛比端口表大的机器 —— 因为已开端口数永远越不过门槛。
+    ⑥ **`security=0` 的机器门槛是 `-1`**（`Computer.cs:202` 的 `security - 1`），
+    `0 > -1` 成立 ⇒ **一个端口都不破**。存档里 8 台。严格按门禁语义的结果，不是缺陷；
+    要「无论门槛破满全部」得另加选项，别改判据。
+    ⑦ **两种模式都生效**（内置次序与脚本）：与 `IsRedundantAfterLogin` 同一取舍 ——
+    脚本里写 `openPort` 的目的是拿下机器，门槛一旦越过，多破的端口对那个目的毫无贡献。
+    若将来要破满全部，那是一个**新选项**，不该靠脚本模式绕过 —— 否则同一条脚本
+    在内置次序下是另一套行为，更难解释。
 
 ## README 已精简掉的内容（原样保留于此）
 

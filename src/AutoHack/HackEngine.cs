@@ -162,14 +162,26 @@ internal static class HackEngine
         => comp == null ? 0 : comp.CountOpenPorts();
 
     /// <summary>
+    /// 已开端口数是否已达提权门槛 —— 与游戏 porthack 门禁的<b>数量那一半</b>逐字一致
+    /// （<c>OS.cs:1916</c> 的 <c>num2 &gt; connectedComp.portsNeededForCrack</c>；
+    /// Pathfinder 的 <c>FixPortHack</c> IL 注入把那个 <c>portsOpen</c> 求和换成了
+    /// <c>CountOpenPorts()</c>，见 ComputerExtensions.cs:486-513 —— 故两边读的是同一份数据）。
+    ///
+    /// <b>拆出来是给 <c>HackRun</c> 用的。</b>porthack 只看端口<b>总数</b>，不看具体是哪些
+    /// 端口，故端口步破到够数就该停 —— 剩下的端口对提权毫无贡献，只会白等动画、点燃追踪、
+    /// 把终端刷满。实测存档 167 台：可破端口步 650 → 487（省 25.1%），79 台有节省。
+    /// </summary>
+    internal static bool PortQuotaMet(Computer comp)
+        => comp != null && OpenPortCount(comp) > comp.portsNeededForCrack;
+
+    /// <summary>
     /// 原生提权门槛 —— 与游戏 porthack 的门禁逐条对齐（OS.cs:1908-1930）：
     /// 已攻破端口数必须**超过** <c>portsNeededForCrack</c>，且防火墙已解；
     /// 缺其一会写 "Target Machine Rejecting Syndicated UDP Traffic" 并拒绝启动 PortHackExe。
     /// 此前 mod 直接调 <c>giveAdmin</c> 跳过整条门禁，等于从未用过原生的提权与防火墙机制。
     /// </summary>
     internal static bool CanEscalate(Computer comp)
-        => comp != null
-           && OpenPortCount(comp) > comp.portsNeededForCrack
+        => PortQuotaMet(comp)
            && (comp.firewall == null || comp.firewall.solved);
 
     /// <summary>

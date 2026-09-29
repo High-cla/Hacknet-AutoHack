@@ -179,6 +179,19 @@ internal sealed class HackRun
                 continue;
             }
 
+            // 端口数已达提权门槛：剩下的端口步全部跳过，直接去解防火墙 + porthack。
+            // 判据与游戏门禁同源（见 HackEngine.PortQuotaMet），破端口是顺序的，
+            // 故「破到够为止」与「按门槛挑着破」等价，且自动覆盖某步没破成的情形。
+            //
+            // 跳过时静默（不回显）—— 没敲过的命令不该出现在终端里。
+            // 也正因为跳过的步不触发循环末尾那道「端口步每帧一步」闸门，
+            // 一帧内就能把该台剩余端口步全部跳完，不额外耗时。
+            if (IsPortQuotaMet(step))
+            {
+                _index++;
+                continue;
+            }
+
             if (WaitForNativeAnimation(step, deltaSeconds, os))
             {
                 return;
@@ -284,6 +297,21 @@ internal sealed class HackRun
             or HackStepKind.SolveFirewall
             or HackStepKind.Escalate;
     }
+
+    /// <summary>
+    /// 这一步是不是「端口已经破够了，可以不用再破」的端口步。
+    ///
+    /// <b>只对 <see cref="HackStepKind.OpenPort"/> 生效。</b>其余步骤都不受端口数量影响 ——
+    /// 尤其是 <see cref="HackStepKind.SolveFirewall"/>：porthack 的第二道门禁要求
+    /// <c>firewall.solved</c>（<c>OS.cs:1920-1927</c>），防火墙该解还得解。
+    ///
+    /// <b>两种模式都生效（内置次序与脚本）。</b>与 <see cref="IsRedundantAfterLogin"/> 同一
+    /// 取舍：脚本里写 <c>openPort</c> 的目的是拿下这台机器，而门槛一旦越过，多破的端口对
+    /// 那个目的毫无贡献。若将来要「无论门槛、破满全部」，那是一个<b>新的选项</b>，
+    /// 不该靠脚本模式绕过 —— 否则同一条脚本在内置次序下是另一套行为，更难解释。
+    /// </summary>
+    private static bool IsPortQuotaMet(HackStep step)
+        => step.Kind == HackStepKind.OpenPort && HackEngine.PortQuotaMet(step.Target);
 
     private void Apply(OS os, HackStep step)
     {

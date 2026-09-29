@@ -3,7 +3,7 @@
 > Hacknet 的 BepInEx / Pathfinder 插件：用游戏自身的原生机制一键入侵全网，带控制面板与脚本驱动。
 > 本文件面向要理解或修改本仓库的编码 agent。规范见 https://llmstxt.org
 
-当前 v1.33.3。构建产物直投游戏插件目录，无需手动拷贝：
+当前 v1.33.4。构建产物直投游戏插件目录，无需手动拷贝：
 
 ```
 D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
@@ -21,7 +21,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    **绝不下载 Release 附件回来比对** —— 需要确认部署新鲜度时只看构建输出目录那份。
 3. **`gh release create` 绝不自动执行** —— 等用户显式发令。`git push` 可以直接做。
 
-**四十一条最容易踩的坑 / 最该知道的机制**（都带行号，可直接 grep）
+**四十三条最容易踩的坑 / 最该知道的机制**（都带行号，可直接 grep）
 
 1. `Computer.portsOpen` 恒为 0 —— Pathfinder 用 Harmony Prefix 接管 `openPort`/`openPorts`
    并 `return false`，状态改存 `PortState.Cracked`。任何读 `portsOpen` 的判断都是错的，
@@ -552,6 +552,47 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     那条倒计时 —— 它一路跑到归零。判据必须是
     `Queue.Count > 0 || Live.Count > 0`（覆盖「已经挂上去的」）。
     也**不能**无条件调用：那样玩家自己敲命令点燃的追踪会被面板补丁一直掐掉。
+
+42. **面板每帧路径上的三处开销，以及为什么缓存不能乱加**（v1.33.4 起）——
+    面板展开态每帧要走 `HackPanel.Draw`，实测三处热点：
+    - `Loc.T` 每帧 **20 次**（`DrawOptions` 内 13 次、`DrawTools` 内 2 次、其余 5 次），
+      而它每次都要进 `LocaleTerms.Loc` —— 游戏侧实现是
+      `if (ActiveTerms.ContainsKey(input)) return ActiveTerms[input];`
+      （`LocaleTerms.cs:59-61`），**ContainsKey + 索引器 = 双查字典**。
+    - `Loc.F` 用 `params object[]` + `string.Format`，每次调用 = 一个数组 + N 个 int 装箱。
+    - `HackPanel.Measure` 每次直接 `SpriteFont.MeasureString`，而面板标签几乎全是常量串。
+    修法：`Loc` 加**按 locale 版本化的缓存**、`F` 改两个 `int` 重载 + `Replace`、
+    `Measure` 加带容量上限的测量缓存。
+    **但缓存有两个必须守的边界**：
+    ① **游戏词表命中的那一条不能进缓存**。失效键是 `Settings.ActiveLocale` +
+    `ActiveTerms.Count`，而 workshop mod（如 ZeroDayToolKit，`ZeroDayToolKit.decompiled.cs:3772`）
+    会写 `ActiveTerms[已有键] = 新值` —— **原地覆盖，Count 不变**，失效键察觉不到。
+    游戏词表**未**命中时结果只由本类静态表决定，缓存它才安全 ——
+    而面板专有词（RUN / SCOPE / PORT INTERVAL…）恰好都落在这一支。
+    ② **测量缓存必须有容量上限**（本仓库取 256，超限整体换新字典）。
+    键含动态串（`"3 / 128"` 这类计数），无上限就是无界增长。
+    失效条件是 `GuiData.smallfont` 的**引用**变化 —— locale 切换 / 字体重载都会换实例，
+    引用比较 O(1) 且不漏路径。
+    另：`Loc.T` 的实参全是字面量（`HackPanel` 的 27 处 + 静态 `Tools` 表的 label + `TraceHud` 一处），
+    含机器名的 `run.Phase` 走 `DrawText` **不过 `Loc.T`**，故键集有界、不会随机器数增长。
+
+43. **别对「每帧存在性查询」直接换 HashSet —— 会引入跨线程竞争**（v1.33.4）——
+    `NativeExes` 每帧要对 `Live`（上限 `MaxQueued`）做剪枝，原判据
+    `os.exes.Contains(run.Exe)` 是 O(Live × exes) 的线性扫描（最坏 32×5=160 次引用比较）。
+    改成 static `HashSet` + `Clear()` 复用（不能每帧 new —— 那只是把省下的比较换成每帧一次堆分配）。
+    **比较语义必须是引用相等**：`ExeModule` 与基类 `Module` 都没重写 `Equals`/`GetHashCode`，
+    默认比较器即引用相等，与 `List<T>.Contains` 逐位一致；**将来若重写 Equals 必须改回引用比较**。
+    两条踩过的坑：
+    ① **唯一写者必须是 `RebuildPanel`，且只能被游戏线程调用**。
+    一度在 `Reset()` 里也加了 `OnPanel.Clear()` —— 而 `Reset` 由 `HackOverlay.Open` 调用，
+    触发路径 `AutoHackCommand → HackOverlay.Toggle` 跑在 `OS.execute` 派生的**命令行线程**上
+    （`OS.cs:1754-1767`），于是与游戏线程 `Tick` 的「重建 + 读取循环」形成读-清竞争，
+    会让仍在播的动画被误判为「已离开面板」⇒ 提前开端口 + 提前丢跟踪项。
+    而且它**收益为零**：每个读点之前都紧接一次 `RebuildPanel`，旧 OS 的残留引用结构上读不到。
+    ② **快照要按需重建**。`Flush` 全仓两处调用点都传 `force:true`，那条路径根本不看面板状态，
+    无条件先 `RebuildPanel` 就是白付一次遍历 —— 改成 `if (!force)` 才重建。
+    但 `Fade` 里**刻意**保留 `os.exes.Contains`：它跑在 `Flush(force:true)` 之后，
+    拿到的 `OnPanel` 是过期快照，用它会把「还在播的」判成「已离开」而不再淡出。
 
 
 ## README 已精简掉的内容（原样保留于此）

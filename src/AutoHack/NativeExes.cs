@@ -150,6 +150,32 @@ internal static class NativeExes
     private static readonly List<Running> Live = new(MaxQueued);
 
     /// <summary>
+    /// <b>本帧</b> <c>os.exes</c> 里那些实例的集合，供 <see cref="StillOnPanel"/> 做 O(1)
+    /// 存在性查询。由 <see cref="RebuildPanel"/> 填充。
+    ///
+    /// <b>为什么复用而不是每帧 new。</b>本类每帧都要对 <see cref="Live"/>（上限
+    /// <see cref="MaxQueued"/>）做一次剪枝，原判据是 <c>os.exes.Contains(run.Exe)</c> ——
+    /// 那是 O(Live × exes) 的线性扫描（最坏 32 × 5 = 160 次引用比较）。改成先一次遍历
+    /// <c>os.exes</c>（通常 1~5 项）填这个集合、之后每项 O(1)。但<b>每帧 new 一个
+    /// HashSet 只是把省下的比较换成每帧一次堆分配</b>，与目标相反 —— 故用 static readonly
+    /// 实例 + <c>Clear()</c> 复用，全程零分配。
+    ///
+    /// <b>比较语义 = 引用相等，与旧判据逐位一致。</b><c>ExeModule</c>（ExeModule.cs:7）
+    /// 及其基类 <c>Module</c>（Module.cs:7）都没有重写 <c>Equals</c> / <c>GetHashCode</c>，
+    /// 故默认比较器走 <c>object</c> 的引用相等 —— 与 <c>List&lt;T&gt;.Contains</c> 在
+    /// 未重写 Equals 时的行为相同。（net472 没有 <c>ReferenceEqualityComparer</c>，
+    /// 无法也不必显式传入。）<b>若将来 ExeModule 重写了 Equals，此处必须改回引用比较</b>，
+    /// 否则「同一个实例」会变成值相等，剪枝与补开端口的结果都会变。
+    ///
+    /// <b>只在游戏线程使用（同 <see cref="Tick"/>），不需要加锁。</b>
+    /// 这条前提是硬约束：<b>唯一的写者是 <see cref="RebuildPanel"/></b>，它只被
+    /// <see cref="Tick"/> 与 <see cref="Flush"/> 调用，两者都跑在游戏线程。
+    /// 其它入口（尤其是 <see cref="Reset"/> —— 它由命令行线程经 HackOverlay.Open 触发）
+    /// <b>不得</b>触碰本集合，否则会与 Tick 的「重建 + 读取」形成读-清竞争。
+    /// </summary>
+    private static readonly HashSet<ExeModule> OnPanel = new();
+
+    /// <summary>
     /// 一个破解程序的两个时长，单位秒。这张表同时就是白名单，
     /// 键集就是可安全演出的全集 —— 白名单与时长合一而非两份，杜绝失同步。
     ///
@@ -339,6 +365,43 @@ internal static class NativeExes
     }
 
     /// <summary>
+    /// 把 <c>os.exes</c> 拍进 <see cref="OnPanel"/>，供随后的一批 <see cref="StillOnPanel"/>
+    /// 查询。一次遍历换一批 O(1) 查询 —— 见 <see cref="OnPanel"/> 里为什么复用实例。
+    ///
+    /// <b>调用时机</b>：紧挨着每个查询循环之前（<see cref="Tick"/> 的剪枝、<see cref="Flush"/>
+    /// 的面板段）。循环体内只写端口状态与改本类自己的列表，都不动 <c>os.exes</c>，
+    /// 故这份快照在整个循环里有效。
+    /// </summary>
+    private static void RebuildPanel(OS os)
+    {
+        OnPanel.Clear();
+
+        if (os?.exes == null)
+        {
+            return;
+        }
+
+        for (var i = 0; i < os.exes.Count; i++)
+        {
+            OnPanel.Add(os.exes[i]);
+        }
+    }
+
+    /// <summary>
+    /// 该 exe 此刻是否还在 RAM 面板上 —— <b><see cref="Tick"/> 的剪枝与 <see cref="Flush"/>
+    /// 的补开用的是同一条判据</b>（原注释即强调「两处一致」，抽成一处后由代码保证）。
+    ///
+    /// <b>前置条件：本批查询之前必须先 <see cref="RebuildPanel"/></b>，且两次调用之间
+    /// 不能有东西改动 <c>os.exes</c>。不满足时读到的是上一批的快照，结果是错的 ——
+    /// 故两处调用点都紧挨着各自的循环。
+    ///
+    /// 刻意<b>不</b>收 <c>OS</c> 参数：本方法读的是静态 <see cref="OnPanel"/>，
+    /// 收一个 OS 只会让人以为「查的是那个 OS 的面板」，而传别的 OS 会静默返回上一批快照的结果。
+    /// </summary>
+    private static bool StillOnPanel(ExeModule exe)
+        => exe != null && OnPanel.Contains(exe);
+
+    /// <summary>
     /// 每帧推进一步：只要预算装得下队首，就把它挂上去（队首的排序键最小，见
     /// <see cref="Compare"/>）。由 <see cref="HackOverlay"/> 的 OS.Update 补丁调用。
     ///
@@ -364,10 +427,13 @@ internal static class NativeExes
         // ① 被游戏的跳板门禁拦下（OS.addExe，OS.cs:2165 写 "Proxy Active -- Cannot Execute"
         //    后直接丢弃，从未进 exes）；② 被别的东西提前摘除。
         // 这两种必须在剪枝的这一刻补开 —— 晚一步就永远补不上了（见 Flush）。
+        // 先把本帧的 os.exes 拍成集合，循环里就是 O(1) 查询（见 OnPanel）。
+        RebuildPanel(os);
+
         for (var i = Live.Count - 1; i >= 0; i--)
         {
             var run = Live[i];
-            if (run.Exe != null && os.exes.Contains(run.Exe))
+            if (StillOnPanel(run.Exe))
             {
                 continue;
             }
@@ -519,7 +585,16 @@ internal static class NativeExes
         // 面板上的那些：**只补「已经不可能再跑完」的**，还活着的留给它自己的 Completed ——
         // 提前补会让端口抢在动画前面开（观感上「还没跑完就开了」）。
         // 「不可能再跑完」= 已经不在 os.exes 里（被游戏摘除 / 被跳板门禁拦下从未挂上）。
-        // 这一条正是 Tick 剪枝用的同一判据，两处一致。
+        // 这一条正是 Tick 剪枝用的同一判据 —— 两处都走 StillOnPanel，一致性由代码保证。
+        //
+        // 快照按需重建：全仓两处 Flush 调用点都传 force:true（HackRun 的等待超时、StopAll），
+        // 那条路径根本不看面板状态，先 RebuildPanel 就是白付一次 O(os.exes) 遍历。
+        // 这里再拍一次而不是复用 Tick 那一次：本方法可能在一帧内被多次调用，Tick 的快照已过期。
+        if (!force)
+        {
+            RebuildPanel(os);
+        }
+
         for (var i = Live.Count - 1; i >= 0; i--)
         {
             var run = Live[i];
@@ -529,7 +604,7 @@ internal static class NativeExes
             }
 
             // 不 force 时只补「已经不可能再跑完」的（不在 os.exes 里）；force 时全补。
-            if (!force && run.Exe != null && os.exes.Contains(run.Exe))
+            if (!force && StillOnPanel(run.Exe))
             {
                 continue;
             }
@@ -590,6 +665,14 @@ internal static class NativeExes
         Queue.Clear();
         Live.Clear();
         ShownCount.Clear();
+
+        // <b>刻意不清 OnPanel。</b>两个理由：
+        // ① 没必要 —— 它的每个读点（Tick 的剪枝、Flush 的补开）之前都紧接一次
+        //    RebuildPanel，读到的必是本批快照，旧 OS 的残留引用结构上不可能被读到。
+        // ② 有代价 —— Reset 由 HackOverlay.Open 调用，而 Open 的触发路径
+        //    （AutoHackCommand → HackOverlay.Toggle）跑在 OS.execute 派生的**命令行线程**上
+        //    （OS.cs:1754-1767），Tick 在游戏线程。在此处 Clear 会与 Tick 的
+        //    RebuildPanel + 读取循环形成读-清竞争，让仍在播的动画被误判为「已离开面板」。
     }
 
     /// <summary>
@@ -635,6 +718,10 @@ internal static class NativeExes
                 continue;
             }
 
+            // 这里**刻意**不用 StillOnPanel：本方法由 StopAll 在 Flush(force:true) 之后调用，
+            // 而 force 路径不重建 OnPanel（见 Flush），拿到的会是过期快照 —— 用它会把
+            // 「还在播的」判成「已离开面板」，于是不置 isExiting，动画不再淡出。
+            // 直接查 os.exes 才是这条路径上的真相；它每轮只跑一次，不在每帧热路径上。
             if (os.exes.Contains(exe))
             {
                 exe.isExiting = true;

@@ -423,7 +423,18 @@ internal static class HackPanel
 
     // ── 正文区块 ────────────────────────────────────────────────
 
+    /// <summary>选项块：按序绘制 SCOPE / PORT INTERVAL / 复选框三段，并给出下一块的 y。</summary>
     private static void DrawOptions(HackPanelState state, int left, int y, Palette c, out int next)
+    {
+        DrawScopeSection(state, left, ref y, c);
+        DrawPortIntervalSection(state, left, ref y, c);
+        DrawCheckboxes(state, left, ref y, c);
+
+        next = y + Gap;
+    }
+
+    /// <summary>SCOPE 段：区标题与 NETWORK SWEEP / CURRENT NODE 两个分段按钮。</summary>
+    private static void DrawScopeSection(HackPanelState state, int left, ref int y, Palette c)
     {
         var half = ContentWidth / 2;
 
@@ -443,18 +454,27 @@ internal static class HackPanel
         }
 
         y += SegmentHeight + Gap;
+    }
 
+    /// <summary>PORT INTERVAL 段：区标题、当前值文本与端口间隔滑条。</summary>
+    private static void DrawPortIntervalSection(HackPanelState state, int left, ref int y, Palette c)
+    {
         Section(Loc.T("PORT INTERVAL"), left, y, c);
         var value = state.PortDelay.ToString("0.00", CultureInfo.InvariantCulture) + " s";
         DrawText(value, left + ContentWidth - Measure(value, 1f).X, y, state.PortDelay <= 0.15f ? c.Warn : c.Text, 1f);
         y += SectionHeight;
 
         state.PortDelay = Slider(
-            state.IdBase + 12, left, y, ContentWidth,
-            state.PortDelay, HackOptions.MinPortDelay, HackOptions.MaxPortDelay, 0.05f, c);
+            state.IdBase + 12,
+            new SliderSpec(left, y, ContentWidth, HackOptions.MinPortDelay, HackOptions.MaxPortDelay, 0.05f),
+            state.PortDelay, c);
 
         y += SliderHeight + Gap;
+    }
 
+    /// <summary>5 行复选框：凭据 / 全网 / 跳过肉鸡 / 清痕 / 先连接 / 断开 / 标记 / 演出 / 换 IP。</summary>
+    private static void DrawCheckboxes(HackPanelState state, int left, ref int y, Palette c)
+    {
         state.UseCredentials = Check(state.IdBase + 16, left, y, ColumnWidth, state.UseCredentials, Loc.T("use known creds"), c);
         state.AllNodes = Check(state.IdBase + 17, left + ColumnWidth + 8, y, ColumnWidth, state.AllNodes, Loc.T("whole map"), c);
         y += CheckRowHeight;
@@ -482,7 +502,6 @@ internal static class HackPanel
         // 那个开关缺省就是开，留着等于给唯一出路配了个自毁按钮。
         // 同一版还并掉了「wipe target logs」与「wipe my logs」两个复选框：
         // 它们现在是同一个口径（只删含玩家 IP 的日志条目）下的一个开关。
-        next = y + Gap;
     }
 
     /// <summary>
@@ -633,15 +652,35 @@ internal static class HackPanel
         return on;
     }
 
+    /// <summary>滑条的几何（x/y/width）与取值域（min/max/step）规格。</summary>
+    private readonly struct SliderSpec
+    {
+        internal SliderSpec(int x, int y, int width, float min, float max, float step)
+        {
+            X = x;
+            Y = y;
+            Width = width;
+            Min = min;
+            Max = max;
+            Step = step;
+        }
+
+        internal readonly int X;
+        internal readonly int Y;
+        internal readonly int Width;
+        internal readonly float Min;
+        internal readonly float Max;
+        internal readonly float Step;
+    }
+
     /// <summary>
     /// 自维护状态机的滑条。不借用 <see cref="Track"/>：拖拽中 <c>GuiData.active == id</c>，
     /// 而 <c>Track</c> 在抬起那一帧会先把 active 复位，导致最后一段位移丢失。
     /// 此处先落值再复位，保证松手位置被采纳。
     /// </summary>
-    private static float Slider(
-        int id, int x, int y, int width, float value, float min, float max, float step, Palette c)
+    private static float Slider(int id, SliderSpec spec, float value, Palette c)
     {
-        var hot = new Rectangle(x, y - 4, width, SliderHeight + 8).Contains(GuiData.getMousePoint());
+        var hot = new Rectangle(spec.X, spec.Y - 4, spec.Width, SliderHeight + 8).Contains(GuiData.getMousePoint());
 
         if (hot)
         {
@@ -657,7 +696,7 @@ internal static class HackPanel
                 var scroll = GuiData.getMouseWheelScroll();
                 if (scroll != 0)
                 {
-                    value += step * scroll;
+                    value += spec.Step * scroll;
                 }
             }
         }
@@ -668,8 +707,8 @@ internal static class HackPanel
 
         if (GuiData.active == id)
         {
-            var t = Clamp((GuiData.getMousePoint().X - x) / (float)width, 0f, 1f);
-            value = min + t * (max - min);
+            var t = Clamp((GuiData.getMousePoint().X - spec.X) / (float)spec.Width, 0f, 1f);
+            value = spec.Min + t * (spec.Max - spec.Min);
 
             if (GuiData.mouse.LeftButton == ButtonState.Released)
             {
@@ -677,14 +716,14 @@ internal static class HackPanel
             }
         }
 
-        value = Clamp(value, min, max);
+        value = Clamp(value, spec.Min, spec.Max);
 
-        var ratio = max - min <= 0f ? 0f : (value - min) / (max - min);
-        Fill(new Rectangle(x, y + 5, width, 6), c.Track);
-        Fill(new Rectangle(x, y + 5, (int)(width * ratio), 6), c.Accent);
+        var ratio = spec.Max - spec.Min <= 0f ? 0f : (value - spec.Min) / (spec.Max - spec.Min);
+        Fill(new Rectangle(spec.X, spec.Y + 5, spec.Width, 6), c.Track);
+        Fill(new Rectangle(spec.X, spec.Y + 5, (int)(spec.Width * ratio), 6), c.Accent);
 
-        var knob = x + (int)(width * ratio);
-        Fill(new Rectangle(knob - 2, y, 4, 16), hot || GuiData.active == id ? Color.White : c.Accent);
+        var knob = spec.X + (int)(spec.Width * ratio);
+        Fill(new Rectangle(knob - 2, spec.Y, 4, 16), hot || GuiData.active == id ? Color.White : c.Accent);
 
         return value;
     }
@@ -862,8 +901,115 @@ internal static class HackPanel
             0.5f);
     }
 
+    /// <summary>
+    /// 测量缓存的容量上限，超过即整体清空。
+    ///
+    /// 必须设上限：面板上的标签几乎全是常量串（跨帧重复测量同样的串纯属浪费，正是本缓存要
+    /// 解决的），但运行期还有不断变化的串 —— 进度 "3 / 128"、当前目标名、战果行 —— 它们
+    /// 每帧都产生新键，不设上限字典会随运行时间无界增长。选择整体清空而不是逐条淘汰：
+    /// 绘制路径上不能维护链表或做遍历，丢弃的代价只是下一帧重测少量串。
+    /// </summary>
+    private const int MeasureCacheCapacity = 256;
+
+    /// <summary>
+    /// 同帧内有效的测量缓存：键 = (文本, 缩放)，值 = 已乘缩放的尺寸。
+    ///
+    /// <b>失效条件</b>：<see cref="GuiData.smallfont"/> 的<b>引用</b>变化即整体换一张新字典。
+    /// locale 切换、字体/分辨率重载都会换掉这个 SpriteFont 实例，旧度量随之作废；用引用比较
+    /// 而不是比较字体属性，是因为前者 O(1) 且不会漏掉任何换字体的路径。
+    ///
+    /// <b>线程模型：仅游戏线程</b>。本类的唯一入口是 <c>HackOverlay</c> 的 <c>OS.Draw</c> Postfix，
+    /// 故读写都在游戏线程、无并发。注释里刻意不宣称线程安全：未命中路径是
+    /// <c>cache[key] = size</c> 的<b>原地写入</b>，并非「整体换引用」，宣称并发安全会误导后人。
+    /// （<see cref="ResetMeasureCache"/> 换引用只是为了在容量超限/换字体时让旧字典整体作废，
+    /// 不是为了并发。）
+    /// </summary>
+    private static Dictionary<MeasureKey, Vector2> _measureCache = new Dictionary<MeasureKey, Vector2>(MeasureCacheCapacity);
+
+    /// <summary>建立当前缓存时所用的字体，用于检测 <see cref="GuiData.smallfont"/> 是否换了实例。</summary>
+    private static SpriteFont _measureCacheFont;
+
     private static Vector2 Measure(string text, float scale)
-        => string.IsNullOrEmpty(text) ? Vector2.Zero : GuiData.smallfont.MeasureString(text) * scale;
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return Vector2.Zero;
+        }
+
+        var font = GuiData.smallfont;
+
+        // 字体引用变了（locale / 字体重载）→ 旧度量作废，整体丢弃。
+        if (!ReferenceEquals(font, _measureCacheFont))
+        {
+            ResetMeasureCache(font);
+        }
+
+        // 先取快照：清空是换引用，快照要么是旧的完整字典、要么是新的空字典，两者都可用。
+        var cache = _measureCache;
+        var key = new MeasureKey(text, scale);
+
+        if (cache.TryGetValue(key, out var cached))
+        {
+            return cached;
+        }
+
+        // 未命中才真正测量 —— 这是本方法唯一还会走 SpriteFont.MeasureString 的分支。
+        var size = font.MeasureString(text) * scale;
+
+        if (cache.Count >= MeasureCacheCapacity)
+        {
+            cache = ResetMeasureCache(font);
+        }
+
+        cache[key] = size;
+        return size;
+    }
+
+    /// <summary>
+    /// 换一张新字典并登记当前字体。用新实例而非 <c>Clear()</c>：容量超限时整体作废最省事，
+    /// 也让旧字典连同它的全部条目一起被 GC 掉，不必逐条移除。
+    /// （调用方在游戏线程，无并发读者，故不需要为「换引用」附加线程安全语义。）
+    /// </summary>
+    private static Dictionary<MeasureKey, Vector2> ResetMeasureCache(SpriteFont font)
+    {
+        var fresh = new Dictionary<MeasureKey, Vector2>(MeasureCacheCapacity);
+        _measureCacheFont = font;
+        _measureCache = fresh;
+        return fresh;
+    }
+
+    /// <summary>
+    /// 测量缓存的键：文本 + 缩放。
+    ///
+    /// 必须实现 <see cref="IEquatable{T}"/>：不实现的话 <see cref="Dictionary{TKey, TValue}"/>
+    /// 会退回 <see cref="ValueType.Equals(object)"/> —— 反射比较并给每个字段装箱，在每帧的绘制
+    /// 路径上比重新测量还贵。
+    /// </summary>
+    private readonly struct MeasureKey : IEquatable<MeasureKey>
+    {
+        private readonly string _text;
+        private readonly float _scale;
+
+        internal MeasureKey(string text, float scale)
+        {
+            _text = text;
+            _scale = scale;
+        }
+
+        public bool Equals(MeasureKey other)
+            => string.Equals(_text, other._text, StringComparison.Ordinal) && _scale == other._scale;
+
+        public override bool Equals(object obj) => obj is MeasureKey other && Equals(other);
+
+        public override int GetHashCode()
+        {
+            // net472 没有 System.HashCode，手工组合两个字段的哈希。
+            unchecked
+            {
+                return (_text.GetHashCode() * 397) ^ _scale.GetHashCode();
+            }
+        }
+    }
 
     /// <summary>
     /// 超宽则截断并加省略号。
@@ -871,6 +1017,9 @@ internal static class HackPanel
     /// 全串平均字宽的比例估算 + 常数步修正，而非逐字符重测：后者每帧要为每个标签
     /// 调用 O(长度) 次 <c>MeasureString</c>，而这是每帧都在跑的绘制路径。
     /// 修正循环保证结果与逐字符法完全一致。
+    ///
+    /// 修正循环里的 <see cref="Measure"/> 走同帧测量缓存：同一个标签每帧截在同一位置，
+    /// 故除首帧外这些探测基本都是字典命中，不再触碰 <c>MeasureString</c>。
     /// </summary>
     private static string Ellipsize(string value, float maxWidth)
     {
@@ -902,9 +1051,33 @@ internal static class HackPanel
         return Mid(value, cut);
     }
 
-    /// <summary>取前 <paramref name="count"/> 个字符并追加省略号。</summary>
+    /// <summary>
+    /// <see cref="Mid"/> 的线程本地暂存缓冲。
+    ///
+    /// 用 <c>[ThreadStatic]</c> 而不是普通静态字段：普通静态缓冲会被并发的调用方互相覆盖
+    /// （写进去的字符还没拷成 string 就被下一方换掉），加锁又要在每帧路径上付同步代价。
+    /// 线程本地让每个线程各持一份，无需同步。
+    /// </summary>
+    [ThreadStatic]
+    private static char[] _midBuffer;
+
+    /// <summary>取前 <paramref name="count"/> 个字符并追加省略号（<b>一次</b>分配）。</summary>
     private static string Mid(string value, int count)
-        => value.Substring(0, count) + "..";
+    {
+        // 原实现 Substring + 拼接 = 两次分配（中间串随后即弃）。net472 没有 string.Create，
+        // 也没有 Concat(ReadOnlySpan, ReadOnlySpan)，故借线程本地缓冲拼好后只 new 一次。
+        var buffer = _midBuffer;
+        if (buffer == null || buffer.Length < count + 2)
+        {
+            buffer = new char[Math.Max(count + 2, 64)];
+            _midBuffer = buffer;
+        }
+
+        value.CopyTo(0, buffer, 0, count);
+        buffer[count] = '.';
+        buffer[count + 1] = '.';
+        return new string(buffer, 0, count + 2);
+    }
 
     private static Color Lighten(Color color, float amount)
         => Color.Lerp(color, Color.White, amount);

@@ -172,33 +172,9 @@ internal sealed class HackRun
                 continue;
             }
 
-            // 提权读的是已破解端口数（HackEngine.CanEscalate → OpenPortCount >
-            // portsNeededForCrack 且防火墙已解）。端口现在由动画的 Completed() 去开，
-            // 故必须等本台交给动画的端口全部开完再提权 —— 否则读数是假的，
-            // porthack 门禁必然不过，终端会多打一行 escalation gate not met。
-            //
-            // 等的是战果本身（PortState.Cracked），不是动画内部状态：九种程序的完成标志
-            // 各不相同，而 Cracked 一置真就说明该端口确实开好了（见 NativeExes.Settled）。
-            //
-            // 不推进 _index，下一帧重来 —— 这是「等」，不是「跳过」。
-            if (step.Kind == HackStepKind.Escalate && !NativeExes.Settled(step.Target))
+            if (WaitForNativeAnimation(step, deltaSeconds, os))
             {
-                _waitSeconds += deltaSeconds;
-                if (_waitSeconds < NativeWaitCapSeconds)
-                {
-                    return;
-                }
-
-                // 超时兜底：把这一台还没开的端口直接开掉，不再等动画。
-                // 必须回显 —— 玩家看到的动画没有跑完，得知道战果是补上的。
-                //
-                // force 连还在播的一起补，且复位计时：否则下一帧 Settled 仍为假，
-                // 会每帧重进这个分支、把同一行刷满终端。
-                var forced = NativeExes.Flush(os, step.Target, force: true);
-                _waitSeconds = 0f;
-                os.write("[autohack] " + step.Target.name + " :: animation wait timed out after "
-                    + (int)NativeWaitCapSeconds + "s - opened " + forced
-                    + " remaining port(s) directly.");
+                return;
             }
 
             var delay = DelayFor(step.Kind);
@@ -220,6 +196,46 @@ internal sealed class HackRun
                 return;
             }
         }
+    }
+
+    /// <summary>
+    /// 提权前的等待：本台交给动画的端口还没开完就不推进，返回 true 表示本帧就此打住；
+    /// 超过上限则把剩余端口直接开掉并回显，随后照常推进。
+    /// </summary>
+    private bool WaitForNativeAnimation(HackStep step, float deltaSeconds, OS os)
+    {
+        // 提权读的是已破解端口数（HackEngine.CanEscalate → OpenPortCount >
+        // portsNeededForCrack 且防火墙已解）。端口现在由动画的 Completed() 去开，
+        // 故必须等本台交给动画的端口全部开完再提权 —— 否则读数是假的，
+        // porthack 门禁必然不过，终端会多打一行 escalation gate not met。
+        //
+        // 等的是战果本身（PortState.Cracked），不是动画内部状态：九种程序的完成标志
+        // 各不相同，而 Cracked 一置真就说明该端口确实开好了（见 NativeExes.Settled）。
+        //
+        // 不推进 _index，下一帧重来 —— 这是「等」，不是「跳过」。
+        if (step.Kind != HackStepKind.Escalate || NativeExes.Settled(step.Target))
+        {
+            return false;
+        }
+
+        _waitSeconds += deltaSeconds;
+        if (_waitSeconds < NativeWaitCapSeconds)
+        {
+            return true;
+        }
+
+        // 超时兜底：把这一台还没开的端口直接开掉，不再等动画。
+        // 必须回显 —— 玩家看到的动画没有跑完，得知道战果是补上的。
+        //
+        // force 连还在播的一起补，且复位计时：否则下一帧 Settled 仍为假，
+        // 会每帧重进这个分支、把同一行刷满终端。
+        var forced = NativeExes.Flush(os, step.Target, force: true);
+        _waitSeconds = 0f;
+        os.write("[autohack] " + step.Target.name + " :: animation wait timed out after "
+            + (int)NativeWaitCapSeconds + "s - opened " + forced
+            + " remaining port(s) directly.");
+
+        return false;
     }
 
     /// <summary>单帧最多执行多少步，防止 Instant 档在极端规模下一帧卡死。</summary>
@@ -322,233 +338,326 @@ internal sealed class HackRun
         switch (step.Kind)
         {
             case HackStepKind.Connect:
-                Phase = "CONNECTING TO " + Upper(target.name);
-                Echo(os, step.Command);
-                Programs.connect(["connect", target.ip], os);
-
-                // 连接可以被目标主动拒绝。带 WhitelistConnectionDaemon 的机器在
-                // Computer.connect 里检查白名单，不通过就调 DisconnectTarget() 并
-                // return false（Computer.cs:383-388）；Programs.connect 只写一行
-                // "External Computer Refused Connection" 再把 os.connectedComp 置 null
-                // （Programs.cs:313-322）。两者都不返回值，故只能核对结果。
-                //
-                // 不核对就是假战果：OpenPort / Escalate / CleanLogs 全部直接对 target
-                // 对象操作，压根不经过连接，于是玩家看到 Refused 却收到「入侵成功」。
-                if (!ReferenceEquals(os.connectedComp, target))
-                {
-                    _refused.Add(target);
-                    os.write("[autohack] " + target.name
-                        + " :: connection refused (whitelist) - continuing without a session");
-                    break;
-                }
-
+                ApplyConnect(os, step);
                 break;
 
             case HackStepKind.Neutralize:
-                Phase = "DISABLING COUNTERATTACK ON " + Upper(target.name);
-                Neutralize(os, target);
+                ApplyNeutralize(os, target);
                 break;
 
             case HackStepKind.BypassProxy:
-                Phase = "BYPASSING PROXY ON " + Upper(target.name);
-                BypassProxy(os, target);
+                ApplyBypassProxy(os, target);
                 break;
 
             case HackStepKind.Login:
-                Phase = "LOGGING IN";
-
-                // login 成功即 giveAdmin（Computer.cs:851-855），与 porthack 终点等价，
-                // 但不破端口、不触发追踪。凭据来自目标自身的公开字段与 known 标记。
-                if (HackEngine.TryLogin(target, out var credential))
-                {
-                    Phase = "LOGGED IN";
-
-                    // 只回显 login 本身：原版 login 是交互式的（先问用户名再问密码，
-                    // Programs.cs:404-448），没有 "login <user> <pass>" 这种写法，
-                    // 拼上参数会是条游戏里不存在的命令。用了哪组凭据由下面的状态行交代。
-                    Echo(os, "login");
-
-                    // 本目标已提权，后续破端口/解防火墙/porthack 都不必跑。
-                    // 只登记「本次运行中确实靠 login 拿下的」机器 —— 不用
-                    // 「adminIP 已是我们」这个更宽的判据，否则 redo 模式
-                    // （重打已控节点）会连端口都不破，改变其语义。
-                    _loggedIn.Add(target);
-
-                    os.write("[autohack] " + target.name + " :: admin via login (" + credential + ") - skipping port cracks");
-                }
-                else
-                {
-                    // 失败必须可见：静默会把「为什么没跳过」这条最有价值的信息藏起来。
-                    os.write("[autohack] " + target.name + " :: login unavailable - cracking ports");
-                }
-
+                ApplyLogin(os, target);
                 break;
 
             case HackStepKind.Probe:
-                Phase = "PROBING " + Upper(target.name);
-
-                // 只有连着目标时 probe 才是在探它 —— 未连接时 Programs.probe 的目标是
-                // os.connectedComp ?? os.thisComputer（Programs.cs:1387），回显会是假命令。
-                // 端口报告本身取自目标对象（HackEngine.ProbeReport），不看连接，故照常输出。
-                if (os.connectedComp == target)
-                {
-                    Echo(os, step.Command ?? "probe");
-                }
-                foreach (var line in HackEngine.ProbeReport(target))
-                {
-                    os.write(line);
-                }
-
+                ApplyProbe(os, step);
                 break;
 
             case HackStepKind.OpenPort:
-                Phase = "CRACKING PORT " + step.Port.DisplayPort;
-
-                // 破解程序的作用域是「当前连接」；未连接时它无从打到目标上，
-                // 而下面的 HackEngine.OpenPort 是直接写目标机端口表，照样生效。
-                if (os.connectedComp == target)
-                {
-                    Echo(os, step.Command);
-                }
-
-                // 端口交给动画去开（v1.33.3）：那 9 个 exe 各自在 Completed() 里调
-                // openPort(<自己的原始终端口号>, ip)，与这里调 HackEngine.OpenPort 落在
-                // 同一个 PortState.Cracked 上（ComputerExtensions.cs:184-197 的 Prefix
-                // 直接拿调用方传入的原始端口号匹配 Record.OriginalPortNumber）。
-                // 故「动画跑完端口才开」不需要造机制 —— 只要不再提前写。
-                //
-                // Show 返回 false 的每一种情形都必须立即补开，否则端口永远不开：
-                // 未连接 / 已控 / 该端口没有可安全演出的程序（实测 73/642）/
-                // 队列满被丢弃。判据见 NativeExes.Show 的文档注释。
-                if (!Options.ShowExes || !NativeExes.Show(os, target, step.Port))
-                {
-                    HackEngine.OpenPort(target, step.Port, os.thisComputer.ip);
-                }
-
+                ApplyOpenPort(os, step);
                 break;
 
             case HackStepKind.SolveFirewall:
-                Phase = "BYPASSING FIREWALL ON " + Upper(target.name);
-
-                // 同 OpenPort：solve 命令的作用域是当前连接，未连接时是假命令。
-                if (os.connectedComp == target)
-                {
-                    Echo(os, "solve " + (target.firewall?.solution ?? string.Empty));
-                }
-
-                SolveFirewall(os, target);
+                ApplySolveFirewall(os, target);
                 break;
 
             case HackStepKind.Escalate:
-                Phase = "ESCALATING";
-
-                // 未连接时 porthack 在终端里无从下手（它读 os.connectedComp），
-                // 而下面的 giveAdmin 是直接写目标机的 adminIP，照样生效。
-                if (os.connectedComp == target)
-                {
-                    Echo(os, step.Command ?? "porthack");
-                }
-
-                // 只用 giveAdmin，不用 os.takeAdmin(ip)：后者内部还会 runCommand("connect " + ip)
-                // （OS.cs:1871-1879），而 connect 的第一件事就是无条件断开旧连接
-                // （Programs.connect，Programs.cs:235-236）—— 那会立刻触发 handleDisconnection
-                // 与管理员反扑，等于自找麻烦。此处已连着目标，写所有权标记即可。
-                // 两道门禁：先试原生 porthack 语义（端口数越不过门槛且防火墙已解），
-                // 过不了就直接写 adminIP —— 与原生提权成功的终态完全一致
-                // （<c>giveAdmin</c> 就是游戏自己提权时走的那一步，Computer.cs:851-855）。
-                //
-                // 这曾是可选开关（v1.33.1 的 ForceEscalate，缺省开），v1.33.2 起常驻：
-                // porthack 的门禁对实测存档里 22 台机器恒假（9 台防护机门槛 9999998、
-                // 13 台普通机器破满端口也差 1~6 个），留一个「默认开、关了就打不下」
-                // 的开关，等于给唯一出路配了个自毁按钮。
-                //
-                // 门禁过不了时**必须说出来**：静默成功会让玩家以为这台机器是靠破端口拿下的。
-                if (HackEngine.CanEscalate(target))
-                {
-                    target.giveAdmin(os.thisComputer.ip);
-                }
-                else if (HackEngine.ForceEscalate(target, os))
-                {
-                    os.write("[autohack] " + target.name
-                        + " :: escalation gate not met (needs > " + target.portsNeededForCrack
-                        + " open port(s), have " + HackEngine.OpenPortCount(target)
-                        + ") - forced admin anyway");
-                }
-
+                ApplyEscalate(os, step);
                 break;
 
             case HackStepKind.BypassWhitelist:
-                // 只对确实连不上的目标动手 —— 连接正常的机器没必要（也不该）改它的白名单。
-                //
-                // 判据不能写成「本轮被拒过」（_refused）：只有 Connect 步失败才会登记，
-                // 而「当前节点」模式压根不排 Connect 步（BuildSteps 里 alreadyConnected
-                // 为真时跳过，见 :679-683），于是这一步在所有直连路径上都静默空转 ——
-                // 正是「当前节点模式下带白名单的机器没反应」的最后一道门。
-                // 改为核对连接结果：连着就别碰，连不上才绕。
-                if (ReferenceEquals(os.connectedComp, target))
-                {
-                    break;
-                }
-
-                Phase = "BYPASSING WHITELIST ON " + Upper(target.name);
-
-                // 这一步不是终端指令（未连接状态下 <c>append</c> 的「当前目录」是玩家
-                // 自己的文件系统，回显出来会是一条假命令），故不发 Echo，只报状态。
-                var bypassNote = HackEngine.BypassWhitelist(os, target, os.thisComputer.ip);
-                if (bypassNote == null)
-                {
-                    os.write("[autohack] " + target.name
-                        + " :: no /Whitelist folder to touch - staying session-less");
-                    break;
-                }
-
-                os.write("[autohack] " + target.name + " :: " + bypassNote);
-
-                // 白名单已放行，重连应当成功；成了就恢复正常流程
-                // （清痕与断开都依赖连接，之前被 DependsOnConnection 挡掉了）。
-                Programs.connect(["connect", target.ip], os);
-                if (ReferenceEquals(os.connectedComp, target))
-                {
-                    _refused.Remove(target);
-                    os.write("[autohack] " + target.name + " :: reconnected - whitelist bypassed");
-                }
-
+                ApplyBypassWhitelist(os, target);
                 break;
 
             case HackStepKind.UploadMarker:
-                Phase = "UPLOADING PAYLOAD";
-                UploadMarker(os, target);
+                ApplyUploadMarker(os, target);
                 break;
 
             case HackStepKind.CleanLogs:
-                Phase = "WIPING TRACES";
-
-                // 不回显 rm：这一步已不是「敲一条终端命令」，而是按 IP 逐条点名删
-                // 日志条目（见 HackEngine.WipeTraces）。回显 rm log/* 反而误导 ——
-                // 玩家会以为整个 /log 被清空了，实际只删了提到自己 IP 的那些。
-                //
-                // 不需要连接：目标机与目录都由参数给定，不读 os.connectedComp。
-                var wiped = HackEngine.WipeTraces(target, os.thisComputer.ip);
-
-                // 战果必须可见。删 0 条时不吭声 —— 无痕迹的机器是多数。
-                if (wiped.Count > 0)
-                {
-                    os.write("[autohack] " + target.name + " :: wiped "
-                        + wiped.Count + " log entr" + (wiped.Count == 1 ? "y" : "ies")
-                        + " mentioning " + os.thisComputer.ip);
-                }
-
+                ApplyCleanLogs(os, target);
                 break;
 
             case HackStepKind.Disconnect:
-                Leave(os, target, step.Command ?? "dc");
+                ApplyDisconnect(os, step);
                 break;
 
             case HackStepKind.KillTrace:
-                Phase = "KILLING TRACE";
-                KillTrace(os);
+                ApplyKillTrace(os);
                 break;
         }
+    }
+
+    /// <summary>
+    /// 连接目标：回显 connect、执行连接，并核对是否被目标的白名单拒绝；
+    /// 被拒时登记 <see cref="_refused"/> 并报一行状态，后续步骤照常执行。
+    /// </summary>
+    private void ApplyConnect(OS os, HackStep step)
+    {
+        var target = step.Target;
+        Phase = "CONNECTING TO " + Upper(target.name);
+        Echo(os, step.Command);
+        Programs.connect(["connect", target.ip], os);
+
+        // 连接可以被目标主动拒绝。带 WhitelistConnectionDaemon 的机器在
+        // Computer.connect 里检查白名单，不通过就调 DisconnectTarget() 并
+        // return false（Computer.cs:383-388）；Programs.connect 只写一行
+        // "External Computer Refused Connection" 再把 os.connectedComp 置 null
+        // （Programs.cs:313-322）。两者都不返回值，故只能核对结果。
+        //
+        // 不核对就是假战果：OpenPort / Escalate / CleanLogs 全部直接对 target
+        // 对象操作，压根不经过连接，于是玩家看到 Refused 却收到「入侵成功」。
+        if (!ReferenceEquals(os.connectedComp, target))
+        {
+            _refused.Add(target);
+            os.write("[autohack] " + target.name
+                + " :: connection refused (whitelist) - continuing without a session");
+            return;
+        }
+    }
+
+    /// <summary>解除目标的延迟反扑，仅在实际解除时由 Neutralize 报一行。</summary>
+    private void ApplyNeutralize(OS os, Computer target)
+    {
+        Phase = "DISABLING COUNTERATTACK ON " + Upper(target.name);
+        Neutralize(os, target);
+    }
+
+    /// <summary>解除目标的跳板，仅在实际解除时由 BypassProxy 报一行。</summary>
+    private void ApplyBypassProxy(OS os, Computer target)
+    {
+        Phase = "BYPASSING PROXY ON " + Upper(target.name);
+        BypassProxy(os, target);
+    }
+
+    /// <summary>
+    /// 用已知凭据登录目标：成功即提权并登记 <see cref="_loggedIn"/>（后续破端口类步骤整体跳过），
+    /// 失败也写一行，避免「为什么没跳过」这条信息静默丢失。
+    /// </summary>
+    private void ApplyLogin(OS os, Computer target)
+    {
+        Phase = "LOGGING IN";
+
+        // login 成功即 giveAdmin（Computer.cs:851-855），与 porthack 终点等价，
+        // 但不破端口、不触发追踪。凭据来自目标自身的公开字段与 known 标记。
+        if (HackEngine.TryLogin(target, out var credential))
+        {
+            Phase = "LOGGED IN";
+
+            // 只回显 login 本身：原版 login 是交互式的（先问用户名再问密码，
+            // Programs.cs:404-448），没有 "login <user> <pass>" 这种写法，
+            // 拼上参数会是条游戏里不存在的命令。用了哪组凭据由下面的状态行交代。
+            Echo(os, "login");
+
+            // 本目标已提权，后续破端口/解防火墙/porthack 都不必跑。
+            // 只登记「本次运行中确实靠 login 拿下的」机器 —— 不用
+            // 「adminIP 已是我们」这个更宽的判据，否则 redo 模式
+            // （重打已控节点）会连端口都不破，改变其语义。
+            _loggedIn.Add(target);
+
+            os.write("[autohack] " + target.name + " :: admin via login (" + credential + ") - skipping port cracks");
+        }
+        else
+        {
+            // 失败必须可见：静默会把「为什么没跳过」这条最有价值的信息藏起来。
+            os.write("[autohack] " + target.name + " :: login unavailable - cracking ports");
+        }
+    }
+
+    /// <summary>侦察目标：连着目标时才回显 probe（否则是假命令），端口报告无条件输出。</summary>
+    private void ApplyProbe(OS os, HackStep step)
+    {
+        var target = step.Target;
+        Phase = "PROBING " + Upper(target.name);
+
+        // 只有连着目标时 probe 才是在探它 —— 未连接时 Programs.probe 的目标是
+        // os.connectedComp ?? os.thisComputer（Programs.cs:1387），回显会是假命令。
+        // 端口报告本身取自目标对象（HackEngine.ProbeReport），不看连接，故照常输出。
+        if (os.connectedComp == target)
+        {
+            Echo(os, step.Command ?? "probe");
+        }
+        foreach (var line in HackEngine.ProbeReport(target))
+        {
+            os.write(line);
+        }
+    }
+
+    /// <summary>
+    /// 破解单个端口：连着目标时才回显破解程序；端口优先交给原生动画去开，
+    /// 演出不可用时立即直接补开，保证端口不会永远不开。
+    /// </summary>
+    private void ApplyOpenPort(OS os, HackStep step)
+    {
+        var target = step.Target;
+        Phase = "CRACKING PORT " + step.Port.DisplayPort;
+
+        // 破解程序的作用域是「当前连接」；未连接时它无从打到目标上，
+        // 而下面的 HackEngine.OpenPort 是直接写目标机端口表，照样生效。
+        if (os.connectedComp == target)
+        {
+            Echo(os, step.Command);
+        }
+
+        // 端口交给动画去开（v1.33.3）：那 9 个 exe 各自在 Completed() 里调
+        // openPort(<自己的原始终端口号>, ip)，与这里调 HackEngine.OpenPort 落在
+        // 同一个 PortState.Cracked 上（ComputerExtensions.cs:184-197 的 Prefix
+        // 直接拿调用方传入的原始端口号匹配 Record.OriginalPortNumber）。
+        // 故「动画跑完端口才开」不需要造机制 —— 只要不再提前写。
+        //
+        // Show 返回 false 的每一种情形都必须立即补开，否则端口永远不开：
+        // 未连接 / 已控 / 该端口没有可安全演出的程序（实测 73/642）/
+        // 队列满被丢弃。判据见 NativeExes.Show 的文档注释。
+        if (!Options.ShowExes || !NativeExes.Show(os, target, step.Port))
+        {
+            HackEngine.OpenPort(target, step.Port, os.thisComputer.ip);
+        }
+    }
+
+    /// <summary>解目标防火墙：连着目标时才回显 solve，实际解除时由 SolveFirewall 报一行。</summary>
+    private void ApplySolveFirewall(OS os, Computer target)
+    {
+        Phase = "BYPASSING FIREWALL ON " + Upper(target.name);
+
+        // 同 OpenPort：solve 命令的作用域是当前连接，未连接时是假命令。
+        if (os.connectedComp == target)
+        {
+            Echo(os, "solve " + (target.firewall?.solution ?? string.Empty));
+        }
+
+        SolveFirewall(os, target);
+    }
+
+    /// <summary>
+    /// 提权：连着目标时才回显 porthack；先试原生门禁，过不了就强制写 adminIP，
+    /// 并把「门禁没过」这件事写进终端。
+    /// </summary>
+    private void ApplyEscalate(OS os, HackStep step)
+    {
+        var target = step.Target;
+        Phase = "ESCALATING";
+
+        // 未连接时 porthack 在终端里无从下手（它读 os.connectedComp），
+        // 而下面的 giveAdmin 是直接写目标机的 adminIP，照样生效。
+        if (os.connectedComp == target)
+        {
+            Echo(os, step.Command ?? "porthack");
+        }
+
+        // 只用 giveAdmin，不用 os.takeAdmin(ip)：后者内部还会 runCommand("connect " + ip)
+        // （OS.cs:1871-1879），而 connect 的第一件事就是无条件断开旧连接
+        // （Programs.connect，Programs.cs:235-236）—— 那会立刻触发 handleDisconnection
+        // 与管理员反扑，等于自找麻烦。此处已连着目标，写所有权标记即可。
+        // 两道门禁：先试原生 porthack 语义（端口数越不过门槛且防火墙已解），
+        // 过不了就直接写 adminIP —— 与原生提权成功的终态完全一致
+        // （<c>giveAdmin</c> 就是游戏自己提权时走的那一步，Computer.cs:851-855）。
+        //
+        // 这曾是可选开关（v1.33.1 的 ForceEscalate，缺省开），v1.33.2 起常驻：
+        // porthack 的门禁对实测存档里 22 台机器恒假（9 台防护机门槛 9999998、
+        // 13 台普通机器破满端口也差 1~6 个），留一个「默认开、关了就打不下」
+        // 的开关，等于给唯一出路配了个自毁按钮。
+        //
+        // 门禁过不了时**必须说出来**：静默成功会让玩家以为这台机器是靠破端口拿下的。
+        if (HackEngine.CanEscalate(target))
+        {
+            target.giveAdmin(os.thisComputer.ip);
+        }
+        else if (HackEngine.ForceEscalate(target, os))
+        {
+            os.write("[autohack] " + target.name
+                + " :: escalation gate not met (needs > " + target.portsNeededForCrack
+                + " open port(s), have " + HackEngine.OpenPortCount(target)
+                + ") - forced admin anyway");
+        }
+    }
+
+    /// <summary>
+    /// 绕过目标白名单：只对确实连不上的目标动手，放行后重连并解除
+    /// <see cref="_refused"/> 登记；连着时是空操作。
+    /// </summary>
+    private void ApplyBypassWhitelist(OS os, Computer target)
+    {
+        // 只对确实连不上的目标动手 —— 连接正常的机器没必要（也不该）改它的白名单。
+        //
+        // 判据不能写成「本轮被拒过」（_refused）：只有 Connect 步失败才会登记，
+        // 而「当前节点」模式压根不排 Connect 步（BuildSteps 里 alreadyConnected
+        // 为真时跳过，见 :679-683），于是这一步在所有直连路径上都静默空转 ——
+        // 正是「当前节点模式下带白名单的机器没反应」的最后一道门。
+        // 改为核对连接结果：连着就别碰，连不上才绕。
+        if (ReferenceEquals(os.connectedComp, target))
+        {
+            return;
+        }
+
+        Phase = "BYPASSING WHITELIST ON " + Upper(target.name);
+
+        // 这一步不是终端指令（未连接状态下 <c>append</c> 的「当前目录」是玩家
+        // 自己的文件系统，回显出来会是一条假命令），故不发 Echo，只报状态。
+        var bypassNote = HackEngine.BypassWhitelist(os, target, os.thisComputer.ip);
+        if (bypassNote == null)
+        {
+            os.write("[autohack] " + target.name
+                + " :: no /Whitelist folder to touch - staying session-less");
+            return;
+        }
+
+        os.write("[autohack] " + target.name + " :: " + bypassNote);
+
+        // 白名单已放行，重连应当成功；成了就恢复正常流程
+        // （清痕与断开都依赖连接，之前被 DependsOnConnection 挡掉了）。
+        Programs.connect(["connect", target.ip], os);
+        if (ReferenceEquals(os.connectedComp, target))
+        {
+            _refused.Remove(target);
+            os.write("[autohack] " + target.name + " :: reconnected - whitelist bypassed");
+        }
+    }
+
+    /// <summary>投放标记文件：只在目标确已拿下（含靠 login 提权）时写 autohack.txt。</summary>
+    private void ApplyUploadMarker(OS os, Computer target)
+    {
+        Phase = "UPLOADING PAYLOAD";
+        UploadMarker(os, target);
+    }
+
+    /// <summary>
+    /// 清痕：按 IP 逐条点名删目标 /log 中提及玩家 IP 的条目，删到才报一行；
+    /// 不回显 rm，也不依赖连接。
+    /// </summary>
+    private void ApplyCleanLogs(OS os, Computer target)
+    {
+        Phase = "WIPING TRACES";
+
+        // 不回显 rm：这一步已不是「敲一条终端命令」，而是按 IP 逐条点名删
+        // 日志条目（见 HackEngine.WipeTraces）。回显 rm log/* 反而误导 ——
+        // 玩家会以为整个 /log 被清空了，实际只删了提到自己 IP 的那些。
+        //
+        // 不需要连接：目标机与目录都由参数给定，不读 os.connectedComp。
+        var wiped = HackEngine.WipeTraces(target, os.thisComputer.ip);
+
+        // 战果必须可见。删 0 条时不吭声 —— 无痕迹的机器是多数。
+        if (wiped.Count > 0)
+        {
+            os.write("[autohack] " + target.name + " :: wiped "
+                + wiped.Count + " log entr" + (wiped.Count == 1 ? "y" : "ies")
+                + " mentioning " + os.thisComputer.ip);
+        }
+    }
+
+    /// <summary>断开连接：由 Leave 解除反扑、回显并静默断开；未连接时是空操作。</summary>
+    private void ApplyDisconnect(OS os, HackStep step)
+    {
+        Leave(os, step.Target, step.Command ?? "dc");
+    }
+
+    /// <summary>终止进行中的追踪，实际停掉时写一行确认。</summary>
+    private void ApplyKillTrace(OS os)
+    {
+        Phase = "KILLING TRACE";
+        KillTrace(os);
     }
 
     /// <summary>
@@ -756,110 +865,152 @@ internal sealed class HackRun
                 continue;
             }
 
-            var alreadyConnected = ReferenceEquals(target, os.connectedComp);
-            if (options.ConnectFirst && !alreadyConnected)
-            {
-                steps.Add(new HackStep(HackStepKind.Connect, target, default, "connect " + target.ip));
-            }
-
-            // 独立成步而非挂在 Connect 上：direct/已连接路径没有 Connect 步，同样需要解除反扑。
-            steps.Add(new HackStep(HackStepKind.Neutralize, target, default, null));
-
-            steps.Add(new HackStep(HackStepKind.Probe, target, default, "probe"));
-
-            // 已知凭据登录排在最前：成功即提权，后面整段破端口动作都不必跑。
-            // 放在 probe 之后是为了让终端先有原生端口报告，再看到 login。
-            //
-            // EOS 设备无条件排这一步：它的端口容量等于提权门槛，破端口是死路，
-            // 固定密码 "alpine" 才是游戏设计的正路（见 HackEngine.IsEosDevice）。
-            if (options.UseCredentials || HackEngine.IsEosDevice(target))
-            {
-                steps.Add(new HackStep(HackStepKind.Login, target, default, null));
-            }
-
-            var ports = HackEngine.CrackablePorts(target);
-            if (ports.Count > 0 && HackEngine.ProxyActive(target))
-            {
-                steps.Add(new HackStep(HackStepKind.BypassProxy, target, default, null));
-            }
-
-            foreach (var port in ports)
-            {
-                steps.Add(new HackStep(HackStepKind.OpenPort, target, port, HackEngine.CrackCommand(port)));
-
-                // 每个端口后立刻清一次追踪（用户定的行为；此前只在每台末尾清一次）。
-                //
-                // 计时上两者都安全，不是缺陷修复：traceTime = max(10 - security, 3) * 15，
-                // 最小 45 秒（Computer.cs:224），而单台的端口步总耗时 = 端口数 × PortDelay，
-                // 量级是秒 —— 每台清一次就已经比倒计时快一个数量级。
-                // 每端口一次的实际差别是「追踪状态在端口之间也归零」：演出 exe 的构造体
-                // 会调 hostileActionTaken()（PacificPortExe.cs:26、SSHCrackExe.cs:90、
-                // SMTPoverflowExe.cs:61 等），traceTime > 0 时即
-                // os.traceTracker.start → os.warningFlash()（Computer.cs:300、
-                // TraceTracker.cs:110）—— 每端口清一次，跑的过程中就不会出现常亮的
-                // 追踪条与闪屏。
-                //
-                // 成本为零：KillTrace 不吃节流（见 DelayFor），且未激活时
-                // HackEngine.KillTrace 直接返回 false、连一行输出都没有。
-                //
-                // 脚本模式不插这一步 —— 那份次序由玩家显式书写，killtrace 是脚本可写的
-                // 动作（HackScript.cs:81），末尾也已有兜底，不该由插件改写脚本语义。
-                steps.Add(new HackStep(HackStepKind.KillTrace, target, default, null));
-            }
-
-            // 防火墙必须在 porthack 之前解 —— 游戏自己的门禁要求
-            // firewall.solved（OS.cs:1918-1930），未解则 porthack 直接被拒。
-            if (target.firewall is { solved: false })
-            {
-                steps.Add(new HackStep(HackStepKind.SolveFirewall, target, default, null));
-            }
-
-            steps.Add(new HackStep(HackStepKind.Escalate, target, default, "porthack"));
-
-            // 白名单机器无条件排一步绕过（与开关解耦）：它的 connect 会被拒，
-            // 而破端口/提权不经连接、照样能拿下 —— 拿下之后再把自己的 IP 追加进它的
-            // /Whitelist/list.txt，重连即恢复会话，后续清痕与断开才走得通。
-            // 这是游戏设计的正路（官方任务 PAE2_Whitelist.xml 的 list_add_manual.txt
-            // 明写「append list.txt <你的IP>」），详见 HackEngine.BypassWhitelist。
-            if (HackEngine.HasWhitelist(target))
-            {
-                steps.Add(new HackStep(HackStepKind.BypassWhitelist, target, default, null));
-            }
-
-            if (options.UploadMarker)
-            {
-                steps.Add(new HackStep(HackStepKind.UploadMarker, target, default, null));
-            }
-
-            // 清痕排在断开**之前**是硬要求：断开本身会往目标 /log 写一条
-            // "<玩家IP> Disconnected"（Computer.disconnecting，Computer.cs:722-727），
-            // 那条也含玩家 IP，排在断开后就得再清一遍。
-            //
-            // 不需要回显也不需要连接：清痕走
-            // Computer.deleteFile(ipFrom, 名, folderPath)（HackEngine.WipeTraces），
-            // 目标机与目录都由参数给定，不读 os.connectedComp / navigationPath ——
-            // 这正是它从 DependsOnConnection 名单里退出来的原因。
-            //
-            // 这一步**不设开关**：留痕的代价是带 tracker="true" 的机器在断开时
-            // 自动排一个脱机追踪（OS.handleDisconnection，OS.cs:944-960 →
-            // TrackerCompleteSequence.cs:30-47），10~20 秒后计时归零端掉玩家。
-            // 而 wipe 删的只是含玩家 IP 的条目，目标机自己的历史原样保留 ——
-            // 没有需要玩家权衡的取舍。要留痕传 'keep'。
-            if (options.WipeTraces)
-            {
-                steps.Add(new HackStep(HackStepKind.CleanLogs, target, default, null));
-            }
-
-            if (options.Disconnect)
-            {
-                steps.Add(new HackStep(HackStepKind.Disconnect, target, default, "dc"));
-            }
-
-            // 断开已让 TraceTracker 自己失效；这一步是确定性的兜底 ——
-            // stay 模式（不断开）下它是唯一的止血点。走 stop()，零每帧开销。
-            steps.Add(new HackStep(HackStepKind.KillTrace, target, default, null));
+            AppendTargetSteps(steps, target, options, os);
         }
 
+        AppendSkippedSteps(steps, skipped, options);
+        AppendSelfStep(steps, os, options);
+
+        return steps;
+    }
+
+    /// <summary>
+    /// 为一个目标展开内置次序：连接 → 侦察 → 解跳板 → 逐端口攻破 → 提权 → 投放 → 清痕 → 断开。
+    /// 本方法只负责把四段串起来，各段的判据与注释都在对应的小方法里。
+    /// </summary>
+    private static void AppendTargetSteps(
+        List<HackStep> steps, Computer target, HackOptions options, OS os)
+    {
+        AppendEngageSteps(steps, target, options, os);
+        AppendPortSteps(steps, target);
+        AppendEscalateSteps(steps, target);
+        AppendCleanupSteps(steps, target, options);
+    }
+
+    /// <summary>入场的四步：连接（可选）→ 解除反扑 → 侦察 → 登录（可选）→ 解跳板（可选）。</summary>
+    private static void AppendEngageSteps(
+        List<HackStep> steps, Computer target, HackOptions options, OS os)
+    {
+        var alreadyConnected = ReferenceEquals(target, os.connectedComp);
+        if (options.ConnectFirst && !alreadyConnected)
+        {
+            steps.Add(new HackStep(HackStepKind.Connect, target, default, "connect " + target.ip));
+        }
+
+        // 独立成步而非挂在 Connect 上：direct/已连接路径没有 Connect 步，同样需要解除反扑。
+        steps.Add(new HackStep(HackStepKind.Neutralize, target, default, null));
+
+        steps.Add(new HackStep(HackStepKind.Probe, target, default, "probe"));
+
+        // 已知凭据登录排在最前：成功即提权，后面整段破端口动作都不必跑。
+        // 放在 probe 之后是为了让终端先有原生端口报告，再看到 login。
+        //
+        // EOS 设备无条件排这一步：它的端口容量等于提权门槛，破端口是死路，
+        // 固定密码 "alpine" 才是游戏设计的正路（见 HackEngine.IsEosDevice）。
+        if (options.UseCredentials || HackEngine.IsEosDevice(target))
+        {
+            steps.Add(new HackStep(HackStepKind.Login, target, default, null));
+        }
+
+        var ports = HackEngine.CrackablePorts(target);
+        if (ports.Count > 0 && HackEngine.ProxyActive(target))
+        {
+            steps.Add(new HackStep(HackStepKind.BypassProxy, target, default, null));
+        }
+    }
+
+    /// <summary>逐端口攻破；每个端口后跟一步反追踪（理由见循环内注释）。</summary>
+    private static void AppendPortSteps(List<HackStep> steps, Computer target)
+    {
+        foreach (var port in HackEngine.CrackablePorts(target))
+        {
+            steps.Add(new HackStep(HackStepKind.OpenPort, target, port, HackEngine.CrackCommand(port)));
+
+            // 每个端口后立刻清一次追踪（用户定的行为；此前只在每台末尾清一次）。
+            //
+            // 计时上两者都安全，不是缺陷修复：traceTime = max(10 - security, 3) * 15，
+            // 最小 45 秒（Computer.cs:224），而单台的端口步总耗时 = 端口数 × PortDelay，
+            // 量级是秒 —— 每台清一次就已经比倒计时快一个数量级。
+            // 每端口一次的实际差别是「追踪状态在端口之间也归零」：演出 exe 的构造体
+            // 会调 hostileActionTaken()（PacificPortExe.cs:26、SSHCrackExe.cs:90、
+            // SMTPoverflowExe.cs:61 等），traceTime > 0 时即
+            // os.traceTracker.start → os.warningFlash()（Computer.cs:300、
+            // TraceTracker.cs:110）—— 每端口清一次，跑的过程中就不会出现常亮的
+            // 追踪条与闪屏。
+            //
+            // 成本为零：KillTrace 不吃节流（见 DelayFor），且未激活时
+            // HackEngine.KillTrace 直接返回 false、连一行输出都没有。
+            //
+            // 脚本模式不插这一步 —— 那份次序由玩家显式书写，killtrace 是脚本可写的
+            // 动作（HackScript.cs:81），末尾也已有兜底，不该由插件改写脚本语义。
+            steps.Add(new HackStep(HackStepKind.KillTrace, target, default, null));
+        }
+    }
+
+    /// <summary>解防火墙 → 提权 → 白名单绕过 → 投放标记。</summary>
+    private static void AppendEscalateSteps(List<HackStep> steps, Computer target)
+    {
+        // 防火墙必须在 porthack 之前解 —— 游戏自己的门禁要求
+        // firewall.solved（OS.cs:1918-1930），未解则 porthack 直接被拒。
+        if (target.firewall is { solved: false })
+        {
+            steps.Add(new HackStep(HackStepKind.SolveFirewall, target, default, null));
+        }
+
+        steps.Add(new HackStep(HackStepKind.Escalate, target, default, "porthack"));
+
+        // 白名单机器无条件排一步绕过（与开关解耦）：它的 connect 会被拒，
+        // 而破端口/提权不经连接、照样能拿下 —— 拿下之后再把自己的 IP 追加进它的
+        // /Whitelist/list.txt，重连即恢复会话，后续清痕与断开才走得通。
+        // 这是游戏设计的正路（官方任务 PAE2_Whitelist.xml 的 list_add_manual.txt
+        // 明写「append list.txt <你的IP>」），详见 HackEngine.BypassWhitelist。
+        if (HackEngine.HasWhitelist(target))
+        {
+            steps.Add(new HackStep(HackStepKind.BypassWhitelist, target, default, null));
+        }
+    }
+
+    /// <summary>收尾：投放（可选）→ 清痕（可选）→ 断开（可选）→ 反追踪兜底。</summary>
+    private static void AppendCleanupSteps(List<HackStep> steps, Computer target, HackOptions options)
+    {
+        if (options.UploadMarker)
+        {
+            steps.Add(new HackStep(HackStepKind.UploadMarker, target, default, null));
+        }
+
+        // 清痕排在断开**之前**是硬要求：断开本身会往目标 /log 写一条
+        // "<玩家IP> Disconnected"（Computer.disconnecting，Computer.cs:722-727），
+        // 那条也含玩家 IP，排在断开后就得再清一遍。
+        //
+        // 不需要回显也不需要连接：清痕走
+        // Computer.deleteFile(ipFrom, 名, folderPath)（HackEngine.WipeTraces），
+        // 目标机与目录都由参数给定，不读 os.connectedComp / navigationPath ——
+        // 这正是它从 DependsOnConnection 名单里退出来的原因。
+        //
+        // 这一步**不设开关**：留痕的代价是带 tracker="true" 的机器在断开时
+        // 自动排一个脱机追踪（OS.handleDisconnection，OS.cs:944-960 →
+        // TrackerCompleteSequence.cs:30-47），10~20 秒后计时归零端掉玩家。
+        // 而 wipe 删的只是含玩家 IP 的条目，目标机自己的历史原样保留 ——
+        // 没有需要玩家权衡的取舍。要留痕传 'keep'。
+        if (options.WipeTraces)
+        {
+            steps.Add(new HackStep(HackStepKind.CleanLogs, target, default, null));
+        }
+
+        if (options.Disconnect)
+        {
+            steps.Add(new HackStep(HackStepKind.Disconnect, target, default, "dc"));
+        }
+
+        // 断开已让 TraceTracker 自己失效；这一步是确定性的兜底 ——
+        // stay 模式（不断开）下它是唯一的止血点。走 stop()，零每帧开销。
+        steps.Add(new HackStep(HackStepKind.KillTrace, target, default, null));
+    }
+
+    /// <summary>为被剔除的机器追加清痕步骤（<c>WipeTraces</c> 为真时）。</summary>
+    private static void AppendSkippedSteps(
+        List<HackStep> steps, IReadOnlyList<Computer> skipped, HackOptions options)
+    {
         // 被剔除的机器照样清痕：它们此前进过、破过、侦察过，/log 里留着痕迹，
         // 「跳过入侵」不等于「放过证据」。排在全部正常步骤之后 —— 正常流程不会再碰
         // 这些机器，此刻清是终点动作，不会有新记录再追加进来。
@@ -871,7 +1022,11 @@ internal sealed class HackRun
                 steps.Add(new HackStep(HackStepKind.CleanLogs, comp, default, null));
             }
         }
+    }
 
+    /// <summary>为玩家自己的机器追加清痕步骤（<c>WipeTraces</c> 为真时），必须排在全部步骤之后。</summary>
+    private static void AppendSelfStep(List<HackStep> steps, OS os, HackOptions options)
+    {
         // 玩家自己的机器也在同一口径内 —— 它的 /log 里同样有指向自己的条目
         // （"<目标IP> Disconnected" 之类），那就是「我的痕迹」。
         //
@@ -884,8 +1039,6 @@ internal sealed class HackRun
         {
             steps.Add(new HackStep(HackStepKind.CleanLogs, os.thisComputer, default, null));
         }
-
-        return steps;
     }
 
     /// <summary>
@@ -919,39 +1072,7 @@ internal sealed class HackRun
 
         foreach (var action in script.Actions)
         {
-            // connect 已被前置步骤登记过时（ConnectFirst 模式），脚本里再写就跳过。
-            if (action.Kind == HackStepKind.Connect)
-            {
-                if (connected || !emitted.Add(HackStepKind.Connect))
-                {
-                    continue;
-                }
-
-                steps.Add(new HackStep(HackStepKind.Connect, target, default, "connect " + target.ip));
-                continue;
-            }
-
-            // OpenPort 可重复（逐端口展开）。CleanLogs 也可重复 —— 它对空 /log
-            // 是幂等的（WipeTraces 返回空列表、不输出），而「证据必须消失」是硬承诺，
-            // 让玩家写两次就多清一次比静默吞掉第二个更符合预期。
-            // 其余动作改的是游戏状态，重复出现只取首次。
-            if (action.Kind is not (HackStepKind.OpenPort or HackStepKind.CleanLogs) &&
-                !emitted.Add(action.Kind))
-            {
-                continue;
-            }
-
-            if (action.Kind == HackStepKind.OpenPort)
-            {
-                foreach (var step in ExpandPorts(target, action.Port))
-                {
-                    steps.Add(step);
-                }
-
-                continue;
-            }
-
-            steps.Add(new HackStep(action.Kind, target, default, CommandFor(action.Kind)));
+            AppendScriptedAction(steps, target, action, emitted, connected);
         }
 
         // 清痕排在 KillTrace 之前，且**不设开关**（与内置次序同一口径，见 BuildSteps）。
@@ -974,6 +1095,49 @@ internal sealed class HackRun
         {
             steps.Add(new HackStep(HackStepKind.KillTrace, target, default, null));
         }
+    }
+
+    /// <summary>
+    /// 追加脚本里的单个动作：<c>connect</c> 已登记则跳过、<c>openPort</c> 逐端口展开，
+    /// 其余动作重复出现只取首次（<c>cleanlogs</c> 例外，它幂等且可重复）。
+    /// </summary>
+    private static void AppendScriptedAction(
+        List<HackStep> steps, Computer target, HackScript.Action action,
+        HashSet<HackStepKind> emitted, bool connected)
+    {
+        // connect 已被前置步骤登记过时（ConnectFirst 模式），脚本里再写就跳过。
+        if (action.Kind == HackStepKind.Connect)
+        {
+            if (connected || !emitted.Add(HackStepKind.Connect))
+            {
+                return;
+            }
+
+            steps.Add(new HackStep(HackStepKind.Connect, target, default, "connect " + target.ip));
+            return;
+        }
+
+        // OpenPort 可重复（逐端口展开）。CleanLogs 也可重复 —— 它对空 /log
+        // 是幂等的（WipeTraces 返回空列表、不输出），而「证据必须消失」是硬承诺，
+        // 让玩家写两次就多清一次比静默吞掉第二个更符合预期。
+        // 其余动作改的是游戏状态，重复出现只取首次。
+        if (action.Kind is not (HackStepKind.OpenPort or HackStepKind.CleanLogs) &&
+            !emitted.Add(action.Kind))
+        {
+            return;
+        }
+
+        if (action.Kind == HackStepKind.OpenPort)
+        {
+            foreach (var step in ExpandPorts(target, action.Port))
+            {
+                steps.Add(step);
+            }
+
+            return;
+        }
+
+        steps.Add(new HackStep(action.Kind, target, default, CommandFor(action.Kind)));
     }
 
     /// <summary>

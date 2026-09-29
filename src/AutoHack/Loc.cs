@@ -1,6 +1,7 @@
 namespace AutoHack;
 
 using System.Globalization;
+using System.Threading;
 using Hacknet;
 
 /// <summary>
@@ -75,12 +76,68 @@ internal static class Loc
             ["READY"] = "就绪",
         };
 
-    /// <summary>查一条静态文案。</summary>
+    /// <summary>
+    /// <see cref="T(string)"/> 的查表结果缓存。
+    ///
+    /// 失效键 = <see cref="Settings.ActiveLocale"/> 与 <see cref="LocaleTerms.ActiveTerms"/>.Count 的组合：
+    /// 换语言时游戏对词表 <c>Clear()</c> 后重填，两者任一变化即整体失效、丢弃全部条目。
+    /// 未命中游戏词表、也未命中本表的输入同样入缓存（英文原文映射到英文原文），故每帧约 20 次
+    /// 的面板查表在首帧后都是纯字典命中，不再进入 <see cref="LocaleTerms.Loc"/> 的 ContainsKey + 索引器双查。
+    ///
+    /// 实例发布后不可变：<see cref="Entries"/> 只读，更新一律新建实例并用 <see cref="Volatile"/>
+    /// 整体替换引用 —— 这样即便有并发调用也不会读到撕裂对象。
+    /// （<see cref="T(string)"/> 的实际调用点全在绘制路径上，都在游戏线程；
+    /// 用 Volatile 是廉价保险，不是必需。）
+    /// </summary>
+    private sealed class Cache
+    {
+        /// <summary>建立本快照时的 <see cref="Settings.ActiveLocale"/>。</summary>
+        internal readonly string Locale;
+
+        /// <summary>建立本快照时的 <see cref="LocaleTerms.ActiveTerms"/> 条目数。</summary>
+        internal readonly int TermCount;
+
+        /// <summary>英文原文 → 已解析文案。发布后不再写入。</summary>
+        internal readonly Dictionary<string, string> Entries;
+
+        internal Cache(string locale, int termCount)
+        {
+            Locale = locale;
+            TermCount = termCount;
+            Entries = new Dictionary<string, string>(StringComparer.Ordinal);
+        }
+
+        /// <summary>当前游戏状态是否仍与本快照的失效键一致。</summary>
+        internal bool IsFresh
+            => TermCount == LocaleTerms.ActiveTerms.Count
+               && string.Equals(Locale, Settings.ActiveLocale, StringComparison.Ordinal);
+    }
+
+    /// <summary>当前生效的缓存快照；<c>null</c> 表示尚未建立。整体替换，绝不原地改。</summary>
+    private static Cache _cache;
+
+    /// <summary>
+    /// 查一条静态文案：缓存 → 游戏词表 → 本表 → 英文原文。
+    ///
+    /// <b>游戏词表命中的那一条不进缓存</b>。原因：本缓存的失效键是
+    /// <see cref="Settings.ActiveLocale"/> + <c>ActiveTerms.Count</c>，而 workshop mod
+    /// （如 ZeroDayToolKit）会写 <c>ActiveTerms[已有键] = 新值</c> —— 原地覆盖，Count 不变，
+    /// 失效键察觉不到，缓存会把旧译文一直发下去。
+    /// 游戏词表<b>未</b>命中时结果只由本类的静态 <see cref="Chinese"/> 表与英文原文决定，
+    /// 运行期恒定，缓存它没有这个风险 —— 而面板专有词（RUN / SCOPE / PORT INTERVAL…）
+    /// 恰好都落在这一支，故缓存收益基本不受影响。
+    /// </summary>
     internal static string T(string english)
     {
         if (string.IsNullOrEmpty(english))
         {
             return english;
+        }
+
+        var cache = Volatile.Read(ref _cache);
+        if (cache != null && cache.IsFresh && cache.Entries.TryGetValue(english, out var cached))
+        {
+            return cached;
         }
 
         // 游戏自己的词表优先（未命中时 Loc 原样返回，故比较是否变化即知有无命中）。
@@ -90,7 +147,33 @@ internal static class Loc
             return fromGame;
         }
 
-        return UseChinese && Chinese.TryGetValue(english, out var zh) ? zh : english;
+        var resolved = UseChinese && Chinese.TryGetValue(english, out var zh) ? zh : english;
+        Volatile.Write(ref _cache, Next(cache, english, resolved));
+        return resolved;
+    }
+
+    /// <summary>
+    /// 生成下一份快照：失效键变了就丢弃全部条目重建，否则复制现有条目再补一条（写时复制，
+    /// 避免并发写已发布的字典）。两个线程同时补不同条目时可能基于同一旧快照各复制一份，
+    /// 后发布者覆盖先发布者 —— 被覆盖的条目下次查询重新解析即可，不影响正确性。
+    /// </summary>
+    private static Cache Next(Cache current, string english, string resolved)
+    {
+        if (current == null || !current.IsFresh)
+        {
+            var rebuilt = new Cache(Settings.ActiveLocale, LocaleTerms.ActiveTerms.Count);
+            rebuilt.Entries[english] = resolved;
+            return rebuilt;
+        }
+
+        var next = new Cache(current.Locale, current.TermCount);
+        foreach (var pair in current.Entries)
+        {
+            next.Entries[pair.Key] = pair.Value;
+        }
+
+        next.Entries[english] = resolved;
+        return next;
     }
 
     // ── 带数字的文案 ────────────────────────────────────────────
@@ -116,6 +199,21 @@ internal static class Loc
     internal static string AdminTag()
         => UseChinese ? "  管理员" : "  admin";
 
-    private static string F(string english, string chinese, params object[] args)
-        => string.Format(CultureInfo.InvariantCulture, UseChinese ? chinese : english, args);
+    /// <summary>按当前语言取格式串，不做替换。</summary>
+    private static string Template(string english, string chinese)
+        => UseChinese ? chinese : english;
+
+    /// <summary>
+    /// 单数字文案。用 <see cref="string.Replace(string, string)"/> 替掉 <c>string.Format</c>：
+    /// 调用点传的都是 <c>int</c>，走 <c>params object[]</c> 会逐个装箱并多分配一个数组。
+    /// 格式串里只有 <c>{0}</c>/<c>{1}</c>，替换值只含数字与负号，不会引入新的占位符。
+    /// </summary>
+    private static string F(string english, string chinese, int arg0)
+        => Template(english, chinese).Replace("{0}", arg0.ToString(CultureInfo.InvariantCulture));
+
+    /// <summary>双数字文案：<c>{0}</c> 先于 <c>{1}</c> 替换，数字不含占位符，故次序无歧义。</summary>
+    private static string F(string english, string chinese, int arg0, int arg1)
+        => Template(english, chinese)
+            .Replace("{0}", arg0.ToString(CultureInfo.InvariantCulture))
+            .Replace("{1}", arg1.ToString(CultureInfo.InvariantCulture));
 }

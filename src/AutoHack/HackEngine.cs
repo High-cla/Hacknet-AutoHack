@@ -575,6 +575,26 @@ internal static class HackEngine
     /// </summary>
     internal static Computer[] SilentClosure(OS os, Computer origin) => Closure(os, origin, reveal: false);
 
+    /// <summary>
+    /// 一次广度优先遍历的全部共享状态：网络图、已入队下标、已发现下标与待展开队列。
+    /// 打包成结构体，使遍历的每一步只携带一个参数，而不是重复传递同一组引用。
+    /// </summary>
+    private readonly struct Traversal
+    {
+        internal readonly NetworkMap map;
+        internal readonly HashSet<int> seen;
+        internal readonly HashSet<int> discovered;
+        internal readonly Queue<int> frontier;
+
+        internal Traversal(NetworkMap map, HashSet<int> seen, HashSet<int> discovered, Queue<int> frontier)
+        {
+            this.map = map;
+            this.seen = seen;
+            this.discovered = discovered;
+            this.frontier = frontier;
+        }
+    }
+
     private static Computer[] Closure(OS os, Computer origin, bool reveal = true)
     {
         var map = os?.netMap;
@@ -598,6 +618,20 @@ internal static class HackEngine
         var discovered = map.visibleNodes == null
             ? new HashSet<int>()
             : new HashSet<int>(map.visibleNodes);
+        SeedSources(map, os, origin, seen, frontier);
+
+        if (seen.Count == 0)
+        {
+            return Array.Empty<Computer>();
+        }
+
+        return ExpandFrontier(new Traversal(map, seen, discovered, frontier), os, incoming, reveal);
+    }
+
+    /// <summary>种子入队：单源只取 origin，多源取玩家机加全部已发现节点。</summary>
+    private static void SeedSources(
+        NetworkMap map, OS os, Computer origin, HashSet<int> seen, Queue<int> frontier)
+    {
         if (origin != null)
         {
             // 单源：只要这一台。它不在本图上（换过地图）时 IndexOf 返回 -1，
@@ -615,17 +649,17 @@ internal static class HackEngine
                 }
             }
         }
+    }
 
-        if (seen.Count == 0)
-        {
-            return Array.Empty<Computer>();
-        }
-
+    /// <summary>主 BFS 循环：出队、跳过空/停用节点、收集结果、补 EOS 设备、双向展开邻边。</summary>
+    private static Computer[] ExpandFrontier(
+        Traversal traversal, OS os, List<int>[] incoming, bool reveal)
+    {
         var found = new List<Computer>();
-        while (frontier.Count > 0)
+        while (traversal.frontier.Count > 0)
         {
-            var index = frontier.Dequeue();
-            var comp = map.nodes[index];
+            var index = traversal.frontier.Dequeue();
+            var comp = traversal.map.nodes[index];
             if (comp == null || comp.disabled)
             {
                 continue;
@@ -638,10 +672,10 @@ internal static class HackEngine
 
             // EOS 设备挂在父机的 attatchedDeviceIDs 上，links 里没有反向边，
             // 必须在 links 展开之外单独补 —— 见 RevealAttachedDevices。
-            RevealAttachedDevices(map, os, comp, seen, discovered, frontier, reveal);
+            RevealAttachedDevices(traversal, os, comp, reveal);
 
-            Expand(map, seen, discovered, frontier, comp.links, reveal);
-            Expand(map, seen, discovered, frontier, incoming[index], reveal);
+            Expand(traversal, comp.links, reveal);
+            Expand(traversal, incoming[index], reveal);
         }
 
         return found.ToArray();
@@ -695,9 +729,7 @@ internal static class HackEngine
     /// 新节点委托 <c>NetworkMap.discoverNode</c> 标为已发现（NetworkMap.cs:415）。
     /// <paramref name="neighbors"/> 为 null 时无操作 —— 出边与入边都可能是空的。
     /// </summary>
-    private static void Expand(
-        NetworkMap map, HashSet<int> seen, HashSet<int> discovered, Queue<int> frontier,
-        List<int> neighbors, bool reveal = true)
+    private static void Expand(Traversal traversal, List<int> neighbors, bool reveal = true)
     {
         if (neighbors == null)
         {
@@ -706,23 +738,23 @@ internal static class HackEngine
 
         foreach (var next in neighbors)
         {
-            if (next < 0 || next >= map.nodes.Count || !seen.Add(next))
+            if (next < 0 || next >= traversal.map.nodes.Count || !traversal.seen.Add(next))
             {
                 continue;
             }
 
-            var neighbor = map.nodes[next];
+            var neighbor = traversal.map.nodes[next];
             if (neighbor == null || neighbor.disabled)
             {
                 continue;
             }
 
-            if (discovered.Add(next) && reveal)
+            if (traversal.discovered.Add(next) && reveal)
             {
-                map.discoverNode(neighbor);
+                traversal.map.discoverNode(neighbor);
             }
 
-            frontier.Enqueue(next);
+            traversal.frontier.Enqueue(next);
         }
     }
 
@@ -743,8 +775,7 @@ internal static class HackEngine
     /// 与游戏自身的「已发现」标记同源，不做自绘的伪发现。
     /// </summary>
     private static void RevealAttachedDevices(
-        NetworkMap map, OS os, Computer comp, HashSet<int> seen, HashSet<int> discovered, Queue<int> frontier,
-        bool reveal = true)
+        Traversal traversal, OS os, Computer comp, bool reveal = true)
     {
         var ids = comp?.attatchedDeviceIDs;
         if (string.IsNullOrEmpty(ids))
@@ -760,20 +791,20 @@ internal static class HackEngine
                 continue;
             }
 
-            var index = map.nodes.IndexOf(device);
-            if (index < 0 || !seen.Add(index))
+            var index = traversal.map.nodes.IndexOf(device);
+            if (index < 0 || !traversal.seen.Add(index))
             {
                 continue;
             }
 
             // 已在 visibleNodes 里的设备不重复 discoverNode（避免多余的高亮闪烁），
             // 但仍要入队 —— 它同样需要沿自己的 links 继续展开。
-            if (discovered.Add(index) && reveal)
+            if (traversal.discovered.Add(index) && reveal)
             {
-                map.discoverNode(device);
+                traversal.map.discoverNode(device);
             }
 
-            frontier.Enqueue(index);
+            traversal.frontier.Enqueue(index);
         }
     }
 
@@ -1266,6 +1297,28 @@ internal static class HackEngine
         }
 
         // 快照待删文件名（与 deleteFile 的 "*" 分支同一过滤条件），供回显与计数。
+        var removed = SnapshotDoomed(folder, only);
+
+        if (removed.Count == 0)
+        {
+            return Array.Empty<string>();
+        }
+
+        if (only == null)
+        {
+            DeleteAll(comp, ipFrom, folder, folderPath);
+        }
+        else
+        {
+            DeleteNamed(comp, ipFrom, folder, folderPath, removed);
+        }
+
+        return removed;
+    }
+
+    /// <summary>快照待删文件名：跳过空白名，传名单时只留名单内的名字。</summary>
+    private static List<string> SnapshotDoomed(Folder folder, IReadOnlyCollection<string> only)
+    {
         var removed = new List<string>(folder.files.Count);
         foreach (var file in folder.files)
         {
@@ -1280,11 +1333,13 @@ internal static class HackEngine
             }
         }
 
-        if (removed.Count == 0)
-        {
-            return Array.Empty<string>();
-        }
+        return removed;
+    }
 
+    /// <summary>全删路径：走 <c>"*"</c> 原语，随后无条件清空目录。</summary>
+    private static void DeleteAll(
+        Computer comp, string ipFrom, Folder folder, List<int> folderPath)
+    {
         // 游戏原语不只「返回 false」，它还会**抛异常**：deleteFile 对每个非 '@' 开头的
         // 文件调 log()，而 log() 直接 files.root.searchForFolder("log").files.Insert(...)
         // （Computer.cs:338-354）—— 目标机没有 log 夹时 searchForFolder 返回 null，
@@ -1292,16 +1347,34 @@ internal static class HackEngine
         // 故兜住它：原语是「尽量走」，下沉才是硬承诺。
         try
         {
-            if (only == null)
+            comp.deleteFile(ipFrom, "*", folderPath);
+        }
+        catch (Exception ex) when (ex is NullReferenceException or ArgumentOutOfRangeException
+                                       or IndexOutOfRangeException or ArgumentException)
+        {
+            // 原语中途失败不影响下沉：已删的已删，剩下的由下面清空，终态一致。
+            // 代价是多人同步消息可能少发一次 —— 比「什么都不删」可接受。
+        }
+
+        // 无条件复核，两条路径同一终态：原语的返回值不可信（权限拒绝时静默 false；
+        // folderPath 解析偏了会去删别的文件夹并照样返回 true），删除是硬承诺。
+        folder.files.Clear();
+    }
+
+    /// <summary>点名路径：逐条走 <c>deleteFile</c> 原语，随后按名无条件复核剔除。</summary>
+    private static void DeleteNamed(
+        Computer comp, string ipFrom, Folder folder, List<int> folderPath, List<string> removed)
+    {
+        // 游戏原语不只「返回 false」，它还会**抛异常**：deleteFile 对每个非 '@' 开头的
+        // 文件调 log()，而 log() 直接 files.root.searchForFolder("log").files.Insert(...)
+        // （Computer.cs:338-354）—— 目标机没有 log 夹时 searchForFolder 返回 null，
+        // 下一行就是 NRE。异常若外溢，「无条件清空」永不执行，表现仍是「按了没反应」。
+        // 故兜住它：原语是「尽量走」，下沉才是硬承诺。
+        try
+        {
+            foreach (var name in removed)
             {
-                comp.deleteFile(ipFrom, "*", folderPath);
-            }
-            else
-            {
-                foreach (var name in removed)
-                {
-                    comp.deleteFile(ipFrom, name, folderPath);
-                }
+                comp.deleteFile(ipFrom, name, folderPath);
             }
         }
         catch (Exception ex) when (ex is NullReferenceException or ArgumentOutOfRangeException
@@ -1313,26 +1386,17 @@ internal static class HackEngine
 
         // 无条件复核，两条路径同一终态：原语的返回值不可信（权限拒绝时静默 false；
         // folderPath 解析偏了会去删别的文件夹并照样返回 true），删除是硬承诺。
-        if (only == null)
+        foreach (var name in removed)
         {
-            folder.files.Clear();
-        }
-        else
-        {
-            foreach (var name in removed)
+            for (var i = 0; i < folder.files.Count; i++)
             {
-                for (var i = 0; i < folder.files.Count; i++)
+                if (string.Equals(folder.files[i]?.name, name, StringComparison.Ordinal))
                 {
-                    if (string.Equals(folder.files[i]?.name, name, StringComparison.Ordinal))
-                    {
-                        folder.files.RemoveAt(i);
-                        i--;
-                    }
+                    folder.files.RemoveAt(i);
+                    i--;
                 }
             }
         }
-
-        return removed;
     }
 
     /// <summary>

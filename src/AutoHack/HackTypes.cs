@@ -29,6 +29,74 @@ internal enum HackSpeed
     Instant,
 }
 
+/// <summary>
+/// 命令行别名对应的语义动作。<see cref="HackOptions.Parse"/> 用一次字典查找取代原先
+/// 对每个 token 依次线性扫描各别名数组；成员与 <see cref="HackOptions"/> 里那些别名数组一一对应，
+/// 别名文本只写在那里（唯一真源），此处不重复列举。
+/// </summary>
+internal enum Opt
+{
+    /// <summary>仅当前已连接的节点。</summary>
+    Connected,
+
+    /// <summary>从玩家机与已发现节点出发、沿网络连线可达的全部服务器。</summary>
+    Network,
+
+    /// <summary>留着痕迹不抹。</summary>
+    KeepTrace,
+
+    /// <summary>抹掉玩家自己留下的痕迹。</summary>
+    WipeTrace,
+
+    /// <summary>投放标记文件。</summary>
+    Marker,
+
+    /// <summary>不投放标记文件。</summary>
+    NoMarker,
+
+    /// <summary>把已控机器也纳入全网扫描。</summary>
+    Redo,
+
+    /// <summary>连内网节点一起扫。</summary>
+    AllNodes,
+
+    /// <summary>不先连接，直接对着目标干活。</summary>
+    Direct,
+
+    /// <summary>结束时保持连接。</summary>
+    Stay,
+
+    /// <summary>结束时断开连接。</summary>
+    Leave,
+
+    /// <summary>用已知凭据登入。</summary>
+    Credentials,
+
+    /// <summary>不用凭据，硬破端口。</summary>
+    NoCredentials,
+
+    /// <summary>把原生破解程序挂进 RAM 面板当演出。</summary>
+    ShowExes,
+
+    /// <summary>不挂演出。</summary>
+    NoShowExes,
+
+    /// <summary>换 IP。</summary>
+    ResetIP,
+
+    /// <summary>不换 IP。</summary>
+    NoResetIP,
+
+    /// <summary>每步之间等待。</summary>
+    Slow,
+
+    /// <summary>压缩非端口步间隔。</summary>
+    Fast,
+
+    /// <summary>非端口步合并到同一帧。</summary>
+    Instant,
+}
+
 /// <summary>一次入侵的运行参数（由命令行解析）。</summary>
 internal sealed record HackOptions(
     HackScope Scope,
@@ -101,6 +169,61 @@ internal sealed record HackOptions(
     private static readonly string[] RedoAliases = ["redo", "force"];
 
     /// <summary>
+    /// 别名 → 动作 的一次性查找表。键为小写别名，由上面各别名数组程序化构建 ——
+    /// 数组仍是唯一真源，新增别名只需改数组。
+    ///
+    /// <b>重复别名保留首条</b>（见 <see cref="AddAliases"/>）：这正是旧实现的行为 ——
+    /// 原先是一串 <c>if (XxxAliases.Contains(...)) { ...; continue; }</c>，靠前的数组先命中即胜出。
+    /// 不用 <c>Dictionary.Add</c>：它抛出的 <see cref="ArgumentException"/> 发生在<b>静态构造</b>里，
+    /// 会把整个类型变成永久不可用（<c>TypeInitializationException</c>），而调用链
+    /// <c>AutoHackPlugin.AutoHackCommand</c> → <c>HackOptions.Parse</c> 一路无人接，
+    /// 最终被 <c>OS.execute</c> 的 <c>catch (Exception)</c>（OS.cs:1833-1837）静默吞掉 ——
+    /// 表现为「autohack run 什么都不干且终端零输出」，比重复别名本身糟得多。
+    /// </summary>
+    private static readonly Dictionary<string, Opt> AliasMap = BuildAliasMap();
+
+    private static Dictionary<string, Opt> BuildAliasMap()
+    {
+        var map = new Dictionary<string, Opt>(StringComparer.Ordinal);
+        AddAliases(map, ConnectedAliases, Opt.Connected);
+        AddAliases(map, NetworkAliases, Opt.Network);
+        AddAliases(map, KeepTraceAliases, Opt.KeepTrace);
+        AddAliases(map, WipeTraceAliases, Opt.WipeTrace);
+        AddAliases(map, MarkerAliases, Opt.Marker);
+        AddAliases(map, NoMarkerAliases, Opt.NoMarker);
+        AddAliases(map, RedoAliases, Opt.Redo);
+        AddAliases(map, AllNodesAliases, Opt.AllNodes);
+        AddAliases(map, DirectAliases, Opt.Direct);
+        AddAliases(map, StayAliases, Opt.Stay);
+        AddAliases(map, LeaveAliases, Opt.Leave);
+        AddAliases(map, CredentialAliases, Opt.Credentials);
+        AddAliases(map, NoCredentialAliases, Opt.NoCredentials);
+        AddAliases(map, ShowExesAliases, Opt.ShowExes);
+        AddAliases(map, NoShowExesAliases, Opt.NoShowExes);
+        AddAliases(map, ResetIPAliases, Opt.ResetIP);
+        AddAliases(map, NoResetIPAliases, Opt.NoResetIP);
+        AddAliases(map, SlowAliases, Opt.Slow);
+        AddAliases(map, FastAliases, Opt.Fast);
+        AddAliases(map, InstantAliases, Opt.Instant);
+        return map;
+    }
+
+    /// <summary>
+    /// 把一个别名数组整体登记进 <see cref="AliasMap"/>。重复别名保留首条 ——
+    /// 与旧实现的「靠前数组先命中即胜出」逐字等价，且不会把静态构造变成异常源（见 <see cref="AliasMap"/>）。
+    /// </summary>
+    private static void AddAliases(Dictionary<string, Opt> map, string[] aliases, Opt opt)
+    {
+        foreach (var alias in aliases)
+        {
+            if (!map.ContainsKey(alias))
+            {
+                map[alias] = opt;
+            }
+        }
+    }
+
+    /// <summary>
     /// 脚本模式：用一份动作表取代内置次序。<c>script=&lt;文件名&gt;</c>，
     /// 文件按游戏的加载前缀解析（扩展目录或 Content/），详见 <see cref="HackScript"/>。
     /// </summary>
@@ -163,26 +286,37 @@ internal sealed record HackOptions(
 
             var lower = token.ToLowerInvariant();
 
-            if (ConnectedAliases.Contains(lower)) { scope = HackScope.Connected; continue; }
-            if (NetworkAliases.Contains(lower)) { scope = HackScope.Network; continue; }
-            if (KeepTraceAliases.Contains(lower)) { wipeTraces = false; continue; }
-            if (WipeTraceAliases.Contains(lower)) { wipeTraces = true; continue; }
-            if (MarkerAliases.Contains(lower)) { uploadMarker = true; continue; }
-            if (NoMarkerAliases.Contains(lower)) { uploadMarker = false; continue; }
-            if (RedoAliases.Contains(lower)) { skipOwned = false; continue; }
-            if (AllNodesAliases.Contains(lower)) { allNodes = true; continue; }
-            if (DirectAliases.Contains(lower)) { connectFirst = false; continue; }
-            if (StayAliases.Contains(lower)) { disconnect = false; continue; }
-            if (LeaveAliases.Contains(lower)) { disconnect = true; continue; }
-            if (CredentialAliases.Contains(lower)) { useCredentials = true; continue; }
-            if (NoCredentialAliases.Contains(lower)) { useCredentials = false; continue; }
-            if (ShowExesAliases.Contains(lower)) { showExes = true; continue; }
-            if (NoShowExesAliases.Contains(lower)) { showExes = false; continue; }
-            if (ResetIPAliases.Contains(lower)) { resetIP = true; continue; }
-            if (NoResetIPAliases.Contains(lower)) { resetIP = false; continue; }
-            if (SlowAliases.Contains(lower)) { speed = HackSpeed.Normal; continue; }
-            if (FastAliases.Contains(lower)) { speed = HackSpeed.Fast; continue; }
-            if (InstantAliases.Contains(lower)) { speed = HackSpeed.Instant; continue; }
+            // 一次查找定动作；别名全部不中才轮到 delay= / script= / ids（判定顺序与旧实现一致）。
+            if (AliasMap.TryGetValue(lower, out var opt))
+            {
+                switch (opt)
+                {
+                    case Opt.Connected: scope = HackScope.Connected; break;
+                    case Opt.Network: scope = HackScope.Network; break;
+                    case Opt.KeepTrace: wipeTraces = false; break;
+                    case Opt.WipeTrace: wipeTraces = true; break;
+                    case Opt.Marker: uploadMarker = true; break;
+                    case Opt.NoMarker: uploadMarker = false; break;
+                    case Opt.Redo: skipOwned = false; break;
+                    case Opt.AllNodes: allNodes = true; break;
+                    case Opt.Direct: connectFirst = false; break;
+                    case Opt.Stay: disconnect = false; break;
+                    case Opt.Leave: disconnect = true; break;
+                    case Opt.Credentials: useCredentials = true; break;
+                    case Opt.NoCredentials: useCredentials = false; break;
+                    case Opt.ShowExes: showExes = true; break;
+                    case Opt.NoShowExes: showExes = false; break;
+                    case Opt.ResetIP: resetIP = true; break;
+                    case Opt.NoResetIP: resetIP = false; break;
+                    case Opt.Slow: speed = HackSpeed.Normal; break;
+                    case Opt.Fast: speed = HackSpeed.Fast; break;
+                    case Opt.Instant: speed = HackSpeed.Instant; break;
+                    default:
+                        throw new ArgumentOutOfRangeException(nameof(opt), opt, "别名动作未在 Parse 中分派");
+                }
+
+                continue;
+            }
 
             if (lower.StartsWith("delay=", StringComparison.Ordinal) &&
                 float.TryParse(lower.Substring(6), NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed))

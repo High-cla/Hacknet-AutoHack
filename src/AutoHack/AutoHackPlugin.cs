@@ -9,7 +9,7 @@ using Pathfinder.Meta.Load;
 /// 命令与扩展点均通过 Pathfinder 的属性自动扫描注册（AttributeManager 挂载于
 /// HacknetChainloader.LoadPlugin），无需手动调用 Register* API。
 /// </summary>
-[BepInPlugin(Guid, "AutoHack", "1.33.3")]
+[BepInPlugin(Guid, "AutoHack", "1.33.4")]
 // Pathfinder 的属性扫描是 IL hook，在 PathfinderAPIPlugin.Load() 里才安装；
 // 缺此依赖本插件会先加载，扫描覆盖不到，命令静默失效。
 [BepInDependency("com.Pathfinder.API")]
@@ -78,56 +78,14 @@ public sealed class AutoHackPlugin : BepInEx.Hacknet.HacknetPlugin
         // 裸 `autohack`（无动词）仍按原设计开关面板；只有显式 help 才打帮助。
         if (verb is "-h" or "--help" or "help")
         {
-            os.write("autohack              - toggle the control panel");
-            os.write("autohack run [options] [target...] - run headless");
-            os.write("  here      only the connected node (default: servers reachable via links)");
-            os.write("  delay=s   seconds between port cracks (default 0.6, min 0.02)");
-            os.write("  direct    skip connect, crack the node already connected");
-            os.write("  stay      keep the connection at the end (this is the default)");
-            os.write("  dc        disconnect each target when done (aborts a trace)");
-            os.write("  redo      re-hack nodes already owned (default: skip them)");
-            os.write("  keep      leave my traces in /log (default: wipe them map-wide)");
-            os.write("  allnodes  sweep the whole map (default: only nodes reachable via links)");
-            os.write("  mark      drop the marker file (default: no marker)");
-            os.write("  creds     use known credentials to log in (default: off)");
-            os.write("  nocreds   never log in - always crack ports");
-            os.write("  show      play the native cracker animations (this is the default)");
-            os.write("            port interval then follows each cracker's own runtime");
-            os.write("  noshow    no animations");
-            os.write("  newip     assign a new IP after the run (this is the default)");
-            os.write("  keepip    keep the current IP");
-            os.write("  instant   run every non-port step in the same frame (fastest)");
-            os.write("  fast      shorten the pause between non-port steps (default: normal)");
-            os.write("  script=F  run a scripted action list from file F (see below)");
-            os.write("");
-            os.write("autohack <tool> [allnodes] - run one tool, no panel needed:");
-            foreach (var (tool, help) in ToolDispatch.Help)
-            {
-                os.write("  " + tool.PadRight(ToolDispatch.HelpVerbWidth) + help);
-            }
-
-            os.write("");
-            os.write("Script files live in Content/HackerScripts/ and are plain text:");
-            os.write("  connect / neutralize / probe / login / proxy / openPort [n]");
-            os.write("  solve / porthack / mark / rm / dc / killtrace / delay s");
-            os.write("  openPort with no number cracks every crackable port on the target.");
-            os.write("  connect, neutralize and killtrace are always supplied - do not write them.");
-            os.write("  'rm' must come before 'dc' or the script is rejected.");
+            WriteHelp(os);
             return;
         }
 
         // 四个工具与 run 平级，各自独立执行；allnodes 只对 dec / mem 有意义。
         if (ToolDispatch.Handles(verb))
         {
-            // 两个口径：
-            // · dec / mem —— 显式传 allnodes 才扫地图全表，缺省只碰当前节点；
-            // · wipe —— 缺省就是地图全表（命令行没有 SCOPE 段，而「我的痕迹」铺在
-            //   哪些机器上与当前连着谁无关），要收窄到当前节点所在的连线分量传 here。
-            var allNodes = verb.ToLowerInvariant() == ToolDispatch.Wipe
-                ? !args.Skip(2).Any(a => a.Equals("here", StringComparison.OrdinalIgnoreCase))
-                : args.Skip(2).Any(a => a.Equals("allnodes", StringComparison.OrdinalIgnoreCase));
-
-            ToolDispatch.Run(os, verb, allNodes);
+            RunTool(os, verb, args);
             return;
         }
 
@@ -136,13 +94,79 @@ public sealed class AutoHackPlugin : BepInEx.Hacknet.HacknetPlugin
         // "autohack"），四个分支没一个能命中，于是 run 与全部工具都变成了开面板。
         if (verb == null || !verb.Equals("run", StringComparison.OrdinalIgnoreCase))
         {
-            HackOverlay.Toggle(os);
-            os.write(HackOverlay.IsOpen
-                ? "[autohack] Panel opened - 'autohack' again to close."
-                : "[autohack] Panel closed.");
+            TogglePanel(os);
             return;
         }
 
+        RunHeadless(os, args);
+    }
+
+    /// <summary>打印 autohack 的完整帮助文本（选项说明与脚本动作说明）。</summary>
+    private static void WriteHelp(OS os)
+    {
+        os.write("autohack              - toggle the control panel");
+        os.write("autohack run [options] [target...] - run headless");
+        os.write("  here      only the connected node (default: servers reachable via links)");
+        os.write("  delay=s   seconds between port cracks (default 0.6, min 0.02)");
+        os.write("  direct    skip connect, crack the node already connected");
+        os.write("  stay      keep the connection at the end (this is the default)");
+        os.write("  dc        disconnect each target when done (aborts a trace)");
+        os.write("  redo      re-hack nodes already owned (default: skip them)");
+        os.write("  keep      leave my traces in /log (default: wipe them map-wide)");
+        os.write("  allnodes  sweep the whole map (default: only nodes reachable via links)");
+        os.write("  mark      drop the marker file (default: no marker)");
+        os.write("  creds     use known credentials to log in (default: off)");
+        os.write("  nocreds   never log in - always crack ports");
+        os.write("  show      play the native cracker animations (this is the default)");
+        os.write("            port interval then follows each cracker's own runtime");
+        os.write("  noshow    no animations");
+        os.write("  newip     assign a new IP after the run (this is the default)");
+        os.write("  keepip    keep the current IP");
+        os.write("  instant   run every non-port step in the same frame (fastest)");
+        os.write("  fast      shorten the pause between non-port steps (default: normal)");
+        os.write("  script=F  run a scripted action list from file F (see below)");
+        os.write("");
+        os.write("autohack <tool> [allnodes] - run one tool, no panel needed:");
+        foreach (var (tool, help) in ToolDispatch.Help)
+        {
+            os.write("  " + tool.PadRight(ToolDispatch.HelpVerbWidth) + help);
+        }
+
+        os.write("");
+        os.write("Script files live in Content/HackerScripts/ and are plain text:");
+        os.write("  connect / neutralize / probe / login / proxy / openPort [n]");
+        os.write("  solve / porthack / mark / rm / dc / killtrace / delay s");
+        os.write("  openPort with no number cracks every crackable port on the target.");
+        os.write("  connect, neutralize and killtrace are always supplied - do not write them.");
+        os.write("  'rm' must come before 'dc' or the script is rejected.");
+    }
+
+    /// <summary>执行单个工具动词；allnodes 口径按动词区分后交给 ToolDispatch。</summary>
+    private static void RunTool(OS os, string verb, string[] args)
+    {
+        // 两个口径：
+        // · dec / mem —— 显式传 allnodes 才扫地图全表，缺省只碰当前节点；
+        // · wipe —— 缺省就是地图全表（命令行没有 SCOPE 段，而「我的痕迹」铺在
+        //   哪些机器上与当前连着谁无关），要收窄到当前节点所在的连线分量传 here。
+        var allNodes = verb.ToLowerInvariant() == ToolDispatch.Wipe
+            ? !args.Skip(2).Any(a => a.Equals("here", StringComparison.OrdinalIgnoreCase))
+            : args.Skip(2).Any(a => a.Equals("allnodes", StringComparison.OrdinalIgnoreCase));
+
+        ToolDispatch.Run(os, verb, allNodes);
+    }
+
+    /// <summary>开关控制面板并回显开关后的状态。</summary>
+    private static void TogglePanel(OS os)
+    {
+        HackOverlay.Toggle(os);
+        os.write(HackOverlay.IsOpen
+            ? "[autohack] Panel opened - 'autohack' again to close."
+            : "[autohack] Panel closed.");
+    }
+
+    /// <summary>不开面板直接执行一次入侵：互斥检查、选项解析、脚本前置校验、入队。</summary>
+    private static void RunHeadless(OS os, string[] args)
+    {
         // 单写者：面板运行与 headless 运行互斥 —— 两条会同时 connect/disconnect
         // 同一个 os.connectedComp，互相把对方的目标换掉。
         if (HackOverlay.IsRunning)

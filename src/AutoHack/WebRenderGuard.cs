@@ -99,8 +99,65 @@ internal static class WebRenderGuard
 
         // 尺寸一致 = 重建后状态与现在逐字相同，唯一差别是 texture 换了实例 ——
         // 而那正是竞态的来源。跳过它就是本补丁的全部目的。
-        return frameWidth != WebRenderer.width || frameHeight != WebRenderer.height;
+        if (frameWidth == WebRenderer.width && frameHeight == WebRenderer.height)
+        {
+            return false;
+        }
+
+        // <b>页面正在加载时不能换视口</b>（v1.34.0，crash dump 取证）。
+        //
+        // 原生侧是 CEF：XNAWR_LoadURL 之后它自己分配一块视口大小的缓冲，
+        // 渲染完跨边界回调 TextureUpdated(ptr)。而 XNAWR_SetViewport 会让它
+        // 换/释放那块缓冲 —— 若此刻正有一帧在飞，回调拿到的就是<b>失效指针</b>。
+        //
+        // 取证：4 份 WER minidump（C:/Users/11/AppData/Local/CrashDumps/，
+        // 2026-09-29 15:58/15:59/16:01/19:08）签名完全一致 ——
+        //   code = 0xc0000005 ACCESS_VIOLATION
+        //   故障指令 = VCRUNTIME140_CLR0400.dll+0x33de（memcpy 家族的栈保护序言）
+        //   异常参数 = [0x0（读）, 0x4143e000]
+        // 四次坏地址各不相同（0x4143e000 / 0x3ce51000 / 0x3d0c7000 / 0x44ad5000），
+        // 且 0x4143e000 落在转储 3459 个内存区之外、距其下最近区域有 62 MB 空隙 ——
+        // 是野生指针而非小幅越界，指向 use-after-free。
+        //
+        // 本机没有 Hacknet.exe.config ⇒ 未开 legacyCorruptedStateExceptionsPolicy
+        // ⇒ AccessViolationException 是损坏状态异常，游戏自己那个
+        // catch (AccessViolationException)（WebRenderer.cs:83-87）是<b>死代码</b>，
+        // 兜不住 ⇒ 进程直接终止，表现为闪退。
+        //
+        // <b>为什么必须延后而不是直接丢弃。</b>ThemeManager.Update（ThemeManager.cs:69-84）
+        // 是一次性的：framesTillWebUpdate 减到 -1 触发一次后就不再进那个分支
+        // （未连网页服务器时它把自己置回 0 每帧重试，一旦触发就永久停在 -1）。
+        // 直接 return false 等于把这次尺寸变更<b>永久丢掉</b> —— 窗口尺寸改了再也不生效。
+        // 故把计数器重新武装成 DeferFrames，让 ThemeManager 自己稍后重试。
+        //
+        // 有界重试：页面永远加载不完时（CEF 崩了/离线）不能无限延后，
+        // 超过 MaxDefers 次就照原样放行 —— 尺寸正确性优先于这一处竞态。
+        if (WebRenderer.loadingPage)
+        {
+            if (_defers < MaxDefers)
+            {
+                _defers++;
+                ThemeManager.framesTillWebUpdate = DeferFrames;
+                return false;
+            }
+        }
+        else
+        {
+            _defers = 0;
+        }
+
+        return true;
     }
+
+    /// <summary>延后时把 ThemeManager 的重试计数器重新武装成这个值（帧）。</summary>
+    private const int DeferFrames = 30;
+
+    /// <summary>最多连续延后多少次。见 <see cref="BeforeSetSize"/>。</summary>
+    private const int MaxDefers = 40;
+
+    /// <summary>已连续延后的次数。真正放行时清零。</summary>
+    private static int _defers;
+
 
     /// <summary>
     /// <b>②</b> 原生回调到达时，缓冲或纹理不可用就整帧丢弃。
@@ -110,8 +167,9 @@ internal static class WebRenderGuard
     /// 这两种抛出的异常都不在游戏自己那个 <c>catch (AccessViolationException)</c>
     /// 的覆盖范围内，会从原生回调里冒出去。
     ///
-    /// <b>不检查原生缓冲的大小</b>：那个尺寸原生侧不告诉我们。真正让两者一致的是
-    /// <see cref="BeforeSetSize"/> —— 它保证 <c>texBuffer</c> 在页面加载期间不再被换掉。
+    /// <b>不检查原生缓冲的大小</b>：那个尺寸原生侧不告诉我们（回调只给一个裸指针）。
+    /// 能查的是<b>托管侧自洽性</b> —— <c>texBuffer.Length</c> 必须等于
+    /// <c>texture.Width * texture.Height * 4</c>；两者都是托管字段，随时可读。
     /// </summary>
     [HarmonyPrefix]
     [HarmonyPatch(typeof(WebRenderer), nameof(WebRenderer.TextureUpdated))]
@@ -124,7 +182,17 @@ internal static class WebRenderGuard
 
         var texture = WebRenderer.texture;
         var target = WebRenderer.texBuffer;
-        return texture != null && !texture.IsDisposed && target != null && target.Length > 0;
+        if (texture == null || texture.IsDisposed || target == null || target.Length == 0)
+        {
+            return false;
+        }
+
+        // <b>纹理与缓冲必须自洽</b>（v1.34.0）。setSize 里
+        // `texture = new Texture2D(...)` 与 `texBuffer = new byte[...]` 是两条独立赋值，
+        // 中间存在「新纹理 + 旧缓冲」的窗口；CEF 的回调正好落在这里时，
+        // Marshal.Copy 会按旧缓冲的长度去读新尺寸的数据 —— 读多读少都是错的。
+        // 自洽判据（字节数 = 宽 × 高 × 4）不成立就丢帧，下一帧重来。
+        return target.Length == texture.Width * texture.Height * 4;
     }
 
     /// <summary>网页缓存文件名（<c>WebServerDaemon.TEMP_WEBPAGE_CACHE_FILENAME</c> 的末段）。</summary>

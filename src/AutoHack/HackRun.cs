@@ -242,9 +242,6 @@ internal sealed class HackRun
         var forced = NativeExes.Flush(os, step.Target, force: true);
         Trace.Write("escalate wait timed out on " + step.Target.ip + " after " + (int)NativeWaitCapSeconds + "s - forced " + forced + " port(s) open");
         _waitSeconds = 0f;
-        os.write("[autohack] " + step.Target.name + " :: animation wait timed out after "
-            + (int)NativeWaitCapSeconds + "s - opened " + forced
-            + " remaining port(s) directly.");
 
         return false;
     }
@@ -371,8 +368,6 @@ internal sealed class HackRun
         if (!ReferenceEquals(os.connectedComp, target))
         {
             _refused.Add(target);
-            os.write("[autohack] " + target.name
-                + " :: connection refused (whitelist) - continuing without a session");
             return;
         }
     }
@@ -392,8 +387,8 @@ internal sealed class HackRun
     }
 
     /// <summary>
-    /// 用已知凭据登录目标：成功即提权并登记 <see cref="_loggedIn"/>（后续破端口类步骤整体跳过），
-    /// 失败也写一行，避免「为什么没跳过」这条信息静默丢失。
+    /// 用已知凭据登录目标：成功即回显 login、提权，并登记 <see cref="_loggedIn"/>
+    /// （后续破端口类步骤整体跳过）；失败则什么都不做，照常走破端口那条路。
     /// </summary>
     private void ApplyLogin(OS os, Computer target)
     {
@@ -407,7 +402,7 @@ internal sealed class HackRun
 
             // 只回显 login 本身：原版 login 是交互式的（先问用户名再问密码，
             // Programs.cs:404-448），没有 "login <user> <pass>" 这种写法，
-            // 拼上参数会是条游戏里不存在的命令。用了哪组凭据由下面的状态行交代。
+            // 拼上参数会是条游戏里不存在的命令。
             Echo(os, "login");
 
             // 本目标已提权，后续破端口/解防火墙/porthack 都不必跑。
@@ -415,29 +410,23 @@ internal sealed class HackRun
             // 「adminIP 已是我们」这个更宽的判据，否则 redo 模式
             // （重打已控节点）会连端口都不破，改变其语义。
             _loggedIn.Add(target);
-
-            os.write("[autohack] " + target.name + " :: admin via login (" + credential + ") - skipping port cracks");
-        }
-        else
-        {
-            // 失败必须可见：静默会把「为什么没跳过」这条最有价值的信息藏起来。
-            os.write("[autohack] " + target.name + " :: login unavailable - cracking ports");
         }
     }
 
-    /// <summary>侦察目标：连着目标时才回显 probe（否则是假命令），端口报告无条件输出。</summary>
+    /// <summary>侦察目标：回显 probe 并输出完整端口报告，两者都无条件。</summary>
     private void ApplyProbe(OS os, HackStep step)
     {
         var target = step.Target;
         Phase = "PROBING " + Upper(target.name);
 
-        // 只有连着目标时 probe 才是在探它 —— 未连接时 Programs.probe 的目标是
-        // os.connectedComp ?? os.thisComputer（Programs.cs:1387），回显会是假命令。
-        // 端口报告本身取自目标对象（HackEngine.ProbeReport），不看连接，故照常输出。
-        if (os.connectedComp == target)
-        {
-            Echo(os, step.Command ?? "probe");
-        }
+        // <b>无条件回显</b>（v1.34.0，用户定：终端里要具体的命令行输出）。
+        //
+        // 此前只在连着目标时回显，理由是「未连接时 Programs.probe 的目标是
+        // os.connectedComp ?? os.thisComputer（Programs.cs:1387），回显是假命令」。
+        // 那个顾虑对**游戏原语**成立，对本步不成立：端口报告取自目标对象本身
+        // （HackEngine.ProbeReport），不看连接 —— 侦察确实发生了，就该看得见。
+        // 缺了它，玩家只看到端口被破，看不到在探什么。
+        Echo(os, step.Command ?? "probe");
         // 端口报告**无条件**打（v1.34.0 修正）。
         //
         // 曾短暂地在 noshow 下压掉它，理由是「167 台上千行太吵」。那是把
@@ -452,7 +441,7 @@ internal sealed class HackRun
     }
 
     /// <summary>
-    /// 破解单个端口：连着目标时才回显破解程序；端口优先交给原生动画去开，
+    /// 破解单个端口：回显破解程序（无条件），端口优先交给原生动画去开，
     /// 演出不可用时立即直接补开，保证端口不会永远不开。
     /// </summary>
     private void ApplyOpenPort(OS os, HackStep step)
@@ -460,12 +449,10 @@ internal sealed class HackRun
         var target = step.Target;
         Phase = "CRACKING PORT " + step.Port.DisplayPort;
 
-        // 破解程序的作用域是「当前连接」；未连接时它无从打到目标上，
-        // 而下面的 HackEngine.OpenPort 是直接写目标机端口表，照样生效。
-        if (os.connectedComp == target)
-        {
-            Echo(os, step.Command);
-        }
+        // 无条件回显破解指令（v1.34.0）。端口无论走哪条路都会开 ——
+        // 连不上时由下面的 HackEngine.OpenPort 直接写目标机端口表 ——
+        // 故「敲了什么」与「端口开了」始终对应，该看得见。
+        Echo(os, step.Command);
 
         // 端口交给动画去开（v1.33.3）：那 9 个 exe 各自在 Completed() 里调
         // openPort(<自己的原始终端口号>, ip)，与这里调 HackEngine.OpenPort 落在
@@ -482,35 +469,29 @@ internal sealed class HackRun
         }
     }
 
-    /// <summary>解目标防火墙：连着目标时才回显 solve，实际解除时由 SolveFirewall 报一行。</summary>
+    /// <summary>解目标防火墙：回显 solve 后无条件解除。</summary>
     private void ApplySolveFirewall(OS os, Computer target)
     {
         Phase = "BYPASSING FIREWALL ON " + Upper(target.name);
 
-        // 同 OpenPort：solve 命令的作用域是当前连接，未连接时是假命令。
-        if (os.connectedComp == target)
-        {
-            Echo(os, "solve " + (target.firewall?.solution ?? string.Empty));
-        }
+        // 同 OpenPort：无条件回显（v1.34.0）。下面 SolveFirewall 直接解目标机
+        // 的 firewall，不经连接，故回显与效果始终对应。
+        Echo(os, "solve " + (target.firewall?.solution ?? string.Empty));
 
         SolveFirewall(os, target);
     }
 
     /// <summary>
-    /// 提权：连着目标时才回显 porthack；先试原生门禁，过不了就强制写 adminIP，
-    /// 并把「门禁没过」这件事写进终端。
+    /// 提权：回显 porthack（无条件），先试原生门禁，过不了就直接写 adminIP。
     /// </summary>
     private void ApplyEscalate(OS os, HackStep step)
     {
         var target = step.Target;
         Phase = "ESCALATING";
 
-        // 未连接时 porthack 在终端里无从下手（它读 os.connectedComp），
-        // 而下面的 giveAdmin 是直接写目标机的 adminIP，照样生效。
-        if (os.connectedComp == target)
-        {
-            Echo(os, step.Command ?? "porthack");
-        }
+        // 无条件回显（v1.34.0）。下面走 giveAdmin 直接写目标机 adminIP，
+        // 不经连接 —— 提权确实发生了，回显与效果对应。
+        Echo(os, step.Command ?? "porthack");
 
         // 只用 giveAdmin，不用 os.takeAdmin(ip)：后者内部还会 runCommand("connect " + ip)
         // （OS.cs:1871-1879），而 connect 的第一件事就是无条件断开旧连接
@@ -525,17 +506,13 @@ internal sealed class HackRun
         // 13 台普通机器破满端口也差 1~6 个），留一个「默认开、关了就打不下」
         // 的开关，等于给唯一出路配了个自毁按钮。
         //
-        // 门禁过不了时**必须说出来**：静默成功会让玩家以为这台机器是靠破端口拿下的。
         if (HackEngine.CanEscalate(target))
         {
             target.giveAdmin(os.thisComputer.ip);
         }
-        else if (HackEngine.ForceEscalate(target, os))
+        else
         {
-            os.write("[autohack] " + target.name
-                + " :: escalation gate not met (needs > " + target.portsNeededForCrack
-                + " open port(s), have " + HackEngine.OpenPortCount(target)
-                + ") - forced admin anyway");
+            HackEngine.ForceEscalate(target, os);
         }
     }
 
@@ -559,25 +536,20 @@ internal sealed class HackRun
 
         Phase = "BYPASSING WHITELIST ON " + Upper(target.name);
 
-        // 这一步不是终端指令（未连接状态下 <c>append</c> 的「当前目录」是玩家
-        // 自己的文件系统，回显出来会是一条假命令），故不发 Echo，只报状态。
-        var bypassNote = HackEngine.BypassWhitelist(os, target, os.thisComputer.ip);
-        if (bypassNote == null)
+        // 这一步不是终端指令（未连接状态下 append 的「当前目录」是玩家自己的
+        // 文件系统），故不发 Echo —— 它自己写 /Whitelist/list.txt 并重连。
+        if (HackEngine.BypassWhitelist(os, target, os.thisComputer.ip) == null)
         {
-            os.write("[autohack] " + target.name
-                + " :: no /Whitelist folder to touch - staying session-less");
             return;
         }
 
-        os.write("[autohack] " + target.name + " :: " + bypassNote);
-
         // 白名单已放行，重连应当成功；成了就恢复正常流程
         // （清痕与断开都依赖连接，之前被 DependsOnConnection 挡掉了）。
+        Echo(os, "connect " + target.ip);
         Programs.connect(["connect", target.ip], os);
         if (ReferenceEquals(os.connectedComp, target))
         {
             _refused.Remove(target);
-            os.write("[autohack] " + target.name + " :: reconnected - whitelist bypassed");
         }
     }
 
@@ -589,27 +561,21 @@ internal sealed class HackRun
     }
 
     /// <summary>
-    /// 清痕：按 IP 逐条点名删目标 /log 中提及玩家 IP 的条目，删到才报一行；
-    /// 不回显 rm，也不依赖连接。
+    /// 清痕：按 IP 逐条点名删目标 /log 中提及玩家 IP 的条目。
+    /// 不回显 rm、不报统计，也不依赖连接。
     /// </summary>
     private void ApplyCleanLogs(OS os, Computer target)
     {
         Phase = "WIPING TRACES";
 
-        // 不回显 rm：这一步已不是「敲一条终端命令」，而是按 IP 逐条点名删
-        // 日志条目（见 HackEngine.WipeTraces）。回显 rm log/* 反而误导 ——
-        // 玩家会以为整个 /log 被清空了，实际只删了提到自己 IP 的那些。
+        // 不回显 rm，也不报统计（v1.34.0，用户定：终端里只要具体的命令行输出）。
+        //
+        // 不回显 rm：这一步已不是「敲一条终端命令」，而是按 IP 逐条点名删日志条目
+        // （见 HackEngine.WipeTraces）。回显 rm log/* 反而误导 —— 玩家会以为整个
+        // /log 被清空了，实际只删了提到自己 IP 的那些。
         //
         // 不需要连接：目标机与目录都由参数给定，不读 os.connectedComp。
-        var wiped = HackEngine.WipeTraces(target, os.thisComputer.ip);
-
-        // 战果必须可见。删 0 条时不吭声 —— 无痕迹的机器是多数。
-        if (wiped.Count > 0)
-        {
-            os.write("[autohack] " + target.name + " :: wiped "
-                + wiped.Count + " log entr" + (wiped.Count == 1 ? "y" : "ies")
-                + " mentioning " + os.thisComputer.ip);
-        }
+        HackEngine.WipeTraces(target, os.thisComputer.ip);
     }
 
     /// <summary>断开连接：由 Leave 解除反扑、回显并静默断开；未连接时是空操作。</summary>
@@ -618,7 +584,7 @@ internal sealed class HackRun
         Leave(os, step.Target, step.Command ?? "dc");
     }
 
-    /// <summary>终止进行中的追踪，实际停掉时写一行确认。</summary>
+    /// <summary>终止进行中的追踪（静默 —— 收尾动作不写终端）。</summary>
     private void ApplyKillTrace(OS os)
     {
         Phase = "KILLING TRACE";
@@ -659,37 +625,25 @@ internal sealed class HackRun
     /// </summary>
     private static void KillTrace(OS os)
     {
-        if (HackEngine.KillTrace(os))
-        {
-            os.write("[autohack] trace killed - timer stopped.");
-        }
+        HackEngine.KillTrace(os);
     }
 
-    /// <summary>解除目标的延迟反扑，仅在实际解除时回显一行（这不是终端指令，故不走 Echo）。</summary>
+    /// <summary>解除目标的延迟反扑（静默 —— 这不是终端指令，也不报状态）。</summary>
     private static void Neutralize(OS os, Computer target)
     {
-        if (HackEngine.SuppressCounterattack(target))
-        {
-            os.write("[autohack] " + target.name + " :: admin counterattack disabled");
-        }
+        HackEngine.SuppressCounterattack(target);
     }
 
-    /// <summary>解目标防火墙，仅在实际解开时回显一行（非终端指令）。</summary>
+    /// <summary>解目标防火墙（静默 —— 指令本身已由 ApplySolveFirewall 回显）。</summary>
     private static void SolveFirewall(OS os, Computer target)
     {
-        if (HackEngine.SolveFirewall(target, os))
-        {
-            os.write("[autohack] " + target.name + " :: firewall solved");
-        }
+        HackEngine.SolveFirewall(target, os);
     }
 
-    /// <summary>解除跳板，仅在实际解除时回显一行（同上，非终端指令）。</summary>
+    /// <summary>解除跳板（静默 —— 这不是终端指令）。</summary>
     private static void BypassProxy(OS os, Computer target)
     {
-        if (HackEngine.BypassProxy(target))
-        {
-            os.write("[autohack] " + target.name + " :: proxy bypassed");
-        }
+        HackEngine.BypassProxy(target);
     }
 
     /// <summary>
@@ -758,7 +712,7 @@ internal sealed class HackRun
         //
         // 排在换 IP 之前：语义上「先收拾追踪、再换身份」；且换 IP 会改掉
         // os.thisComputer.ip，任何按旧 IP 匹配的判断都必须在它之前做完。
-        TraceTools.Run(os);
+        TraceTools.Run(os, announce: false);
 
         // 换 IP：游戏原生的「保命」动作（ISPDaemon 的 "Assign New IP"），
         // 并把全图已控机器的归属迁移到新 IP。理由与代价见 IpTools 的文档注释。
@@ -767,7 +721,7 @@ internal sealed class HackRun
         // 现在不擦日志了，但顺序仍然保持，因为语义上「先收拾追踪、再换身份」更清楚。
         if (Options.ResetIP)
         {
-            IpTools.Run(os);
+            IpTools.Run(os, announce: false);
         }
 
         foreach (var target in _targets)
@@ -782,29 +736,16 @@ internal sealed class HackRun
             // 后者要求端口已破，靠 login 拿下的目标会因为 0 端口而被误报 admin=no。
             var owned = HackEngine.IsOwned(target, os);
             Outcomes.Add(new TargetOutcome(target.name, opened, ports.Count, owned));
-            os.write("[autohack] " + target.name + " :: " + opened + "/" + ports.Count
-                + " ports, admin=" + (owned ? "yes" : "no"));
         }
 
+        // 目标为 0 是最容易被误读的状态：终端仍会逐台打清痕行，看着像
+        // 「每台都重跑了一遍」，实际每台只抹了 log。这一条必须留 ——
+        // 它是「为什么什么都没发生」的唯一解释，不是战果报告。
         if (_targets.Count == 0)
         {
-            // 目标为 0 是最容易被误读的状态：终端仍会逐台打清痕行，
-            // 看着像「每台都重跑了一遍」，实际每台只抹了 log。
-            // 必须把原因和出路直接写出来。
             os.write("[autohack] No targets: all " + SkippedOwned
                 + " reachable node(s) were already owned.");
             os.write("[autohack]   'redo' includes owned nodes; 'allnodes' sweeps the whole map.");
-        }
-
-        if (SkippedOwned > 0)
-        {
-            os.write("[autohack] skipped " + SkippedOwned + " node(s) already owned - 'redo' to include them.");
-        }
-
-        if (_refused.Count > 0)
-        {
-            os.write("[autohack] " + _refused.Count
-                + " node(s) refused the session (whitelist) - cracked without one.");
         }
 
         Current = "done - " + _targets.Count + " target(s)";

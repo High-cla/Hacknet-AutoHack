@@ -38,7 +38,12 @@ using Hacknet;
 /// </summary>
 internal static class TraceTools
 {
-    internal static void Run(OS os)
+    /// <param name="announce">
+    /// 是否把结果写进终端。<c>HackRun.Finish</c> 传 <c>false</c> —— 收尾是自动动作，
+    /// 不是玩家敲的命令，终端里只该出现玩家自己会敲的那些指令行（用户定）。
+    /// 显式入口 <c>autohack trace</c> 与面板按钮走默认值，照常回显。
+    /// </param>
+    internal static void Run(OS os, bool announce = true)
     {
         if (os == null)
         {
@@ -53,6 +58,11 @@ internal static class TraceTools
         var trackers = os.TrackersInProgress;
         var pendingCount = trackers?.Count ?? 0;
         trackers?.Clear();
+        if (!announce)
+        {
+            return;
+        }
+
         if (!timerStopped && pendingCount == 0)
         {
             // 两套都没有：明确说出来。这一行也是「按钮确实生效了」的自证 ——

@@ -198,8 +198,8 @@ internal static class HackOverlay
             return;
         }
 
-        var skipped = _run.SkippedOwned > 0 ? $" ({_run.SkippedOwned} already owned)" : string.Empty;
-        _os.write($"[autohack] Engaging {_run.Targets.Count} target(s) - {_run.Total} action(s){skipped}.");
+        // 这里曾有「Engaging N target(s)」汇总行，已删（用户定：终端里只要具体的
+        // 命令行输出，不要战果报告）。面板运行视图本来就有进度条与计数。
     }
 
     [HarmonyPostfix]

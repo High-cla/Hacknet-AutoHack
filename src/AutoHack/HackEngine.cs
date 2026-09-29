@@ -1243,7 +1243,7 @@ internal static class HackEngine
             return;
         }
 
-        WipeNetwork(os, options.Scope != HackScope.Connected);
+        WipeNetwork(os, options.Scope != HackScope.Connected, announce: false);
     }
 
     /// <summary>
@@ -1251,7 +1251,12 @@ internal static class HackEngine
     /// 面板工具与运行收尾共用这一份实现，回显措辞只写一次。
     /// </summary>
     /// <param name="allNodes">true = 地图全表；false = 当前节点所在的无向连通分量。</param>
-    internal static void WipeNetwork(OS os, bool allNodes)
+    /// <param name="announce">
+    /// 是否把统计写进终端。<c>WipeForRun</c> 传 <c>false</c> —— 收尾清痕是自动动作，
+    /// 不是玩家敲的命令（用户定：终端里只要具体的命令行输出）。
+    /// 显式工具 <c>autohack wipe</c> 与面板按钮走默认值，照常回显。
+    /// </param>
+    internal static void WipeNetwork(OS os, bool allNodes, bool announce = true)
     {
         var self = os?.thisComputer;
         if (self == null)
@@ -1269,9 +1274,12 @@ internal static class HackEngine
         comps.Add(self);
 
         var (entries, machines) = WipeEverything(comps, self.ip);
-        os.write("[autohack] wiped " + entries + " trace entr" + (entries == 1 ? "y" : "ies")
-            + " across " + machines + " node(s)"
-            + (allNodes ? " (whole map)." : " (linked component)."));
+        if (announce)
+        {
+            os.write("[autohack] wiped " + entries + " trace entr" + (entries == 1 ? "y" : "ies")
+                + " across " + machines + " node(s)"
+                + (allNodes ? " (whole map)." : " (linked component)."));
+        }
     }
 
     /// <summary>

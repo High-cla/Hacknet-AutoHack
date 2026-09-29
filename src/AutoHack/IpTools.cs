@@ -71,9 +71,19 @@ internal static class IpTools
     /// 回显也收在这里 —— 两个入口各写一句措辞就会漂移。
     /// 失败时**必须**出声：面板按钮单击没有回显，玩家只会觉得「按了没反应」。
     /// </summary>
-    internal static void Run(OS os)
+    /// <param name="announce">
+    /// 是否把结果写进终端。<c>HackRun.Finish</c> 传 <c>false</c> —— 收尾换 IP 是自动动作，
+    /// 不是玩家敲的命令（用户定：终端里只要具体的命令行输出）。
+    /// 显式入口 <c>autohack ip</c> 与面板 NEW IP 按钮走默认值，照常回显。
+    /// </param>
+    internal static void Run(OS os, bool announce = true)
     {
         var note = Reset(os);
+        if (!announce)
+        {
+            return;
+        }
+
         os.write(note == null
             ? "[autohack] new local IP: no local machine to re-address."
             : "[autohack] new local IP: " + note + ".");

@@ -24,8 +24,10 @@ internal static class ToolDispatch
     internal const string Skip = "skip";
     internal const string Trace = "trace";
     internal const string Ip = "ip";
+    internal const string Wipe = "wipe";
 
-    private static readonly string[] Verbs = { Scan, Dec, Mem, Exes, Unbreakable, Pull, Purge, Drop, Trace, Skip, Ip };
+    private static readonly string[] Verbs =
+        { Scan, Dec, Mem, Exes, Unbreakable, Pull, Purge, Drop, Trace, Skip, Ip, Wipe };
 
     /// <summary>help 文本来源：子命令与其说明只写一次，命令入口与文档都读这里。</summary>
     internal static readonly (string Verb, string Help)[] Help =
@@ -41,6 +43,7 @@ internal static class ToolDispatch
         (Trace, "anti-trace: stop the countdown and every pending tracker"),
         (Skip, "complete the active mission and take the next one"),
         (Ip, "assign this machine a new IP (keeps owned-node tags in sync)"),
+        (Wipe, "wipe MY traces  [here]  (/log entries naming your IP; default: whole map)"),
     };
 
     /// <summary>help 里动词列的宽度，供调用方排版。</summary>
@@ -131,6 +134,12 @@ internal static class ToolDispatch
 
             case Ip:
                 IpTools.Run(os);
+                break;
+
+            case Wipe:
+                // 范围随 scope 走（用户定）：「当前节点」沿连线取连通分量，全网扫描取地图全表。
+                // 这两个口径与 run 的目标池是同一套语义，故共用 HackEngine.WipeNetwork。
+                HackEngine.WipeNetwork(os, allNodes);
                 break;
         }
     }

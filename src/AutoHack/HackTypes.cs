@@ -134,8 +134,11 @@ internal sealed record HackOptions(
         // 要便利性再显式 creds。
         var useCredentials = false;
 
-        // 缺省开：原生破解程序是纯演出 —— 端口状态由 HackEngine.OpenPort 同步写好，
-        // exe 只是把原版动画挂进 RAM 面板（见 NativeExes），幂等、不影响战果。
+        // 缺省开：把原生破解程序挂进 RAM 面板当演出。
+        //
+        // v1.33.3 起端口改由这些程序自己在 Completed() 里开（见 NativeExes.Show 的文档
+        // 注释）—— 看到动画跑完就等于那个端口真的开了。没有对应动画的端口
+        // （实测 73/642）由调用方立即开，故关掉演出不影响战果，只是没有动画可看。
         // 缺省开是为了让脚本跑起来有可看的演出；要安静跑用 noshow。
         var showExes = true;
 

@@ -566,7 +566,16 @@ internal static class HackEngine
     /// </summary>
     internal static Computer[] ReachableFrom(OS os, Computer origin) => Closure(os, origin);
 
-    private static Computer[] Closure(OS os, Computer origin)
+    /// <summary>
+    /// 同 <see cref="ReachableFrom"/>，但<b>不</b>把走到的节点标成「已发现」。
+    ///
+    /// 清痕要沿连线走到玩家此前访问过的机器，但那不是侦察 ——
+    /// <c>Closure</c> 默认会调 <c>NetworkMap.discoverNode</c>（NetworkMap.cs:415），
+    /// 把沿途节点在地图上点亮。清痕顺手替玩家揭开地图，是没人要的副作用。
+    /// </summary>
+    internal static Computer[] SilentClosure(OS os, Computer origin) => Closure(os, origin, reveal: false);
+
+    private static Computer[] Closure(OS os, Computer origin, bool reveal = true)
     {
         var map = os?.netMap;
         if (map?.nodes == null || map.nodes.Count == 0)
@@ -629,10 +638,10 @@ internal static class HackEngine
 
             // EOS 设备挂在父机的 attatchedDeviceIDs 上，links 里没有反向边，
             // 必须在 links 展开之外单独补 —— 见 RevealAttachedDevices。
-            RevealAttachedDevices(map, os, comp, seen, discovered, frontier);
+            RevealAttachedDevices(map, os, comp, seen, discovered, frontier, reveal);
 
-            Expand(map, seen, discovered, frontier, comp.links);
-            Expand(map, seen, discovered, frontier, incoming[index]);
+            Expand(map, seen, discovered, frontier, comp.links, reveal);
+            Expand(map, seen, discovered, frontier, incoming[index], reveal);
         }
 
         return found.ToArray();
@@ -686,7 +695,9 @@ internal static class HackEngine
     /// 新节点委托 <c>NetworkMap.discoverNode</c> 标为已发现（NetworkMap.cs:415）。
     /// <paramref name="neighbors"/> 为 null 时无操作 —— 出边与入边都可能是空的。
     /// </summary>
-    private static void Expand(NetworkMap map, HashSet<int> seen, HashSet<int> discovered, Queue<int> frontier, List<int> neighbors)
+    private static void Expand(
+        NetworkMap map, HashSet<int> seen, HashSet<int> discovered, Queue<int> frontier,
+        List<int> neighbors, bool reveal = true)
     {
         if (neighbors == null)
         {
@@ -706,7 +717,7 @@ internal static class HackEngine
                 continue;
             }
 
-            if (discovered.Add(next))
+            if (discovered.Add(next) && reveal)
             {
                 map.discoverNode(neighbor);
             }
@@ -732,7 +743,8 @@ internal static class HackEngine
     /// 与游戏自身的「已发现」标记同源，不做自绘的伪发现。
     /// </summary>
     private static void RevealAttachedDevices(
-        NetworkMap map, OS os, Computer comp, HashSet<int> seen, HashSet<int> discovered, Queue<int> frontier)
+        NetworkMap map, OS os, Computer comp, HashSet<int> seen, HashSet<int> discovered, Queue<int> frontier,
+        bool reveal = true)
     {
         var ids = comp?.attatchedDeviceIDs;
         if (string.IsNullOrEmpty(ids))
@@ -756,7 +768,7 @@ internal static class HackEngine
 
             // 已在 visibleNodes 里的设备不重复 discoverNode（避免多余的高亮闪烁），
             // 但仍要入队 —— 它同样需要沿自己的 links 继续展开。
-            if (discovered.Add(index))
+            if (discovered.Add(index) && reveal)
             {
                 map.discoverNode(device);
             }
@@ -1066,6 +1078,119 @@ internal static class HackEngine
         }
 
         return RemoveFiles(comp, ipFrom, logFolder, folderPath, doomed);
+    }
+
+    /// <summary>
+    /// 全网清痕：把地图上<b>所有</b>机器 /log 里提到玩家 IP 的条目一次清掉。
+    /// 返回删掉的条目数与波及的机器数。
+    ///
+    /// <b>为什么需要它。</b>按目标展开的 <c>CleanLogs</c> 步只覆盖本轮的目标池 ——
+    /// 玩家此前访问过、但不在池里的机器（换过分量、早前几轮打过的）一条都清不掉。
+    /// 而痕迹是<b>累积</b>的：<c>Computer.log</c> 在每次连接、读文件、断开时都追加，
+    /// 只要有一行同时含玩家 IP 与 <c>FileCopied</c>/<c>FileDeleted</c>/<c>FileMoved</c>，
+    /// 那台机器就会在断开时自动排一个脱机追踪
+    /// （<c>TrackerCompleteSequence.cs:30-47</c>）。玩家 IP 不变时，这些历史痕迹
+    /// 始终有效 —— 收尾清一次是唯一的解法。
+    ///
+    /// <b>为什么遍历全图而不是可达闭包。</b>痕迹不看连通性：地图上任何一台机器都可能是
+    /// 玩家直接敲 IP 连过的（<c>Programs.connect</c> 全程不检查 visibleNodes，
+    /// Programs.cs:231-322）。范围取舍由调用方定 —— 面板「当前节点」用
+    /// <see cref="SilentClosure"/> 沿连线取分量，全网扫描用全表。
+    ///
+    /// <b>跳过 disabled 与没有 /log 的机器</b>：前者 <c>Computer.log</c> 直接 return
+    /// （Computer.cs:321-324），后者 <c>searchForFolder("log")</c> 返回 null ——
+    /// <see cref="WipeTraces"/> 对两者本就是幂等的空操作，这里的守卫只为省掉无谓遍历。
+    /// </summary>
+    internal static (int Entries, int Machines) WipeEverything(IEnumerable<Computer> comps, string ipFrom)
+    {
+        if (comps == null || string.IsNullOrEmpty(ipFrom))
+        {
+            return (0, 0);
+        }
+
+        var entries = 0;
+        var machines = 0;
+        var seen = new HashSet<Computer>();
+
+        foreach (var comp in comps)
+        {
+            if (comp == null || comp.disabled || !seen.Add(comp))
+            {
+                continue;
+            }
+
+            var wiped = WipeTraces(comp, ipFrom);
+            if (wiped.Count == 0)
+            {
+                continue;
+            }
+
+            entries += wiped.Count;
+            machines++;
+        }
+
+        return (entries, machines);
+    }
+
+    /// <summary>
+    /// 全网清痕的入口：按当前 scope 取机器池，清完回显一行。
+    ///
+    /// <b>范围随 scope 走</b>（用户定）：
+    /// <list type="bullet">
+    /// <item>「当前节点」= 沿连线取当前节点所在的无向连通分量
+    ///   （<see cref="SilentClosure"/>，<b>不</b>揭图 —— 清痕不是侦察）；</item>
+    /// <item>全网扫描 = 地图全表（<see cref="ConnectableComputers"/>）。</item>
+    /// </list>
+    /// 两者都含玩家机 —— <see cref="Closure"/> 会剔除 <c>os.thisComputer</c>，
+    /// 而玩家机的 /log 记着「谁连过我」，正是自己的痕迹（见 llms.txt 坑 9），
+    /// 故单独补回来。
+    ///
+    /// <b>排在换 IP 之前</b>（调用方负责）：判据是玩家<b>当前</b>的 IP，
+    /// 换完之后旧 IP 就不再指向玩家，这些痕迹反而清不掉了。
+    /// </summary>
+    /// <summary>
+    /// 一次运行的收尾清痕：按 scope 决定范围，<c>keep</c> 时不做事。
+    ///
+    /// 范围（用户定）：<b>只有「当前节点」模式走窄口径</b>（沿连线取连通分量），
+    /// 其余（网络扫描 / 全网 / 显式点名 / 脚本）一律地图全表 —— 玩家显式聚焦一台机器时
+    /// 才不该惊动别处，其余场景「我的痕迹」本就是全网概念。
+    /// </summary>
+    internal static void WipeForRun(OS os, HackOptions options)
+    {
+        if (options == null || !options.WipeTraces)
+        {
+            return;
+        }
+
+        WipeNetwork(os, options.Scope != HackScope.Connected);
+    }
+
+    /// <summary>
+    /// 全网清痕的入口：按给定范围清掉含玩家 IP 的 /log 条目，清完回显一行。
+    /// 面板工具与运行收尾共用这一份实现，回显措辞只写一次。
+    /// </summary>
+    /// <param name="allNodes">true = 地图全表；false = 当前节点所在的无向连通分量。</param>
+    internal static void WipeNetwork(OS os, bool allNodes)
+    {
+        var self = os?.thisComputer;
+        if (self == null)
+        {
+            return;
+        }
+
+        var pool = allNodes
+            ? ConnectableComputers(os)
+            : SilentClosure(os, os.connectedComp ?? self);
+
+        // 玩家机不在连通分量里（Closure 显式剔除），单独补上。
+        var comps = new List<Computer>(pool.Length + 1);
+        comps.AddRange(pool);
+        comps.Add(self);
+
+        var (entries, machines) = WipeEverything(comps, self.ip);
+        os.write("[autohack] wiped " + entries + " trace entr" + (entries == 1 ? "y" : "ies")
+            + " across " + machines + " node(s)"
+            + (allNodes ? " (whole map)." : " (linked component)."));
     }
 
     /// <summary>

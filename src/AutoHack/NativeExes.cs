@@ -3,21 +3,29 @@ namespace AutoHack;
 using System;
 using Hacknet;
 using Microsoft.Xna.Framework;
+using Pathfinder.Port;
 
 /// <summary>
 /// 原生破解程序的「演出」：把游戏自己的 SSHCrackExe / FTPBounceExe 等挂进 RAM 面板，
 /// 让入侵过程带上原版的动画与音效。由 <c>autohack run show</c> 或面板勾选开启。
 ///
-/// <b>只是演出。</b>端口状态在调用点已由 <see cref="HackEngine.OpenPort"/> 同步写好，
-/// 这里挂的 exe 到点后自己再调一次 <c>Computer.openPort</c>（SSHCrackExe.cs:229、
-/// SMTPoverflowExe.cs:169、HTTPExploitExe.cs:161、FTPBounceExe.cs:153、
-/// SQLExploitExe.cs:235、MedicalPortExe.cs:110、TorrentPortExe.cs:74、
-/// PacificPortExe.cs:49、RTSPPortExe.cs:80）—— 那是幂等的：Pathfinder 的
-/// <c>OpenPortPrefix</c> 只做 <c>PortState.Cracked = true</c> 就 <c>return false</c>
-/// （ComputerExtensions.cs:182-197），故两边不冲突、不重复计数。
-/// 状态不依赖 exe 跑完，exe 被中途打断也不影响战果。
+/// <b>端口由这些程序自己开（v1.33.3 起）。</b>9 个可安全演出的 exe 各自在
+/// <c>Completed()</c> 里调 <c>openPort(&lt;自己的原始终端口号&gt;, os.thisComputer.ip)</c>
+/// （SSHCrackExe.cs:229、SMTPoverflowExe.cs:169、HTTPExploitExe.cs:161、
+/// FTPBounceExe.cs:153、SQLExploitExe.cs:235、MedicalPortExe.cs:110、
+/// TorrentPortExe.cs:74、PacificPortExe.cs:49、RTSPPortExe.cs:80）——
+/// 开的正是自己那个端口，与 <c>PortExploits.cracks</c> 的键逐一对应。
+/// 而 Pathfinder 的 <c>OpenPortPrefix</c> 直接拿<b>调用方传入的原始参数</b>匹配
+/// <c>Record.OriginalPortNumber</c> 后 <c>return false</c>
+/// （ComputerExtensions.cs:184-197），故它与 <c>HackEngine.OpenPort</c> 落在同一个
+/// <c>PortState.Cracked</c> 上。
+/// <b>于是「动画跑完端口才开」不需要造机制 —— 调用方只要不再提前写。</b>
+/// <c>unbreakable</c> 随机过显示端口号也不影响（匹配的是原始终端口号）。
 ///
-/// <b>为什么必须串行（v1.32.8）。</b>此前是「破一个端口就地挂一个 exe」，于是同时挂在
+/// 代价是三条<b>补开</b>责任落在调用方（见 <see cref="Show"/> 与 <see cref="Flush"/>）：
+/// 没排上演出、被丢弃、被截断的端口，动画永远不会去开它。
+///
+/// <b>为什么必须有队列（v1.32.8）。</b>此前是「破一个端口就地挂一个 exe」，于是同时挂在
 /// RAM 面板上的 exe 数量只受破解节奏限制 —— 端口步只等 <c>PortDelay</c>（缺省 0.6s），
 /// 而单个动画要跑 4.8~22 秒（TorrentPortExe 4.8 / PacificPortExe 6 / RTSPPortExe 6.3 /
 /// SSHCrackExe 8 / SMTPoverflowExe 12 / HTTPExploitExe 14 / FTPBounceExe 15 /
@@ -31,17 +39,23 @@ using Microsoft.Xna.Framework;
 /// 现在改成队列 + 每帧泵：每帧在<b>游戏自己重算的预算</b>内挂载，
 /// 故 <c>addExe</c> 的门禁恒真、溢出在结构上不可能发生。
 ///
-/// <b>能并发就并发，且优先放「没出现过的、内存小、时间短的」。</b>并发上限由 RAM 决定，
-/// 不是 1 —— 761mb 的预算配上 190~400mb 的单个动画，同时挂 2~3 个是常态。
+/// <b>排队次序：优先放「没出现过的、内存小、时间短的」。</b>
 /// 队列按 <see cref="Compare"/> 升序排：已播出次数少的在前（九种动画轮流冒头），
 /// 同次数时内存小、时间短的在前，再相同则按随机数。
-/// 泵只挂队首且要求装得下 —— 按代价升序贪心装箱正是<b>最大化并发个数</b>的装法，
-/// 小动画先占位、也先播完释放，吞吐因此最高。
-/// 超出 <see cref="MaxQueued"/> 的新请求丢弃：演出是可丢的装饰，战果早已写好。
+/// 泵只挂队首且要求装得下 —— 按代价升序贪心装箱在<b>并发有余量时</b>是吞吐最高的装法。
+///
+/// <b>并发度由 RAM 决定（v1.33.3 起）。</b>端口步不再等待（见 <c>HackRun.DelayFor</c>），
+/// 一帧只推进一步、步与步之间零间隔，于是单台十几个动画请求在十几帧内全部入队，
+/// 由泵按 <c>os.ramAvaliable</c> 能挂几个挂几个 —— 实测峰值同屏 <b>3</b> 个
+/// （贪心升序装箱 190+208+210 = 608，再加 242 就超 761）。
+/// 实测 167 台 / 642 可破端口：峰值 RAM 760/761、642 端口全开、0 超时、0 丢弃。
+/// 超出 <see cref="MaxQueued"/> 的新请求丢弃：演出是可丢的装饰，端口由调用方补开
+/// （<see cref="Show"/> 返回 false）。
 ///
 /// <b>演出会点燃追踪。</b>9 个白名单 exe 里有 8 个调 <c>hostileActionTaken()</c>
 /// （3 个在构造函数、5 个在 <c>LoadContent</c>），目标 <c>traceTime &gt; 0</c> 时即
-/// 启动倒计时。泵每帧扑掉一次，理由与覆盖面见 <see cref="KillTrace"/>。
+/// 启动倒计时。泵每帧扑掉一次，理由与覆盖面见 <see cref="KillTrace"/> ——
+/// 注意判据要覆盖「已挂上但队列已空」的那一刻，见 <see cref="Tick"/>。
 ///
 /// 每帧只挂一个：<c>os.ramAvaliable</c> 由 <c>OS.Update</c> 每帧重算
 /// （OS.cs:840-859），一帧内连挂多个会让后续 <c>addExe</c> 拿同一个尚未扣减的
@@ -75,10 +89,18 @@ using Microsoft.Xna.Framework;
 /// </summary>
 internal static class NativeExes
 {
-    /// <summary>队列容量。积压超此数后，新请求只有比队尾更优才挤得进来
-    /// （见 <see cref="Show"/>）—— 演出是可丢的装饰，战果早已写好，
-    /// 不为此把几十个动画排到几十分钟之后。</summary>
-    private const int MaxQueued = 8;
+    /// <summary>
+    /// 队列容量。积压超此数后，新请求只有比队尾更优才挤得进来（见 <see cref="Show"/>）。
+    ///
+    /// <b>v1.33.3 起从 8 提到 32。</b>端口步改成零间隔入队（每帧一个）后，单台十几个端口
+    /// 会在十几帧内全部涌进来，而 RAM 只允许同时挂 3 个 —— 容量 8 会让大部分请求在
+    /// 挂载之前就被挤掉，演出直接演不出来。单台最多 15 个端口，跨台重叠时再翻一倍，
+    /// 32 留足余量。
+    ///
+    /// 被挤掉的那一条会由调用方立即补开端口（<see cref="Show"/> 返回 false）——
+    /// 容量只影响观感，不影响战果。
+    /// </summary>
+    private const int MaxQueued = 32;
 
     /// <summary>
     /// 一个待播动画：exe 实例 + 排序与决策用的代价。
@@ -101,8 +123,18 @@ internal static class NativeExes
     /// <paramref name="Tiebreak"/> 是「同档次内随机」的载体：键相同的动画按它排，
     /// 入队时取一个随机数，故同档的相对次序每次都不一样。
     /// </summary>
+    /// <param name="Target">这个动画要打在谁身上。截断时按它补开端口用 ——
+    /// 不能反查 <c>os.connectedComp</c>，那时早已换台（见 <see cref="Show"/>）。</param>
+    /// <param name="Port">这个动画负责开的那个端口。补开与等待判据都用它。</param>
     private readonly record struct Pending(
-        ExeModule Exe, string ExeName, int RamCost, float Seconds, float Tiebreak);
+        ExeModule Exe, string ExeName, int RamCost, Life Life, float Tiebreak,
+        Computer Target, PortInfo Port);
+
+    /// <summary>
+    /// 一个<b>已经挂上面板</b>的动画。与 <see cref="Pending"/> 同构，只是少了调度字段 ——
+    /// 已挂上的不再参与排序。
+    /// </summary>
+    private readonly record struct Running(ExeModule Exe, Computer Target, PortInfo Port);
 
     /// <summary>待播动画，按 <see cref="Compare"/> 排序 —— 代价小的在前。</summary>
     private static readonly List<Pending> Queue = new(MaxQueued);
@@ -115,41 +147,52 @@ internal static class NativeExes
     /// 播完的实例由游戏自己摘除（<c>needsRemoval</c>，ExeModule.cs:76 → OS.cs:852），
     /// 故每帧清一次「已不在 <c>os.exes</c> 里」的项，列表不随会话增长。
     /// </summary>
-    private static readonly List<ExeModule> Live = new(MaxQueued);
+    private static readonly List<Running> Live = new(MaxQueued);
 
     /// <summary>
-    /// 可安全演出的破解程序名 → <b>实际存活时长</b>（秒）。这张表同时就是白名单，
+    /// 一个破解程序的两个时长，单位秒。这张表同时就是白名单，
     /// 键集就是可安全演出的全集 —— 白名单与时长合一而非两份，杜绝失同步。
+    ///
+    /// <c>CrackSeconds</c> 是 <c>Completed()</c> 被调用的时刻，也就是端口状态写好的瞬间；
+    /// <c>TotalSeconds</c> 是它从构造到 <c>needsRemoval</c> 被摘除的全过程。
+    /// 两者相差一个收尾停顿加 2 秒淡出
+    /// （<c>fade</c> 从 1 减到 0 需要 <c>1 / FADEOUT_RATE = 2</c> 秒，ExeModule.cs:9/:76）。
+    ///
+    /// <b>为什么要分开。</b>端口现在由动画的 <c>Completed()</c> 去开（见 <see cref="Show"/>），
+    /// 故 <c>CrackSeconds</c> 是「多久之后端口会开」—— 它是等待与观感的依据；
+    /// 而调度排序关心的是「这个动画要占多久面板」，对应总存活
+    /// （<see cref="Tier"/> 用的就是它）。合成一个数会让排序低估占位。
     ///
     /// 白名单的入表条件（取自 <c>PortExploits.cracks</c>，不硬编码端口号）：
     /// 在 launchExecutable 里有 case、不需要参数、且 <c>Completed()</c> 开的
     /// 正是自己那个端口。排除项与理由见类注释。
     ///
-    /// 时长是<b>从构造到 <c>needsRemoval</c> 被摘除</b>的全过程，不是动画名义时长。
-    /// 三段相加：动画本体 + 收尾停顿 + 淡出
-    /// （<c>fade</c> 从 1 减到 0 需要 <c>1 / FADEOUT_RATE = 2</c> 秒，ExeModule.cs:9/:76）。
-    /// 出处逐条：
-    /// - TorrentStreamInjector：<c>IDLE_TIME 16.5</c>（TorrentPortExe.cs:11）+ 2
-    /// - PacificPortcrusher：<c>IDLE_TIME 6.2</c>（PacificPortExe.cs:10）+ 2
-    /// - SSHcrack：<c>DURATION 8</c>（SSHCrackExe.cs:20）+ 2
-    /// - SQL_MemCorrupt：3+3+5+1.2 = <c>12.2</c>（SQLExploitExe.cs:16-22）+ 2
-    /// - SMTPoverflow：<c>DURATION 12</c>（SMTPoverflowExe.cs:10）+ <c>sucsessTimer 0.5</c>（:20）+ 2
-    /// - WebServerWorm：<c>DURATION 14</c>（HTTPExploitExe.cs:10）+ <c>AFTER_COMPLETION_STALL 1</c>（:12）+ 2
-    /// - FTPBounce：<c>DURATION 15</c>（FTPBounceExe.cs:8）+ 2
-    /// - KBT_PortTest：<c>RUNTIME 22</c> + <c>COMPLETE_TIME 2</c>（MedicalPortExe.cs:7-9）+ 2
-    /// - RTSPCrack：<c>IDLE_TIME 30.5</c>（RTSPPortExe.cs:10）+ 2
+    /// 出处逐条（完成时刻取 <c>Completed()</c> 或触发它的那个比较；总存活 = 完成时刻
+    /// 之后的收尾 + 2 秒淡出，逐条核过）：
+    /// - TorrentStreamInjector：4.8（TorrentPortExe.cs:49）→ 16.5 + 2 = 18.5
+    /// - PacificPortcrusher：6（PacificPortExe.cs:32）→ 6.2 + 2 = 8.2
+    /// - SSHcrack：8（SSHCrackExe.cs:20/:98）→ 8 + 2 = 10
+    /// - SQL_MemCorrupt：3+3+5+1.2 = 12.2（SQLExploitExe.cs:81-104）→ + 2 = 14.2
+    /// - SMTPoverflow：12（SMTPoverflowExe.cs:10/:68）→ 12 + 0.5 + 2 = 14.5
+    /// - WebServerWorm：14（HTTPExploitExe.cs:10/:72）→ 14 + 1 + 2 = 17
+    /// - FTPBounce：15（FTPBounceExe.cs:8/:88）→ 15 + 2 = 17
+    /// - KBT_PortTest：22（MedicalPortExe.cs:42）→ 22 + 2 + 2 = 26
+    /// - RTSPCrack：6.3（RTSPPortExe.cs:8/:40）→ 30.5 + 2 = 32.5
     /// </summary>
-    private static readonly Dictionary<string, float> Lifetimes = new(StringComparer.OrdinalIgnoreCase)
+    internal readonly record struct Life(float CrackSeconds, float TotalSeconds);
+
+    /// <summary>白名单 + 时长表。见 <see cref="Life"/>。</summary>
+    private static readonly Dictionary<string, Life> Lifetimes = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["TorrentStreamInjector.exe"] = 18.5f,
-        ["PacificPortcrusher.exe"] = 8.2f,
-        ["SSHcrack.exe"] = 10f,
-        ["SQL_MemCorrupt.exe"] = 14.2f,
-        ["SMTPoverflow.exe"] = 14.5f,
-        ["WebServerWorm.exe"] = 17f,
-        ["FTPBounce.exe"] = 17f,
-        ["KBT_PortTest.exe"] = 26f,
-        ["RTSPCrack.exe"] = 32.5f,
+        ["TorrentStreamInjector.exe"] = new(4.8f, 18.5f),
+        ["PacificPortcrusher.exe"] = new(6f, 8.2f),
+        ["SSHcrack.exe"] = new(8f, 10f),
+        ["SQL_MemCorrupt.exe"] = new(12.2f, 14.2f),
+        ["SMTPoverflow.exe"] = new(12f, 14.5f),
+        ["WebServerWorm.exe"] = new(14f, 17f),
+        ["FTPBounce.exe"] = new(15f, 17f),
+        ["KBT_PortTest.exe"] = new(22f, 26f),
+        ["RTSPCrack.exe"] = new(6.3f, 32.5f),
     };
 
     /// <summary>内存分档宽度（mb）。ramCost 落在 190~400，按 100 分即 4 档。</summary>
@@ -216,18 +259,32 @@ internal static class NativeExes
 
     /// <summary>代价档号：内存档为主、时长档为辅（见 <see cref="SortKey"/>）。</summary>
     private static int Tier(Pending p)
-        => p.RamCost / RamTierMb * SecondTierCount + (int)(p.Seconds / SecondTierSec);
+        => p.RamCost / RamTierMb * SecondTierCount + (int)(p.Life.TotalSeconds / SecondTierSec);
 
     /// <summary>
     /// 为一次端口破解排一个原生动画。<paramref name="target"/> 必须正是当前连接目标 ——
     /// 否则动画会打在本机上（见类注释约束 1）。未连接、无对应程序、程序不在白名单时静默跳过；
     /// 目标已提权时也跳过（见方法内）；队列满时只有排序键比队尾更小才挤进来。
+    ///
+    /// <b>回传 bool 而非时长（v1.33.3 起）。</b>端口不再由调用方提前写 —— 交给动画自己的
+    /// <c>Completed()</c>（那 9 个 exe 各自 <c>openPort(&lt;自己的原始终端口号&gt;, ip)</c>，
+    /// 与 <see cref="HackEngine.OpenPort"/> 落在同一个 <c>PortState.Cracked</c> 上，
+    /// 见类注释）。故调用方只需要知道一件事：<b>这次有没有动画可等</b>。
+    ///
+    /// 返回 <c>false</c> 的每一种情形，调用方都必须立即补开端口，否则它永远不开：
+    /// <list type="bullet">
+    /// <item>未连接目标 —— 动画会打在本机上（类注释约束 1），不能演，但端口该开；</item>
+    /// <item>目标已控 —— 不排演出，但 redo 模式下端口照样要开；</item>
+    /// <item>该端口没有可安全演出的程序（实测 73/642：443 / 3659 / 3724 / 9418 / 211 / 32）；</item>
+    /// <item>队列已满且新请求不比队尾更优 —— 这一条最隐蔽：实例从未 <c>addExe</c>，
+    ///   <c>Completed()</c> 永不执行，端口就此丢失。</item>
+    /// </list>
     /// </summary>
-    internal static void Show(OS os, Computer target, PortInfo port)
+    internal static bool Show(OS os, Computer target, PortInfo port)
     {
         if (os == null || target == null || !ReferenceEquals(os.connectedComp, target))
         {
-            return;
+            return false;
         }
 
         // 已提权的机器不排演出。它不需要破端口（权限已在手），动画因此纯粹是噪音，
@@ -239,26 +296,26 @@ internal static class NativeExes
         // 玩家要碰那台机器，但碰不等于要看一遍它已经完成过的动画。
         if (HackEngine.IsOwned(target, os))
         {
-            return;
+            return false;
         }
 
         if (PortExploits.cracks == null || !PortExploits.cracks.TryGetValue(port.CodePort, out var exeName))
         {
-            return;
+            return false;
         }
 
-        if (!Lifetimes.TryGetValue(exeName, out var seconds))
+        if (!Lifetimes.TryGetValue(exeName, out var life))
         {
-            return;
+            return false;
         }
 
         var exe = Create(os, exeName);
         if (exe == null)
         {
-            return;
+            return false;
         }
 
-        var pending = new Pending(exe, exeName, exe.ramCost, seconds, (float)Utils.random.NextDouble());
+        var pending = new Pending(exe, exeName, exe.ramCost, life, (float)Utils.random.NextDouble(), target, port);
 
         if (Queue.Count >= MaxQueued)
         {
@@ -270,7 +327,7 @@ internal static class NativeExes
             // 且泵每帧都会把它扑掉 —— 见 KillTrace）。
             if (Compare(pending, Queue[Queue.Count - 1]) >= 0)
             {
-                return;
+                return false;
             }
 
             Queue.RemoveAt(Queue.Count - 1);
@@ -278,15 +335,17 @@ internal static class NativeExes
 
         Queue.Add(pending);
         Queue.Sort(Compare);
+        return true;
     }
 
     /// <summary>
     /// 每帧推进一步：只要预算装得下队首，就把它挂上去（队首的排序键最小，见
     /// <see cref="Compare"/>）。由 <see cref="HackOverlay"/> 的 OS.Update 补丁调用。
     ///
-    /// 泵本身不关心入侵是否还在推进 —— 队列何时被截断由 <see cref="StopTarget"/> 与
-    /// <see cref="StopAll"/> 决定，那两个入口由 <see cref="HackRun"/> 在目标边界与
-    /// 整轮收尾处调用。
+    /// 泵本身不关心入侵是否还在推进 —— 队列何时被清由 <see cref="StopAll"/> 决定，
+    /// 那个入口由 <see cref="HackRun"/> 在整轮收尾处调用。换目标时<b>不</b>截断：
+    /// 端口步零间隔入队后，本台十几个动画会跨过目标边界继续播，而换目标时端口
+    /// 已经全开（提权前等过，见 <see cref="Settled"/>），截断只会白丢观感。
     ///
     /// 只在游戏线程调用（OS.Update 的 Harmony Postfix），故与 <see cref="Queue"/> /
     /// <see cref="Live"/> 的读写天然串行，不需要加锁。
@@ -300,22 +359,33 @@ internal static class NativeExes
 
         // 播完的实例已由游戏摘除，这里跟着剪一遍 —— 队列空时也要剪，
         // 否则 Live 会在整个会话里只增不减。
-        if (Live.Count > 0)
+        // 动画已不在面板上 = 它再也不会 Update、也就再也不会 Completed。
+        // 正常播完的那批端口早已开好（Completed 里 openPort）；剩下两种是没开成的：
+        // ① 被游戏的跳板门禁拦下（OS.addExe，OS.cs:2165 写 "Proxy Active -- Cannot Execute"
+        //    后直接丢弃，从未进 exes）；② 被别的东西提前摘除。
+        // 这两种必须在剪枝的这一刻补开 —— 晚一步就永远补不上了（见 Flush）。
+        for (var i = Live.Count - 1; i >= 0; i--)
         {
-            Live.RemoveAll(exe => exe == null || !os.exes.Contains(exe));
-        }
+            var run = Live[i];
+            if (run.Exe != null && os.exes.Contains(run.Exe))
+            {
+                continue;
+            }
 
-        if (Queue.Count == 0)
-        {
-            return;
+            if (!IsOpen(run.Target, run.Port))
+            {
+                HackEngine.OpenPort(run.Target, run.Port, os.thisComputer?.ip);
+            }
+
+            Live.RemoveAt(i);
         }
 
         // 一帧只挂一个：os.ramAvaliable 由 OS.Update 每帧重算（OS.cs:840-859），
         // 而 addExe 只扣 exes 的累计值、不回写它。同帧连挂多个会拿同一个
         // 尚未扣减的值反复判断，挂到预算之外。60 个/秒已远快于需求。
-        var head = Queue[0];
-        if (head.RamCost <= os.ramAvaliable)
+        if (Queue.Count > 0 && Queue[0].RamCost <= os.ramAvaliable)
         {
+            var head = Queue[0];
             Queue.RemoveAt(0);
 
             // 绕开 launchExecutable：它的位置算法是面板为空时的那一套（见类注释）。
@@ -324,17 +394,156 @@ internal static class NativeExes
             os.addExe(head.Exe);
 
             // 登记归属：停播时要按实例精确摘出来（见 Live）。
-            Live.Add(head.Exe);
+            Live.Add(new Running(head.Exe, head.Target, head.Port));
 
             // 挂上去了才算「出现过」—— 排过队但被挤掉、丢弃、或预算不足没挂上的都不算。
             ShownCount[head.ExeName] = Count(head.ExeName) + 1;
 
             // 计数变了，队列里同类的键随之变大，重排一次让「刚播完的那类」立刻让位
-            // 给还没露面的。队列至多 8 项，每帧最多走这一次。
+            // 给还没露面的。队列至多 MaxQueued 项，每帧最多走这一次。
             Queue.Sort(Compare);
         }
 
-        KillTrace(os);
+        // 只要「本类的动画还在队列里或还在面板上」，就逐帧扑一次追踪。
+        //
+        // <b>不能只判队列非空。</b>LoadContent 点火的那 5 个 exe（SSHCrackExe.cs:90 等）
+        // 正是在<b>挂载那一刻</b>点火的，若此刻因为队列空而提前返回，那条倒计时就会
+        // 一路跑到归零。判据必须覆盖「已经挂上去的」。
+        //
+        // 也不能无条件调用：那样玩家自己敲命令点燃的追踪会被面板补丁一直掐掉。
+        if (Queue.Count > 0 || Live.Count > 0)
+        {
+            KillTrace(os);
+        }
+    }
+
+    /// <summary>
+    /// 等待某一台上「交给动画去开」的端口全部开完；返回是否已经全部开完。
+    ///
+    /// <b>判据是「那个端口是否已 Cracked」，不是 exe 内部字段。</b>九种程序的完成标志
+    /// 各不相同（<c>complete</c> / <c>hasCompleted</c> / <c>isComplete</c> /
+    /// <c>sucsessTimer</c> / <c>elapsedTime</c>），读它们就得写一张九分支的表；
+    /// 而 <c>PortState.Cracked</c> 是<b>战果本身</b>，动画一 <c>Completed()</c> 就置真
+    /// （<c>openPort</c> 的 Prefix，ComputerExtensions.cs:184-197）。用结果当判据，
+    /// 既不用懂九种内部状态，也自动覆盖「动画被截断/丢弃」的情形 —— 那两种由调用方
+    /// 补开（见 <see cref="Flush"/>），补完这里也就返回 true。
+    ///
+    /// 被截断、被丢弃、或本来就没有程序的端口，调用方已用
+    /// <see cref="HackEngine.OpenPort"/> 直接开掉，故不在等待名单里。
+    /// </summary>
+    internal static bool Settled(Computer target)
+    {
+        if (target == null)
+        {
+            return true;
+        }
+
+        foreach (var run in Live)
+        {
+            if (ReferenceEquals(run.Target, target) && !IsOpen(target, run.Port))
+            {
+                return false;
+            }
+        }
+
+        foreach (var pending in Queue)
+        {
+            if (ReferenceEquals(pending.Target, target) && !IsOpen(target, pending.Port))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// 该端口此刻是不是已破解。<b>按协议名现查端口表</b>，不用 <see cref="PortInfo.Cracked"/> ——
+    /// 那是 <c>HackEngine.Ports</c> 在构建步骤时拍的快照，之后动画把端口开了它也不会变。
+    ///
+    /// 查不到该协议时返回 true（当作「没有可等的」）：那种端口 <c>HackEngine.OpenPort</c>
+    /// 也写不进去，等下去只会卡住。
+    /// </summary>
+    private static bool IsOpen(Computer target, PortInfo port)
+    {
+        var state = target.GetPortState(port.Protocol);
+        return state == null || state.Cracked;
+    }
+
+    /// <summary>
+    /// 把「交出去但动画已经不可能再跑完」的端口立刻补开，返回补开的条数。
+    ///
+    /// <b>为什么必须补。</b>端口不再由调用方提前写，而是等动画的 <c>Completed()</c>
+    /// 去开。但有三条路径会让那个回调永不执行：
+    /// <list type="number">
+    /// <item><b>整轮收尾</b>（<see cref="StopAll"/>）：清队列 + 置 <c>isExiting</c>，
+    ///   <c>ExeModule.Update</c> 在 <c>fade &lt;= 0</c> 时置 <c>needsRemoval</c>，
+    ///   之后 <c>OS.Update</c> 摘除它、<c>Update</c> 不再被调 —— 端口永不开。</item>
+    /// <item><b>队列满被丢弃</b>：那个实例从未 <c>addExe</c>，也就永远不 <c>Update</c>。</item>
+    /// <item><b>换 OS</b>（<see cref="Reset"/>）：连同 <c>os.exes</c> 一起丢弃。</item>
+    /// </list>
+    /// 不补就是<b>丢战果</b>：终端上端口看起来破了，实际 <c>PortState.Cracked</c> 仍是假。
+    /// </summary>
+    /// <param name="target">只补这一台；<c>null</c> = 全部。</param>
+    /// <param name="force">
+    /// <c>true</c> = 连<b>还在面板上播</b>的也一并开掉并摘出 <see cref="Live"/>。
+    /// 只给等待超时用（见 <c>HackRun.NativeWaitCapSeconds</c>）：那时已经不再等动画了，
+    /// 留着那些项会让 <see cref="Settled"/> 永远为假，于是每帧重进超时分支、回显刷屏。
+    /// </param>
+    internal static int Flush(OS os, Computer target, bool force = false)
+    {
+        if (os == null)
+        {
+            return 0;
+        }
+
+        var opened = 0;
+        var ip = os.thisComputer?.ip;
+
+        for (var i = Queue.Count - 1; i >= 0; i--)
+        {
+            var pending = Queue[i];
+            if (target != null && !ReferenceEquals(pending.Target, target))
+            {
+                continue;
+            }
+
+            Queue.RemoveAt(i);
+            if (!IsOpen(pending.Target, pending.Port))
+            {
+                HackEngine.OpenPort(pending.Target, pending.Port, ip);
+                opened++;
+            }
+        }
+
+        // 面板上的那些：**只补「已经不可能再跑完」的**，还活着的留给它自己的 Completed ——
+        // 提前补会让端口抢在动画前面开（观感上「还没跑完就开了」）。
+        // 「不可能再跑完」= 已经不在 os.exes 里（被游戏摘除 / 被跳板门禁拦下从未挂上）。
+        // 这一条正是 Tick 剪枝用的同一判据，两处一致。
+        for (var i = Live.Count - 1; i >= 0; i--)
+        {
+            var run = Live[i];
+            if (target != null && !ReferenceEquals(run.Target, target))
+            {
+                continue;
+            }
+
+            // 不 force 时只补「已经不可能再跑完」的（不在 os.exes 里）；force 时全补。
+            if (!force && run.Exe != null && os.exes.Contains(run.Exe))
+            {
+                continue;
+            }
+
+            if (!IsOpen(run.Target, run.Port))
+            {
+                HackEngine.OpenPort(run.Target, run.Port, ip);
+                opened++;
+            }
+
+            Live.RemoveAt(i);
+        }
+
+        return opened;
     }
 
     /// <summary>
@@ -373,6 +582,9 @@ internal static class NativeExes
     ///
     /// <b>不淡出 <see cref="Live"/> 里的实例</b>：换 OS 意味着那些 exe 连同旧 OS 的
     /// <c>exes</c> 列表一起被丢弃，去碰它们没有意义。只清列表本身。</summary>
+    /// <b>刻意不补开端口。</b>换 OS 时队列里排的是<b>旧 OS</b> 的机器，而此刻能拿到的
+    /// 只有新 OS 的玩家 IP —— 拿它去开旧机器的端口是错的。而旧 OS 已经整个被丢弃
+    /// （回主菜单再进档），那些端口开不开都不再有意义。
     internal static void Reset()
     {
         Queue.Clear();
@@ -381,33 +593,11 @@ internal static class NativeExes
     }
 
     /// <summary>
-    /// 一台目标的动作跑完了：丢掉它待播的动画，并让它已经在面板上播的那个淡出。
+    /// 整轮结束：把还没开的端口补开，再让所有仍在面板上播的动画淡出。
     ///
-    /// <b>为什么需要这个入口。</b>动画在<b>破端口那一刻</b>入队，而提权排在全部端口之后
-    /// （BuildSteps）—— 等到提权发生时，队列里还压着属于这台机器的好几个动画
-    /// （队列容量 8，单个动画要活 8~33 秒，而单台端口步只花端口数 × PortDelay ≈ 几秒）。
-    /// 不截断的话，玩家会在「已经黑进去了」之后继续看这台机器的破解动画。
-    ///
-    /// 按 <c>targetIP</c> 匹配而不是按 <see cref="Computer"/> 引用：exe 自己就是靠
-    /// <c>Programs.getComputer(os, targetIP)</c> 找目标的（SSHCrackExe.cs:226 等），
-    /// 那是它与目标之间唯一的联系，也是构造时定下的那个值（ExeModule.cs:38）。
-    /// </summary>
-    internal static void StopTarget(OS os, string ip)
-    {
-        if (os == null || string.IsNullOrEmpty(ip))
-        {
-            return;
-        }
-
-        Queue.RemoveAll(pending => SameTarget(pending.Exe, ip));
-        Fade(os, exe => SameTarget(exe, ip));
-    }
-
-    /// <summary>
-    /// 整轮结束：清空待播队列，并让所有仍在面板上播的动画淡出。
-    ///
-    /// 与 <see cref="StopTarget"/> 的差别只是范围 —— 收尾时不该再有「本轮的演出」
-    /// 继续拖尾，而单台机器收尾只该截断那一台。
+    /// <b>必须先补开、后淡出</b>（v1.33.3）：端口现在由动画的 <c>Completed()</c> 去开，
+    /// 而淡出会置 <c>isExiting</c> → 2 秒后 <c>needsRemoval</c> → 被 <c>OS.Update</c> 摘除，
+    /// <c>Update</c> 不再被调 ⇒ <c>Completed()</c> 永不执行。先淡出就是丢战果。
     /// </summary>
     internal static void StopAll(OS os)
     {
@@ -416,12 +606,12 @@ internal static class NativeExes
             return;
         }
 
-        Queue.Clear();
+        // force: true 是必需的 —— 非 force 只补「已经不在 os.exes 里」的，而此刻
+        // 正在播的那些<b>还在</b> exes 里；紧接着的 Fade 把它们淡出后，
+        // 它们再也不会 Completed（淡出完就被摘除），端口就此丢失。
+        Flush(os, null, force: true);
         Fade(os, _ => true);
     }
-
-    private static bool SameTarget(ExeModule exe, string ip)
-        => exe != null && string.Equals(exe.targetIP, ip, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// 让匹配的实例淡出，并把它们从 <see cref="Live"/> 摘除。
@@ -439,7 +629,7 @@ internal static class NativeExes
     {
         for (var i = Live.Count - 1; i >= 0; i--)
         {
-            var exe = Live[i];
+            var exe = Live[i].Exe;
             if (exe == null || !match(exe))
             {
                 continue;

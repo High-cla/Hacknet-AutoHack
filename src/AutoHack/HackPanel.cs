@@ -98,9 +98,10 @@ internal sealed class HackPanelState
     /// <summary>
     /// 是否把原生破解程序挂进 RAM 面板当演出（缺省**开**）。
     ///
-    /// 只是演出：端口状态由 <see cref="HackEngine.OpenPort"/> 同步写好，
-    /// exe 到点后自己再调一次是幂等的，不影响战果。缺省开是为了让入侵过程
-    /// 看得见（原版动画是这游戏的主要反馈）；要安静跑可取消勾选。
+    /// v1.33.3 起端口由这些程序自己在跑完时开（见 <see cref="NativeExes"/>），
+    /// 故「动画跑完」就等于「端口真的开了」。没有对应动画的端口由调用方立即开，
+    /// 关掉演出不影响战果，只是没有动画可看。缺省开是为了让入侵过程看得见
+    /// （原版动画是这游戏的主要反馈）；要安静跑可取消勾选。
     /// </summary>
     internal bool ShowExes { get; set; } = true;
 
@@ -251,6 +252,11 @@ internal static class HackPanel
         (ToolDispatch.Pull, "PULL FILES", false),
         (ToolDispatch.Purge, "PURGE FILES", true),
         (ToolDispatch.Drop, "DROP NODE", true),
+
+        // 清痕作用于**我的痕迹**（/log 里含玩家 IP 的条目），范围随 SCOPE 段走：
+        // 「当前节点」= 当前节点所在的连通分量，全网扫描 = 地图全表。
+        // 用告警色是因为它删的是数据；作用域与 run 的目标池同源，故玩家对范围不会意外。
+        (ToolDispatch.Wipe, "WIPE TRACES", true),
 
         // 这里**没有**独立的反追踪按钮：止追踪已并进选项区的「disconnect & clear
         // traces」复选框（见 HackPanelState.Disconnect）。两个控件的取舍理由见

@@ -36,18 +36,28 @@ internal sealed class HackRun
     /// <summary>Normal 档的非端口步间隔（真人节奏）。</summary>
     private const float NormalStepDelay = 0.35f;
 
+    /// <summary>
+    /// 等本台端口开完的上限（秒），超时就把剩下的端口直接开掉并继续。
+    ///
+    /// <b>为什么必须有上限。</b>等待的判据是「端口是否已 Cracked」，而端口由动画的
+    /// <c>Completed()</c> 去开；动画要挂上 RAM 面板才跑，挂载受 <c>os.ramAvaliable</c>
+    /// 门禁。玩家自己开着几个吃内存的 exe（ShellExe 600mb 之类）时，本插件排的动画
+    /// 可能永远装不下 —— 那时没有上限就是<b>整轮永久停在 ESCALATING</b>，比少开一个
+    /// 端口糟得多。
+    ///
+    /// 取 180 秒：实测单台最坏 72.3 秒（167 台 / 642 可破端口全量仿真），留 2.5 倍余量。
+    /// 超时走 <see cref="NativeExes.Flush"/> —— 把还没开的直接开掉，战果不丢。
+    /// </summary>
+    private const float NativeWaitCapSeconds = 180f;
+
+    /// <summary>在提权等待上已经花掉的秒数（见 <see cref="NativeWaitCapSeconds"/>）。</summary>
+    private float _waitSeconds;
+
     private readonly List<Computer> _targets;
     private readonly List<HackStep> _steps;
 
     private int _index;
     private float _timer;
-
-    /// <summary>
-    /// 上一步所属的目标。步骤按目标成组排列（BuildSteps 逐个 target 展开），
-    /// 故「目标变了」就是「上一台跑完了」—— 那是截断它演出的时机（见
-    /// <see cref="NativeExes.StopTarget"/>）。
-    /// </summary>
-    private Computer _activeTarget;
 
     /// <summary>本次运行中靠已知凭据登入（即已提权）的机器，其破端口类步骤整体跳过。</summary>
     private readonly HashSet<Computer> _loggedIn = new();
@@ -68,6 +78,7 @@ internal sealed class HackRun
     /// 整段跳过等于把一台本来能拿下的机器直接放弃，这才是真损失。
     /// </summary>
     private readonly HashSet<Computer> _refused = new();
+
 
     /// <summary>本次运行的入侵脚本；null = 用内置次序。构造期已解析完成。</summary>
     private readonly HackScript _script;
@@ -127,8 +138,12 @@ internal sealed class HackRun
         _timer += deltaSeconds;
 
         // Instant 档：非端口步不等时间，一帧内连跑到底，直到撞上一个端口步
-        // 或本帧的预算耗尽。端口步始终按 Options.PortDelay 等 —— 那是回显
-        // 逐条浮现的节奏来源，也是唯一有意义的等待。
+        // 或本帧的预算耗尽。
+        //
+        // 端口步在开了演出时零间隔（DelayFor），真正的节流是循环末尾那道
+        // 「端口步只推进一个就 return」—— 于是每帧至多入队一个动画请求，
+        // 终端仍逐行浮现，而动画由 RAM 门禁自行并发。关掉演出时端口步吃
+        // Options.PortDelay，那道闸门也就取不到上限（MinPortDelay 0.02s = 50/秒 < 60）。
         var budget = MaxStepsPerFrame;
         while (!Finished && budget-- > 0)
         {
@@ -139,19 +154,6 @@ internal sealed class HackRun
             }
 
             var step = _steps[_index];
-
-            // 换目标 = 上一台跑完了。它排的演出动画此刻起没有理由再播 ——
-            // 破端口时入的队，而提权排在全部端口之后，队列里往往还压着好几个
-            // （容量 8、单个动画 8~33 秒，单台端口步只花几秒）。见 NativeExes.StopTarget。
-            if (!ReferenceEquals(_activeTarget, step.Target))
-            {
-                if (_activeTarget != null)
-                {
-                    NativeExes.StopTarget(os, _activeTarget.ip);
-                }
-
-                _activeTarget = step.Target;
-            }
 
             // 该目标的连接被拒（白名单）：只跳过**依赖连接**的步骤，其余照常执行。
             // 依据见 _refused 的字段注释 —— 破端口/提权/投放操作的是 target 对象本身，
@@ -170,6 +172,35 @@ internal sealed class HackRun
                 continue;
             }
 
+            // 提权读的是已破解端口数（HackEngine.CanEscalate → OpenPortCount >
+            // portsNeededForCrack 且防火墙已解）。端口现在由动画的 Completed() 去开，
+            // 故必须等本台交给动画的端口全部开完再提权 —— 否则读数是假的，
+            // porthack 门禁必然不过，终端会多打一行 escalation gate not met。
+            //
+            // 等的是战果本身（PortState.Cracked），不是动画内部状态：九种程序的完成标志
+            // 各不相同，而 Cracked 一置真就说明该端口确实开好了（见 NativeExes.Settled）。
+            //
+            // 不推进 _index，下一帧重来 —— 这是「等」，不是「跳过」。
+            if (step.Kind == HackStepKind.Escalate && !NativeExes.Settled(step.Target))
+            {
+                _waitSeconds += deltaSeconds;
+                if (_waitSeconds < NativeWaitCapSeconds)
+                {
+                    return;
+                }
+
+                // 超时兜底：把这一台还没开的端口直接开掉，不再等动画。
+                // 必须回显 —— 玩家看到的动画没有跑完，得知道战果是补上的。
+                //
+                // force 连还在播的一起补，且复位计时：否则下一帧 Settled 仍为假，
+                // 会每帧重进这个分支、把同一行刷满终端。
+                var forced = NativeExes.Flush(os, step.Target, force: true);
+                _waitSeconds = 0f;
+                os.write("[autohack] " + step.Target.name + " :: animation wait timed out after "
+                    + (int)NativeWaitCapSeconds + "s - opened " + forced
+                    + " remaining port(s) directly.");
+            }
+
             var delay = DelayFor(step.Kind);
             if (_timer < delay)
             {
@@ -177,8 +208,17 @@ internal sealed class HackRun
             }
 
             _timer = 0f;
+            _waitSeconds = 0f;
             Apply(os, step);
             _index++;
+
+            // 端口步每帧只推进一步。DelayFor 已把它压到 0，若不加这道闸，
+            // 一帧 512 步的预算会让单台十几个端口同帧全部入队 —— 终端一帧刷十几行，
+            // 且动画请求全部挤进队列，反而看不清「一次破解」。
+            if (step.Kind == HackStepKind.OpenPort)
+            {
+                return;
+            }
         }
     }
 
@@ -224,9 +264,21 @@ internal sealed class HackRun
     /// <summary>该步骤需等待的秒数。Instant 档把非端口步压到 0。</summary>
     private float DelayFor(HackStepKind kind)
     {
+        // 端口步：开了演出就零间隔，关掉演出才吃 Options.PortDelay。
+        //
+        // <b>开了演出时零间隔是刻意的</b>（v1.33.3）：破解之间的等待不再由计时器管，
+        // 而是由「动画跑完端口才开」这件事本身管 —— 见 Apply(OpenPort) 与 Tick 里的
+        // 提权等待。真正的节流是「每帧只推进一个端口步」（Tick 里那道 return），
+        // 故一帧最多入队一个动画请求，终端逐行浮现的观感得以保留，
+        // 而动画由 RAM 门禁自行并发（实测峰值 3 个同屏）。
+        //
+        // <b>关掉演出时仍吃 PortDelay</b>：那种情况下端口在 Apply 里立即开，没有任何
+        // 可等的东西，若也压成 0 就是 60 端口/秒的刷屏 —— 面板的 PORT INTERVAL 滑条
+        // 与命令行的 delay= 会当场失去意义（那是本仓库唯一的节奏控件）。
+        // 每帧一步的闸门不影响它：MinPortDelay 0.02s = 50 端口/秒 < 60，取不到上限。
         if (kind == HackStepKind.OpenPort)
         {
-            return Options.PortDelay;
+            return Options.ShowExes ? 0f : Options.PortDelay;
         }
 
         // 清痕是纯内存操作（WipeTraces 只做 List 扫描 + deleteFile 遍历，
@@ -359,13 +411,18 @@ internal sealed class HackRun
                     Echo(os, step.Command);
                 }
 
-                HackEngine.OpenPort(target, step.Port, os.thisComputer.ip);
-
-                // 状态已写好，这里只是把原版动画排进演出队列（缺省开）。
-                // 队列串行播、同一时刻至多一个 —— RAM 账见 NativeExes 类注释。
-                if (Options.ShowExes)
+                // 端口交给动画去开（v1.33.3）：那 9 个 exe 各自在 Completed() 里调
+                // openPort(<自己的原始终端口号>, ip)，与这里调 HackEngine.OpenPort 落在
+                // 同一个 PortState.Cracked 上（ComputerExtensions.cs:184-197 的 Prefix
+                // 直接拿调用方传入的原始端口号匹配 Record.OriginalPortNumber）。
+                // 故「动画跑完端口才开」不需要造机制 —— 只要不再提前写。
+                //
+                // Show 返回 false 的每一种情形都必须立即补开，否则端口永远不开：
+                // 未连接 / 已控 / 该端口没有可安全演出的程序（实测 73/642）/
+                // 队列满被丢弃。判据见 NativeExes.Show 的文档注释。
+                if (!Options.ShowExes || !NativeExes.Show(os, target, step.Port))
                 {
-                    NativeExes.Show(os, target, step.Port);
+                    HackEngine.OpenPort(target, step.Port, os.thisComputer.ip);
                 }
 
                 break;
@@ -605,6 +662,13 @@ internal sealed class HackRun
         // RAM 决定、只有 2~3 个），不截断的话收尾后还要空播半分钟以上。
         // 已在面板上的那个走游戏自己的淡出，2 秒内消失（见 NativeExes.StopAll）。
         NativeExes.StopAll(os);
+
+        // 收尾全网清痕 —— 覆盖本轮目标池之外的历史痕迹（此前访问过、但不在池里的机器）。
+        // 排在反追踪与换 IP 之前：判据是玩家当前的 IP，换完之后就清不掉了。
+        //
+        // 只在这一轮确实要清痕时做：keep 是玩家显式要求留痕，不该被收尾兜底绕过。
+        // 被跳过（已控）与玩家自己的机器由 WipeNetwork 一并覆盖，不再单独追加。
+        HackEngine.WipeForRun(os, Options);
 
         // 收尾反追踪 —— 无条件执行，不是选项：止住倒计时 + 清空脱机追踪列表。
         // **不擦追踪者的 /log**：那是目标机的操作史，反追踪不该顺手替玩家做决定。

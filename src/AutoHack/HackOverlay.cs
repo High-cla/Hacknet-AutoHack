@@ -50,7 +50,7 @@ internal static class HackOverlay
             _state = fresh;
 
             // 同一局内重复开关面板不清队列；换 OS 才清 —— 否则上一局排的动画
-            // 会漏进新一局，且旧 OS 的 exe 引用会卡住串行闸门（见 NativeExes.Tick）。
+            // 会漏进新一局，且旧 OS 的 exe 引用会卡住等待判据（见 NativeExes.Tick）。
             NativeExes.Reset();
         }
 
@@ -159,8 +159,15 @@ internal static class HackOverlay
             return;
         }
 
+        // wipe 的范围随 SCOPE 段走（「当前节点」= 当前节点所在的连线分量，其余 = 地图全表），
+        // 与 dec / mem 的「whole map」复选框不是一个口径 —— 那两个问的是「工具作用在
+        // 哪些机器上」，而 wipe 问的是「我的痕迹铺得多远」，后者本就该跟着 SCOPE。
+        var allNodes = verb == ToolDispatch.Wipe
+            ? _state.Scope != HackScope.Connected
+            : _state.AllNodes;
+
         // 护栏在 ToolDispatch.Run 内 —— 两个入口共用一份，此处不再重复包一层。
-        ToolDispatch.Run(_os, verb, _state.AllNodes);
+        ToolDispatch.Run(_os, verb, allNodes);
     }
 
     private static bool Visible(OS instance)

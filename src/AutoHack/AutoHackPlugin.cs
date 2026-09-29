@@ -9,7 +9,7 @@ using Pathfinder.Meta.Load;
 /// 命令与扩展点均通过 Pathfinder 的属性自动扫描注册（AttributeManager 挂载于
 /// HacknetChainloader.LoadPlugin），无需手动调用 Register* API。
 /// </summary>
-[BepInPlugin(Guid, "AutoHack", "1.33.2")]
+[BepInPlugin(Guid, "AutoHack", "1.33.3")]
 // Pathfinder 的属性扫描是 IL hook，在 PathfinderAPIPlugin.Load() 里才安装；
 // 缺此依赖本插件会先加载，扫描覆盖不到，命令静默失效。
 [BepInDependency("com.Pathfinder.API")]
@@ -86,12 +86,13 @@ public sealed class AutoHackPlugin : BepInEx.Hacknet.HacknetPlugin
             os.write("  stay      keep the connection at the end (this is the default)");
             os.write("  dc        disconnect each target when done (aborts a trace)");
             os.write("  redo      re-hack nodes already owned (default: skip them)");
-            os.write("  keep      leave my traces in /log (default: wipe them)");
+            os.write("  keep      leave my traces in /log (default: wipe them map-wide)");
             os.write("  allnodes  sweep the whole map (default: only nodes reachable via links)");
             os.write("  mark      drop the marker file (default: no marker)");
             os.write("  creds     use known credentials to log in (default: off)");
             os.write("  nocreds   never log in - always crack ports");
             os.write("  show      play the native cracker animations (this is the default)");
+            os.write("            port interval then follows each cracker's own runtime");
             os.write("  noshow    no animations");
             os.write("  newip     assign a new IP after the run (this is the default)");
             os.write("  keepip    keep the current IP");
@@ -118,7 +119,14 @@ public sealed class AutoHackPlugin : BepInEx.Hacknet.HacknetPlugin
         // 四个工具与 run 平级，各自独立执行；allnodes 只对 dec / mem 有意义。
         if (ToolDispatch.Handles(verb))
         {
-            var allNodes = args.Skip(2).Any(a => a.Equals("allnodes", StringComparison.OrdinalIgnoreCase));
+            // 两个口径：
+            // · dec / mem —— 显式传 allnodes 才扫地图全表，缺省只碰当前节点；
+            // · wipe —— 缺省就是地图全表（命令行没有 SCOPE 段，而「我的痕迹」铺在
+            //   哪些机器上与当前连着谁无关），要收窄到当前节点所在的连线分量传 here。
+            var allNodes = verb.ToLowerInvariant() == ToolDispatch.Wipe
+                ? !args.Skip(2).Any(a => a.Equals("here", StringComparison.OrdinalIgnoreCase))
+                : args.Skip(2).Any(a => a.Equals("allnodes", StringComparison.OrdinalIgnoreCase));
+
             ToolDispatch.Run(os, verb, allNodes);
             return;
         }

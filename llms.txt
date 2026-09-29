@@ -3,7 +3,7 @@
 > Hacknet 的 BepInEx / Pathfinder 插件：用游戏自身的原生机制一键入侵全网，带控制面板与脚本驱动。
 > 本文件面向要理解或修改本仓库的编码 agent。规范见 https://llmstxt.org
 
-当前 v1.33.2。构建产物直投游戏插件目录，无需手动拷贝：
+当前 v1.33.3。构建产物直投游戏插件目录，无需手动拷贝：
 
 ```
 D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
@@ -21,7 +21,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    **绝不下载 Release 附件回来比对** —— 需要确认部署新鲜度时只看构建输出目录那份。
 3. **`gh release create` 绝不自动执行** —— 等用户显式发令。`git push` 可以直接做。
 
-**三十九条最容易踩的坑 / 最该知道的机制**（都带行号，可直接 grep）
+**四十一条最容易踩的坑 / 最该知道的机制**（都带行号，可直接 grep）
 
 1. `Computer.portsOpen` 恒为 0 —— Pathfinder 用 Harmony Prefix 接管 `openPort`/`openPorts`
    并 `return false`，状态改存 `PortState.Cracked`。任何读 `portsOpen` 的判断都是错的，
@@ -53,17 +53,28 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    catch 吞掉，表现为「面板莫名其妙不显示」。只可用 `smallfont`/`tinyfont`/`font`/`detailfont`。
    同理不用原生 `CheckBox`/`Button`（前者只在 hover 时画文字，后者自动缩字并加 13px 色块），
    面板是自绘的。
-9. **清痕要覆盖玩家自己的机器** —— 玩家机被 `ResolveTargets` 显式跳过（`HackEngine.cs:445`），
-   既不入 `Targets` 也不入 `Skipped`，两处清痕追加都够不着它。`BuildSteps` 须在**全部步骤
-   之后**单独追加一条玩家机清痕（放末尾是因为入侵途中每连一台都会往玩家 `/log` 写一条）。
-   这条不需要等断开：它不产生 `rm` 回显，删除走 `Computer.deleteFile` + 显式 `folderPath`，
-   而 `getFolderFromNavigationPath`（`Programs.cs:1749-1770`）只读 `path` 与 `startFolder`，
-   不看 `os.connectedComp` —— 与坑 3 的 `rm` 作用域规则**不同**，别混。
+9. **清痕的范围是「我的痕迹铺在哪些机器上」，与「本轮打了谁」无关** —— 按目标展开的
+   `CleanLogs` 步只覆盖本轮目标池，玩家此前访问过、但不在池里的机器（换过分量、
+   早前几轮打过的）一条都清不掉，而痕迹是**累积**的（`Computer.log` 每次连接/读文件/
+   断开都追加）。故 v1.33.3 起收尾由 `HackEngine.WipeForRun` 兜一次全网。
+   范围随 scope：**只有「当前节点」走窄口径**（`SilentClosure` 取当前节点所在的无向
+   连通分量），其余（网络扫描 / 全网 / 显式点名 / 脚本）一律地图全表 —— 玩家显式聚焦
+   一台机器时才不该惊动别处。
+   `SilentClosure` 是 `Closure(os, origin, reveal: false)`：默认那条会调
+   `NetworkMap.discoverNode`（`NetworkMap.cs:415`）把沿途节点点亮，**清痕不是侦察**。
+   玩家机由 `Closure` 显式剔除（`HackEngine.cs:625`），`WipeNetwork` 单独补回来 ——
+   它的 `/log` 记着「谁连过我」，正是自己的痕迹。
+   删除走 `Computer.deleteFile` + 显式 `folderPath`，而 `getFolderFromNavigationPath`
+   （`Programs.cs:1749-1770`）只读 `path` 与 `startFolder`，不看 `os.connectedComp` ——
+   与坑 3 的 `rm` 作用域规则**不同**，别混。
+   实测（`save_a.xml`，167 台 / 100 个分量）：全表 640 条命中 / 65 台；玩家机所在分量
+   只有 16 台 / 30 条 —— 窄口径**漏掉 95% 的痕迹**，这就是缺口本身。
 10. **别拿常量当数据长度门槛** —— `PortExploits.EXE_FILE_LENGTH = 500`（`PortExploits.cs:10`）
    在游戏里**零引用**，它是 `generateBinaryString` 的**请求**长度：该函数开 `byte[length/8]`
    再 `Convert.ToString(b, 2)`（**不补前导零**，`Computer.cs:1580-1585`），产物约 445 字符。
    拿它校验曾让程序补全 `added 0 / skipped 37`（表面「给了但没效果」）。判据用「非空」。
-11. **清痕只删「含玩家 IP 的条目」，不是清空整个 `/log`**（v1.33.2 起）——
+11. **清痕只删「含玩家 IP 的条目」，不是清空整个 `/log`**（v1.33.2 起；v1.33.3 起
+   范围扩到全网，见坑 9）——
    `HackEngine.WipeTraces` 按 IP 过滤，目标机与玩家机同一口径，由 `HackOptions.WipeTraces`
    一个开关控制，**缺省开**。它由两个旧开关合并而来（`ClearLogs` `wipe target logs` +
    `ClearOwnLogs` `wipe my logs`，两者缺省都是关），口径从「清空对方 /log」收窄为
@@ -168,7 +179,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     它的定位算法（`OS.cs:1898-1903`，`ram.bounds.Y + contentStartOffset` 再逐个加
     `exes[i].bounds.Height`）**只在面板为空时正确**，而演出队列恰恰是「已挂着一个、再挂下一个」
     的场景，算出来的 Y 会叠在上一个 exe 身上。addExe 不碰位置，交给 `OS.Update`
-    的布局循环（`OS.cs:840-851`）统一排才是权威。详见坑 37。
+    的布局循环（`OS.cs:840-851`）统一排才是权威。详见坑 38。
 
 22. **`Computer.links` 是**有向图**，且原生 `scan` 的三处行为都不该抄** ——
     `<link target=X>`（`ComputerLoader.cs:344-356`）与 `<dlink target=X>`（`:357-373`）
@@ -411,7 +422,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     运行时看到的 `: OPEN` 只活在内存里，读档即复原。`unbreakable` 因此只改 `PortState.PortNumber`
     （显示端口号，49152-65535 随机、互不重复），不碰 `Cracked` —— 加固不是「把 15 个端口全开」。
 
-38. **门槛剔除已删；已控剔除保留但只对全网扫描生效** —— `HackEngine.ResolveTargets`
+37. **门槛剔除已删；已控剔除保留但只对全网扫描生效** —— `HackEngine.ResolveTargets`
     现在两道过滤，实测存档 167 台：
 
     | 口径 | 目标池 | 说明 |
@@ -444,7 +455,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
       门禁不过时终端写一行
       `escalation gate not met (needs > N open port(s), have M) - forced admin anyway`。
 
-37. **演出动画的并发数由 RAM 决定，不是 1；且存活时长要算上淡出** —— 单 exe 占 190~400mb
+38. **演出动画的并发数由 RAM 决定，不是 1；且存活时长要算上淡出** —— 单 exe 占 190~400mb
     （PacificPortExe 190 / HTTPExploitExe 208 / FTPBounceExe 210 / SSHCrackExe 242 /
     SQLExploitExe 350 / SMTPoverflowExe 356 / TorrentPortExe 360 / RTSPPortExe 360 /
     MedicalPortExe 400），而 `totalRam = 800 - (21 + 2) - 16 = 761`（`OS.cs:74`，
@@ -492,6 +503,55 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     故 `HackEngine.Mentions` 在命中处前后各留一个字符做边界：两侧都不是数字或点才算真命中。
     全存档回归：宽松判据 592 条、边界判据 592 条（本例不改变结果，但前缀对确实存在）。
     同类陷阱：任何「文本包含 IP」的判据都要先想前缀重叠。
+
+40. **端口由动画自己开；调用方有三条必须补开的逃生路径**（v1.33.3 起）——
+    9 个可安全演出的 exe 各自在 `Completed()` 里调
+    `openPort(<自己的原始终端口号>, os.thisComputer.ip)`（SSHCrackExe.cs:229、
+    FTPBounceExe.cs:153、SMTPoverflowExe.cs:169、HTTPExploitExe.cs:161、
+    SQLExploitExe.cs:235、MedicalPortExe.cs:110、PacificPortExe.cs:49、
+    TorrentPortExe.cs:74、RTSPPortExe.cs:80），开的正是自己那个端口。
+    `OpenPortPrefix` 直接拿**调用方传入的原始参数**匹配
+    `Record.OriginalPortNumber`（`ComputerExtensions.cs:184-197`），
+    故它与 `HackEngine.OpenPort(target, port.CodePort, ip)` 落在同一个
+    `PortState.Cracked` 上 —— **「动画跑完端口才开」不需要造机制，只要不再提前写**。
+    `unbreakable` 随机过显示端口号也不影响（匹配的是原始终端口号）。
+    **调用方（`HackRun.Apply(OpenPort)`）只在 `NativeExes.Show` 返回 false 时才立即开**；
+    返回 false 的每一种都必须开，否则端口永远不开：
+    ① 未连接（动画会打在本机上，`ExeModule.cs:38`）；
+    ② 目标已控（`redo` 模式下端口照样要开）；
+    ③ 该端口没有可安全演出的程序 —— 实测 **73/642**：443 SSLTrojan 要 4 个参数、
+    211 FTPSprint 开的是 21、32/3659/3724/9418 在 `launchExecutable` 里无 case；
+    ④ 队列满且新请求不比队尾更优 —— 最隐蔽的一条。
+    **另外三条路径连 `Completed()` 都跑不到**，必须由 `NativeExes.Flush` 补开：
+    `StopAll`（收尾淡出 → `needsRemoval` → `OS.Update` 摘除 → `Update` 不再被调）、
+    `Tick` 的剪枝（动画被跳板门禁拦下从未进 `os.exes`，`OS.cs:2165` 写
+    `"Proxy Active -- Cannot Execute"` 后直接丢弃）、`Reset(os)`（换 OS）。
+    `StopAll` **必须先 `Flush` 再 `Fade`** —— 反了就是丢战果。
+    等待判据用 `PortState.Cracked`（`NativeExes.Settled` 按协议名现查端口表），
+    **不读 exe 内部字段**：九种程序的完成标志各不相同
+    （`complete`/`hasCompleted`/`isComplete`/`sucsessTimer`/`elapsedTime`），
+    而 `RTSPCrack` 的 `isExiting` 比 `Completed` 晚 24 秒 —— 用它会把单台最坏
+    53 秒拖成 76 秒。用结果当判据，也自动覆盖「被截断/丢弃」的情形。
+    提权前必须等本台 `Settled`（`HackRun.Tick`）：`CanEscalate` 读的是已破解端口数，
+    不等就会恒不过门禁、多打一行 `escalation gate not met`。等待有 **180 秒上限**
+    （`NativeWaitCapSeconds`）：玩家自己开着吃内存的 exe 时本插件的动画可能永远
+    装不下，没上限就是整轮永久停在 ESCALATING；超时走 `Flush(force: true)`
+    连在播的一起补开并摘出 `Live`，否则 `Settled` 恒假、每帧重进分支刷屏。
+    实测（167 台 / 642 可破端口 / 569 有演出，逐帧全量仿真）：
+    串行 89.4 min → **并发 75.1 min（1.19×）**，单台最坏 98.2s → **72.3s**；
+    峰值 RAM **760/761**、同屏动画 **3** 个（贪心升序装箱 190+208+210=608，
+    再加 242 就超 761）、642 端口**全开、0 超时、0 丢弃**。
+    收益有限是因为并发度由 RAM 卡死在 3，而 167 台里 51 台只有 1~2 个可演端口。
+    注意串行基准要算对：无演出程序的端口会让 `Show` 返回 false，
+    在旧实现里那会把 `_lastCrackSeconds` 清空、使下一发退回 `PortDelay`（0.6s）——
+    按「每发都等 crack 时长」估会得到 109 min，虚高一截。
+
+41. **演出泵不能在队列空时提前返回** —— `NativeExes.Tick` 曾写
+    `if (Queue.Count == 0) return;`，但 9 个白名单 exe 里有 5 个在 **`LoadContent`**
+    里调 `hostileActionTaken()`（`OS.addExe` 那一刻），队列空时返回就再也没人扑掉
+    那条倒计时 —— 它一路跑到归零。判据必须是
+    `Queue.Count > 0 || Live.Count > 0`（覆盖「已经挂上去的」）。
+    也**不能**无条件调用：那样玩家自己敲命令点燃的追踪会被面板补丁一直掐掉。
 
 
 ## README 已精简掉的内容（原样保留于此）

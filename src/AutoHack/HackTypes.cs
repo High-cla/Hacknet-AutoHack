@@ -96,6 +96,12 @@ internal sealed record HackOptions(
     bool UseCredentials,
     bool ShowExes,
     bool ResetIP,
+
+    /// <summary>
+    /// 允许自动入侵去开的<b>模组端口协议名</b>（大小写不敏感）。缺省空 = 一个都不开。
+    /// 由命令行 <c>modports=mqtt,ntp</c> 逐协议累加，理由与取舍见 <see cref="ModPortPolicy"/>。
+    /// </summary>
+    IReadOnlyCollection<string> ModPorts,
     string Script)
 {
     // 这里曾有 WantsAntiTrace（从 Disconnect 派生的「收尾是否清追踪」）。
@@ -271,6 +277,10 @@ internal sealed record HackOptions(
         // 要换用 newip 显式开启，或直接用面板的 NEW IP 按钮换一次。
         var resetIP = false;
 
+        // 模组端口白名单：缺省空（完全 opt-in）。命令行可给多次 modports=，逐协议累加。
+        // 不做成静态累积表 —— 那会让上一轮的协议漏到下一轮，见 ModPortPolicy 的类注释。
+        var modPorts = new List<string>();
+
         string script = null;
 
         foreach (var raw in args ?? Array.Empty<string>())
@@ -312,6 +322,12 @@ internal sealed record HackOptions(
                 continue;
             }
 
+            if (ModPortPolicy.Matches(lower))
+            {
+                modPorts.AddRange(ModPortPolicy.Parse(token));
+                continue;
+            }
+
             if (lower.StartsWith(ScriptPrefix, StringComparison.Ordinal))
             {
                 var name = token.Substring(ScriptPrefix.Length).Trim();
@@ -333,7 +349,7 @@ internal sealed record HackOptions(
 
         return new HackOptions(
             scope, ids, wipeTraces, uploadMarker, connectFirst, disconnect, skipOwned,
-            allNodes, useCredentials, showExes, resetIP, script);
+            allNodes, useCredentials, showExes, resetIP, modPorts, script);
     }
 }
 

@@ -75,6 +75,32 @@ autohack -h                                     # 帮助
 `PORT INTERVAL` 滑条、`delay=` 参数、脚本的 `delay` 行已一并删除 —— 留一个「更慢」的开关
 只是把玩家往坑里引）。
 
+### 模组端口
+
+其它插件（workshop mod）注册的自定义端口，游戏原生**进不了自动入侵**：判据是
+`PortExploits.cracks` 里有该端口的破解程序，而它只含原生 36 个端口 —— 实测三个模组注册的
+16 个端口（LunarOS 3 / SRPortToolkit 8 / ZeroDayToolKit 5）一个都不在其中，且没有任何模组
+往 `cracks` 里写过。故本插件加一张**手动白名单**，缺省空：
+
+```
+autohack run noshow modports=mqtt,ntp,Redis
+```
+
+- **端口由插件直接开**，不跑模组自己的破解程序。回显的是占位命令 `portcrack <端口>`，
+  一眼可辨不是真程序 —— 那些 exe 的参数语义各异（`RedisBreaker` 要显示端口号、
+  `SSHPacket` 要 `-s` 子命令、`LunarEclipse` 开的是别人家的端口），编一条「看起来像真的」
+  的命令只会让玩家敲了报错。
+- **收益是真实的**：提权门槛判据是「已开端口数 **>** `portsNeededForCrack`」。实测存档有
+  13 台机器门槛 2~8 而端口表只有 1~4 个，破满也差 1~6 个，只能走强行提权兜底。
+  **每多开一个模组端口，就少一台机器需要兜底。**
+- **缺省一个都不开**：这些端口是各模组的剧情拼图（`moonshine` 是 LunarEclipse 跑完才开的、
+  `lunardefender` 存在时 `PortBackdoor` 会被 LunarOS 的 Prefix 拦下并报
+  「Execution failed」）。提前开等于替玩家跳过解谜，故必须显式点名。
+- **名字写错会提示**：模组未加载或拼错时端口表里根本没有那个协议，整轮会安静地少开几个端口。
+  故开跑前报一行 `no plugin has registered a port named '...'`。只提示不拦截。
+- 协议名匹配**大小写不敏感**（`Redis` / `IMP` / `mqtt` 混用），但「是否注册」的检查用框架的
+  Ordinal 比较 —— 写了 `redis` 而注册名是 `Redis` 时功能正常，但会多报一行未注册提示。
+
 ### 设置持久化
 
 面板里的每一项设置（含面板位置与收起状态）都写进 `BepInEx/config/com.highcla.autohack.cfg`，重开游戏后原样恢复。
@@ -98,6 +124,7 @@ autohack -h                                     # 帮助
 | `dc` | 每个目标跑完断开（反追踪：追踪只在连着目标时推进） |
 | `redo` | 全网扫描时**连已控节点一起重打**（缺省跳过肉鸡） |
 | `script=文件` | 用一份**动作表**取代内置次序（见「脚本模式」） |
+| `modports=协议,...` | 额外破解**其它插件注册的模组端口**（缺省**一个都不开**）。名字用各模组注册的协议名，如 `modports=mqtt,ntp,Redis`，**大小写不敏感**；可写多次累加。这些端口**直接开**，不跑模组自己的破解程序 —— 那 21 个 exe 的参数语义各异（实测 11 个「参数不足即退出」、多个开的是别人家的端口），没有可通用推断的形式（见下「模组端口」） |
 
 > `allnodes` 与缺省口径的差额实测（同一存档 147 节点）：沿连线广度优先 **7** 个目标，地图全表 **110** 个。
 > 差额是「可以直接敲 IP 连上、但不在连线上」的机器 —— `Programs.connect` 遍历的是
@@ -119,7 +146,7 @@ autohack -h                                     # 帮助
 | `autohack dec [allnodes]` | 解开目标上的 `#DEC_ENC` 加密文件，逐层解到明文，写入玩家 `/home/MemDumps` |
 | `autohack mem [allnodes]` | 查看本机内存转储（紧凑格式，截断显示）、导出到 `/home/MemDumps`、扫描节点上的 `.mem` 并解其内嵌 DEC |
 | `autohack exes` | 把游戏能生成的破解程序全部补进玩家 `/bin`（幂等） |
-| `autohack mods` | 扫描其它插件（workshop mod）注册的自定义 exe 与自定义端口，并把它们的 exe 补进玩家 `/bin`（幂等）。**只提供文件，不参与自动入侵** —— 这些 exe 的参数语义各异（实测 21 个里 11 个有「参数不足即退出」的硬门禁，多个开的是别人的端口），强行自动化会开错端口、刷错误、卡住动画 |
+| `autohack mods` | 扫描其它插件（workshop mod）注册的自定义 exe 与自定义端口，并把它们的 exe 补进玩家 `/bin`（幂等）。**只提供文件，不参与自动入侵** —— 这些 exe 的参数语义各异（实测 21 个里 11 个有「参数不足即退出」的硬门禁，多个开的是别人的端口），强行自动化会开错端口、刷错误、卡住动画。它列出的端口可以喂给 `autohack run modports=...`（见「模组端口」） |
 | `autohack unbreakable` | 加固玩家自己这台机器（**不可逆**） |
 | `autohack pull` | 把**当前目录**下全部文件下载到本机 `/home/stash`（**一个夹**，不分流）。**注意**：`FileDownload` 类任务的判定不递归子目录（`Folder.containsFileWithData` 只查一级），故 `pull` 拉回的文件**不能**用于过这类任务 —— 要过请手敲 `scp <file>`（落 `/home`） |
 | `autohack purge` | 删除**当前目录**下全部文件（同游戏 `rm`；与清痕**同一实现**；**只删文件，不删文件夹**）。`clearfolder` 类任务要求目标目录一个文件不剩，**先 `cd` 对再敲** —— 站错目录会删掉任务不需要的东西而目标目录仍非空 |
@@ -219,6 +246,7 @@ src/AutoHack/
 ├── HackEngine.cs       决策逻辑：可连接目标遍历、端口表读取、提权门槛（含端口容量）、防火墙破解、反扑解除、跳板绕过、日志清理
 ├── HackTypes.cs        不可变数据：HackOptions（参数解析）/ HackStep（含回显指令）
 ├── HackScript.cs       入侵脚本：行式动作表的解析与校验（script= 模式）
+├── ModPortPolicy.cs    模组端口白名单：modports= 的解析、命中判定、未注册提示
 ├── PendingRuns.cs      无面板运行的调度：命令线程只传参数，游戏线程构造并推进（按 OS 键控的 ConcurrentDictionary）
 ├── IsExternalInit.cs   net472 兼容垫片（record/init 需要）
 └── GlobalUsings.cs     全局 using

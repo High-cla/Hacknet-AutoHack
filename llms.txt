@@ -3,7 +3,7 @@
 > Hacknet 的 BepInEx / Pathfinder 插件：用游戏自身的原生机制一键入侵全网，带控制面板与脚本驱动。
 > 本文件面向要理解或修改本仓库的编码 agent。规范见 https://llmstxt.org
 
-当前 v1.34.0。构建产物直投游戏插件目录，无需手动拷贝：
+当前 v1.35.0。构建产物直投游戏插件目录，无需手动拷贝：
 
 ```
 D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
@@ -21,7 +21,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    **绝不下载 Release 附件回来比对** —— 需要确认部署新鲜度时只看构建输出目录那份。
 3. **`gh release create` 绝不自动执行** —— 等用户显式发令。`git push` 可以直接做。
 
-**四十六条最容易踩的坑 / 最该知道的机制**（都带行号，可直接 grep）
+**四十七条最容易踩的坑 / 最该知道的机制**（都带行号，可直接 grep）
 
 1. `Computer.portsOpen` 恒为 0 —— Pathfinder 用 Harmony Prefix 接管 `openPort`/`openPorts`
    并 `return false`，状态改存 `PortState.Cracked`。任何读 `portsOpen` 的判断都是错的，
@@ -701,6 +701,57 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     删 `delay/config` 分支时吃掉了 `var resolved = ResolveKind(verb);`。
     **用「起点…终点」锚点删除时，终点必须选在下一段的标题行**，且删完立刻编译。
 
+47. **模组端口（其它插件注册的端口）进不了自动入侵，只能靠手动白名单**（v1.35.0）——
+    `HackEngine.CrackablePorts` 的判据是 `PortExploits.cracks.ContainsKey(codePort)`，
+    `cracks` 只含**原生 36 个**端口（`PortExploits.cs:51-214`）。实测三个模组注册的
+    16 个端口（LunarOS 3 / SRPortToolkit 8 / ZeroDayToolKit 5）**一个都不在其中**，且
+    **没有任何模组往 `cracks` 写过**（全仓只有 `ZeroDayToolKit.decompiled.cs:945/949`
+    两处只读引用）。故模组端口在本特性之前恒不可见。
+
+    ① **打开它的钥匙是「手动表 + 现查目标」两件事分开**。手动表只回答「允许开哪些协议」
+    （`modports=mqtt,ntp`，缺省空）；「哪台机器有哪个端口」由 `comp.GetAllPortStates()`
+    直接给出，**不需要手动**。这是整个设计的简化点 —— 别去反射
+    `PortManager.CustomPorts`（私有静态 `AssemblyAssociatedList<PortRecord>`，
+    `PortManager.cs:14`）：那是 `ModTools.ScanPorts` 的**诊断**用途，端口清单不能
+    自动变成「允许开」，那些端口是各模组的剧情拼图。
+
+    ② **开端口本身零新代码**。`comp.openPort(port.CodePort, ipFrom)` 对模组端口同样命中
+    Pathfinder 的 Prefix（按 `Record.OriginalPortNumber` 匹配后 `return false`，
+    `ComputerExtensions.cs:236-251`）。**不要传显示端口号** —— 那会被 Prefix 拿去比对
+    `OriginalPortNumber`，而 `unbreakable` 随机化过的机器两者不等，结果是**静默什么都不做**。
+    已有 `PortInfo.CodePort` 就是 `OriginalPortNumber`，`GetCodePortNumberFromDisplayPort`
+    的换算是恒等往返，可以省掉。
+
+    ③ **收益是可测的**：提权门槛判据是 `OpenPortCount > portsNeededForCrack`
+    （`CountOpenPorts` = `GetAllPortStates().Count(x => x.Cracked)`，
+    `ComputerExtensions.cs:217-220`）。实测存档 13 台机器门槛 2~8 而端口表只有 1~4 个，
+    破满也差 1~6 个 —— **每多开一个模组端口就少一台需要走 `ForceEscalate` 兜底**。
+
+    ④ **不跑模组自己的破解程序**。它们走的是 `ProgramRunner.GetFileIndexOfExeProgram`
+    按文件名匹配 /bin → IL hook 抛 `ExecutableExecuteEvent` → `ExecutableManager.OnExeExecute`
+    （`ExecutableManager.cs:52-75`）→ `Activator.CreateInstance`，
+    **`OS.launchExecutable` 里没有它们的 case**（原生 9 个有，见 `NativeExes`）。
+    参数门禁还各不相同：`RedisBreakerExe` 要 `Args[1] == GetDisplayPortNumberFromCodePort(6379)`
+    （`SRPortToolkit:97-101`）、`PortBackdoorEXE` 开的是 `originPort`=**0**（`:4267`）、
+    `TeleSmoothTalkEXE` 会**派生 5 个子 exe**、总时长 170.5 秒（`:4008-4018`）。
+    故回显给占位命令 `portcrack <端口>`，端口由插件直接开。
+
+    ⑤ **两个必须排除的坑**：`backdoor` 的 `DefaultPortNumber` 是 **0**
+    （`ZeroDayToolKit:148`）—— `CodePort <= 0` 一律排除，端口号 0 开了也匹配不到东西；
+    `lunardefender` 存在时 `PortBackdoor` 会被 LunarOS 的 Prefix 拦下并报
+    「Execution failed」（`LunarOSPathfinder:298-308`），`moonshine` 是 `LunarEclipse`
+    跑完才开的剧情端口（`:1338`）。**这些是剧情门禁，提前开等于替玩家跳过解谜** ——
+    所以白名单缺省空、必须显式点名。
+
+    ⑥ **命名陷阱**：静态类不能叫 `ModPorts` —— `HackOptions` 上那个属性就叫这个名，
+    同名静态类会被实例成员遮蔽，在 `HackOptions` 的方法里写 `ModPorts.Matches(...)`
+    会编译成「对实例属性的成员访问」并报 **CS0120**。故类名是 `ModPortPolicy`，属性名才是
+    `ModPorts`。**改一处名，比以后每写一行都加限定名划算。**
+
+    ⑦ **验证方式**：差分测试镜像新旧谓词，13 个端口样本（原生 / 模组 16 个 / 非法）
+    × 2 个 cracked 状态 × 9 组白名单 = **234 用例**：缺省行为逐位不变（0 处不一致）、
+    非缺省只增不减（0 处丢原生）、越权新增 0、非正端口被加 0。
+
 ## README 已精简掉的内容（原样保留于此）
 
 README 在 v1.32.6 之后被刻意精简过一轮（删了 94 行），只留使用者需要的东西。
@@ -822,6 +873,7 @@ passcode = 头部第 4 段首个密文数字 - 158485
 - [src/AutoHack/ScanTools.cs](src/AutoHack/ScanTools.cs): 地图扫描 —— 标出当前节点所在连通分量
 - [src/AutoHack/HackRun.cs](src/AutoHack/HackRun.cs): 执行层 —— 动作序列、逐帧推进、指令回显
 - [src/AutoHack/HackScript.cs](src/AutoHack/HackScript.cs): 入侵脚本的解析与校验（`script=` 模式）；路径解析交给框架 `StringExtensions.ContentFilePath`，不自己拼内容目录前缀
+- [src/AutoHack/ModPortPolicy.cs](src/AutoHack/ModPortPolicy.cs): 模组端口白名单 —— `modports=` 的解析、命中判定、未注册协议提示（见坑 47）
 - [src/AutoHack/IpTools.cs](src/AutoHack/IpTools.cs): 收尾换 IP —— 原生三步 + 肉鸡归属迁移 + 重建 Pathfinder 查找表（见坑 29）
 - [src/SaveFix/SaveFixPlugin.cs](src/SaveFix/SaveFixPlugin.cs): 独立插件 HacknetSaveFix，修游戏本体存档 NRE
 - [src/AutoHack/HackPanel.cs](src/AutoHack/HackPanel.cs): 自绘控制面板

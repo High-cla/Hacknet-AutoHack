@@ -93,7 +93,8 @@ internal static class ModTools
                 names[i] = ports[i].Protocol + "=" + ports[i].CodePort;
             }
 
-            os.write("[autohack] mods: ports " + string.Join(", ", names) + ".");
+            os.write("[autohack] mods: ports " + string.Join(", ", names)
+                + "  (pass 'modports=<protocol,...>' to autohack run to crack them).");
         }
 
         if (exes.Count == 0)

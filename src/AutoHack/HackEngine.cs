@@ -109,8 +109,15 @@ internal static class HackEngine
         return fallback;
     }
 
-    /// <summary>该机器上「有原生破解程序」且尚未攻破的端口（破解程序表取自 PortExploits.cracks，不硬编码）。</summary>
-    internal static IReadOnlyList<PortInfo> CrackablePorts(Computer comp)
+    /// <summary>
+    /// 该机器上可自动攻破的端口 = 原生有破解程序的（<c>PortExploits.cracks</c>，不硬编码）
+    /// ∪ 玩家在 <c>modports=</c> 里显式点名的模组协议。
+    ///
+    /// 后一半需要手动表：<c>cracks</c> 只含原生 36 个端口，workshop 注册的 16 个一个都不在其中，
+    /// 且没有任何模组往 <c>cracks</c> 写过。理由与取舍见 <see cref="ModPortPolicy"/>。
+    /// </summary>
+    /// <param name="modPorts">允许开模组端口的协议名；<c>null</c>/空 = 一个都不开（缺省）。</param>
+    internal static IReadOnlyList<PortInfo> CrackablePorts(Computer comp, IReadOnlyCollection<string> modPorts = null)
     {
         var ports = Ports(comp);
         if (ports.Count == 0)
@@ -122,7 +129,19 @@ internal static class HackEngine
         var seen = new HashSet<int>();
         foreach (var port in ports)
         {
-            if (!port.Cracked && HasCrackProgram(port.CodePort) && seen.Add(port.CodePort))
+            // CodePort <= 0 一律排除：ZeroDayToolKit 注册的 "backdoor" 缺省端口就是 0
+            // （ZeroDayToolKit.decompiled.cs:148），端口号 0 在游戏里无意义，开了也匹配不到任何东西。
+            if (port.Cracked || port.CodePort <= 0)
+            {
+                continue;
+            }
+
+            if (!HasCrackProgram(port.CodePort) && !ModPortPolicy.Allows(modPorts, port.Protocol))
+            {
+                continue;
+            }
+
+            if (seen.Add(port.CodePort))
             {
                 found.Add(port);
             }
@@ -291,7 +310,16 @@ internal static class HackEngine
         return firewall.attemptSolve(firewall.solution, os);
     }
 
-    /// <summary>真人会敲的破解指令，如 <c>sshcrack 22</c>。程序名取自游戏数据，端口号取显示端口。</summary>
+    /// <summary>
+    /// 真人会敲的破解指令，如 <c>sshcrack 22</c>。程序名取自游戏数据，端口号取显示端口。
+    ///
+    /// <b>模组端口回显的是占位命令 <c>portcrack</c>。</b>那些端口的破解程序由各自的模组
+    /// 注册（<c>RedisBreaker</c> / <c>SSHSwift</c> / <c>MQTTInterceptor</c> …），名字与参数
+    /// 语义各不相同（有的要显示端口号、有的要 <c>-s</c> 子命令、有的开的是别人家的端口），
+    /// 没有可通用推断的形式 —— 与 v1.33.5 否掉「自动联动模组程序」是同一条理由
+    /// （见 ModTools 的类注释）。故这里给一个<b>一眼可辨的占位</b>，而不是编一条
+    /// 看起来像真的、实际敲了会报错的命令。端口本身由 <see cref="OpenPort"/> 直接开。
+    /// </summary>
     internal static string CrackCommand(PortInfo port)
     {
         var program = HasCrackProgram(port.CodePort)

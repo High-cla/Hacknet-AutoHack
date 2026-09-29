@@ -174,6 +174,9 @@ internal sealed class HackPanelState
         UseCredentials,
         ShowExes,
         ResetIP,
+        // 模组端口白名单是命令行专属（modports=a,b）：面板没有文本输入控件，
+        // 为它造一套编辑 UI 的收益不抵复杂度 —— 与 Script 同一取舍（见 HackPanelState.Script）。
+        Array.Empty<string>(),
         Script);
 }
 

@@ -788,7 +788,7 @@ internal sealed class HackRun
         List<HackStep> steps, Computer target, HackOptions options, OS os)
     {
         AppendEngageSteps(steps, target, options, os);
-        AppendPortSteps(steps, target);
+        AppendPortSteps(steps, target, options);
         AppendEscalateSteps(steps, target);
         AppendCleanupSteps(steps, target, options);
     }
@@ -818,7 +818,7 @@ internal sealed class HackRun
             steps.Add(new HackStep(HackStepKind.Login, target, default, null));
         }
 
-        var ports = HackEngine.CrackablePorts(target);
+        var ports = HackEngine.CrackablePorts(target, options.ModPorts);
         if (ports.Count > 0 && HackEngine.ProxyActive(target))
         {
             steps.Add(new HackStep(HackStepKind.BypassProxy, target, default, null));
@@ -826,9 +826,9 @@ internal sealed class HackRun
     }
 
     /// <summary>逐端口攻破；每个端口后跟一步反追踪（理由见循环内注释）。</summary>
-    private static void AppendPortSteps(List<HackStep> steps, Computer target)
+    private static void AppendPortSteps(List<HackStep> steps, Computer target, HackOptions options)
     {
-        foreach (var port in HackEngine.CrackablePorts(target))
+        foreach (var port in HackEngine.CrackablePorts(target, options.ModPorts))
         {
             steps.Add(new HackStep(HackStepKind.OpenPort, target, port, HackEngine.CrackCommand(port)));
 
@@ -978,7 +978,7 @@ internal sealed class HackRun
 
         foreach (var action in script.Actions)
         {
-            AppendScriptedAction(steps, target, action, emitted, connected);
+            AppendScriptedAction(steps, target, action, emitted, connected, options);
         }
 
         // 清痕排在 KillTrace 之前，且**不设开关**（与内置次序同一口径，见 BuildSteps）。
@@ -1009,7 +1009,7 @@ internal sealed class HackRun
     /// </summary>
     private static void AppendScriptedAction(
         List<HackStep> steps, Computer target, HackScript.Action action,
-        HashSet<HackStepKind> emitted, bool connected)
+        HashSet<HackStepKind> emitted, bool connected, HackOptions options)
     {
         // connect 已被前置步骤登记过时（ConnectFirst 模式），脚本里再写就跳过。
         if (action.Kind == HackStepKind.Connect)
@@ -1035,7 +1035,7 @@ internal sealed class HackRun
 
         if (action.Kind == HackStepKind.OpenPort)
         {
-            foreach (var step in ExpandPorts(target, action.Port))
+            foreach (var step in ExpandPorts(target, action.Port, options))
             {
                 steps.Add(step);
             }
@@ -1052,9 +1052,9 @@ internal sealed class HackRun
     /// 敲的 <c>sshcrack 22</c> 同一个数）。指定的端口不存在或不含破解程序时展开为空 ——
     /// 不臆造步骤。
     /// </summary>
-    private static IEnumerable<HackStep> ExpandPorts(Computer target, int portNumber)
+    private static IEnumerable<HackStep> ExpandPorts(Computer target, int portNumber, HackOptions options)
     {
-        foreach (var port in HackEngine.CrackablePorts(target))
+        foreach (var port in HackEngine.CrackablePorts(target, options.ModPorts))
         {
             if (portNumber != 0 && port.DisplayPort != portNumber && port.CodePort != portNumber)
             {

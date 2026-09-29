@@ -9,7 +9,7 @@ using Pathfinder.Meta.Load;
 /// 命令与扩展点均通过 Pathfinder 的属性自动扫描注册（AttributeManager 挂载于
 /// HacknetChainloader.LoadPlugin），无需手动调用 Register* API。
 /// </summary>
-[BepInPlugin(Guid, "AutoHack", "1.34.0")]
+[BepInPlugin(Guid, "AutoHack", "1.35.0")]
 // Pathfinder 的属性扫描是 IL hook，在 PathfinderAPIPlugin.Load() 里才安装；
 // 缺此依赖本插件会先加载，扫描覆盖不到，命令静默失效。
 [BepInDependency("com.Pathfinder.API")]
@@ -133,6 +133,10 @@ public sealed class AutoHackPlugin : BepInEx.Hacknet.HacknetPlugin
                         waited on - this is the fastest mode
               newip     assign a new IP after the run (this is the default)
               keepip    keep the current IP
+              modports=A,B  also crack these mod-registered ports (default: none).
+                        Names are the protocols other plugins registered, e.g.
+                        'modports=mqtt,ntp,Redis'. Case-insensitive. They are
+                        opened directly - the plugins' own crackers are NOT run.
               script=F  run a scripted action list from file F (see below)
 
             There is no step-interval option any more (v1.34.0 removed every
@@ -213,6 +217,16 @@ public sealed class AutoHackPlugin : BepInEx.Hacknet.HacknetPlugin
         }
 
         var options = HackOptions.Parse(rest);
+
+        // 白名单里查不到的协议名报一次：模组未加载或名字拼错时，端口表里根本没有那个
+        // 协议，整轮会安静地少开几个端口，玩家只会以为「这个开关没用」。
+        // 只提示不拦截 —— 大小写不符也会落进这里（判据见 ModPortPolicy.Unknown 的注释），
+        // 那种情况功能其实正常，拦下反而更糟。
+        foreach (var missing in ModPortPolicy.Unknown(options.ModPorts))
+        {
+            os.write("[autohack] modports: no plugin has registered a port named '"
+                + missing + "' - check the spelling (names are case-sensitive here).");
+        }
 
         // 脚本在入队前校验一遍：语法错/文件缺失当场报出来，而不是等首帧构造
         // HackRun 时在游戏线程抛出。边界校验前置，错误带原始行号。

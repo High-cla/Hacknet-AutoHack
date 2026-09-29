@@ -184,7 +184,12 @@ internal sealed class HackPanelState
         // 面板不再提供节奏档位（三档 UI 已删）：面板一律走原生节奏，
         // 命令行仍可用 slow / fast / instant 显式选档（见 HackTypes.Parse）。
         HackSpeed.Normal,
-        Script);
+        Script,
+
+        // 面板没有独立的「显式设过」标志：滑条值 ≠ 缺省 就说明玩家拖过它。
+        // 拖回缺省（0.6）则视为「没设过」，交回演出开关自动决定 —— 与命令行
+        // 不传 delay= 同一语义。
+        PortDelay != HackOptions.DefaultPortDelay);
 }
 
 /// <summary>
@@ -239,6 +244,7 @@ internal static class HackPanel
         (ToolDispatch.Dec, "DEC DECRYPT", false),
         (ToolDispatch.Mem, "MEMORY DUMP", false),
         (ToolDispatch.Exes, "ALL PROGRAMS", false),
+        (ToolDispatch.Mods, "MOD PROGRAMS", false),
         (ToolDispatch.Unbreakable, "UNBREAKABLE", true),
 
         // 三个远程动作，作用于**当前连接的节点**；未连接时 pull/drop 报错，

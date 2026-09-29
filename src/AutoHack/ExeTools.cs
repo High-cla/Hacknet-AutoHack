@@ -72,4 +72,40 @@ internal static class ExeTools
 
         os.write("[autohack] exes: added " + added + ", skipped " + skipped + ".");
     }
+
+    /// <summary>
+    /// 把其它插件注册的自定义 exe 补进玩家 /bin（名单与数据来源见 <see cref="ModTools"/>）。
+    ///
+    /// 判重与落盘方式与 <see cref="Run"/> 的原生那批一致：文件名已存在就跳过、数据为空就跳过。
+    /// 唯一的差别是数据来源 —— 原生走 <c>PortExploits.crackExeData[port]</c>，这里走
+    /// <c>ExecutableManager.CustomExeInfo.ExeData</c>。后者是执行时用于比对的键
+    /// （ExecutableManager.cs:47-71），<b>必须原样写入</b>：改写或截断都会让
+    /// <c>OnExeExecute</c> 匹配不上，表现成「敲了名字没反应」而不报错。
+    /// </summary>
+    internal static (int Added, int Skipped) FillCustom(OS os, IReadOnlyList<ModTools.ModExe> exes)
+    {
+        var bin = os.thisComputer.getFolderFromPath("bin", createFoldersThatDontExist: true);
+        var added = 0;
+        var skipped = 0;
+
+        foreach (var exe in exes)
+        {
+            if (bin.searchForFile(exe.FileName) != null)
+            {
+                skipped++;
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(exe.ExeData))
+            {
+                skipped++;
+                continue;
+            }
+
+            bin.files.Add(new FileEntry(exe.ExeData, exe.FileName));
+            added++;
+        }
+
+        return (added, skipped);
+    }
 }

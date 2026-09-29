@@ -310,6 +310,7 @@ internal static class NativeExes
     {
         if (os == null || target == null || !ReferenceEquals(os.connectedComp, target))
         {
+            Trace.Write("show " + port.Protocol + " skipped: target is not the connected node");
             return false;
         }
 
@@ -322,22 +323,26 @@ internal static class NativeExes
         // 玩家要碰那台机器，但碰不等于要看一遍它已经完成过的动画。
         if (HackEngine.IsOwned(target, os))
         {
+            Trace.Write("show " + port.Protocol + " skipped: " + target.ip + " is already owned");
             return false;
         }
 
         if (PortExploits.cracks == null || !PortExploits.cracks.TryGetValue(port.CodePort, out var exeName))
         {
+            Trace.Write("show " + port.Protocol + " (" + port.CodePort + ") skipped: no native cracker for this port");
             return false;
         }
 
         if (!Lifetimes.TryGetValue(exeName, out var life))
         {
+            Trace.Write("show " + exeName + " skipped: not in the animation whitelist");
             return false;
         }
 
         var exe = Create(os, exeName);
         if (exe == null)
         {
+            Trace.Write("show " + exeName + " skipped: launchExecutable has no case for it");
             return false;
         }
 
@@ -353,6 +358,7 @@ internal static class NativeExes
             // 且泵每帧都会把它扑掉 —— 见 KillTrace）。
             if (Compare(pending, Queue[Queue.Count - 1]) >= 0)
             {
+                Trace.Write("show " + exeName + " dropped: queue full (" + MaxQueued + ") and this one ranks worse");
                 return false;
             }
 
@@ -361,6 +367,7 @@ internal static class NativeExes
 
         Queue.Add(pending);
         Queue.Sort(Compare);
+        Trace.Write("show " + exeName + " queued for " + target.ip + ", depth " + Queue.Count);
         return true;
     }
 

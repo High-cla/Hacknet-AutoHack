@@ -230,6 +230,7 @@ internal sealed class HackRun
         // force 连还在播的一起补，且复位计时：否则下一帧 Settled 仍为假，
         // 会每帧重进这个分支、把同一行刷满终端。
         var forced = NativeExes.Flush(os, step.Target, force: true);
+        Trace.Write("escalate wait timed out on " + step.Target.ip + " after " + (int)NativeWaitCapSeconds + "s - forced " + forced + " port(s) open");
         _waitSeconds = 0f;
         os.write("[autohack] " + step.Target.name + " :: animation wait timed out after "
             + (int)NativeWaitCapSeconds + "s - opened " + forced
@@ -280,21 +281,30 @@ internal sealed class HackRun
     /// <summary>该步骤需等待的秒数。Instant 档把非端口步压到 0。</summary>
     private float DelayFor(HackStepKind kind)
     {
-        // 端口步：开了演出就零间隔，关掉演出才吃 Options.PortDelay。
+        // 端口步的间隔分三种情形：
         //
-        // <b>开了演出时零间隔是刻意的</b>（v1.33.3）：破解之间的等待不再由计时器管，
-        // 而是由「动画跑完端口才开」这件事本身管 —— 见 Apply(OpenPort) 与 Tick 里的
-        // 提权等待。真正的节流是「每帧只推进一个端口步」（Tick 里那道 return），
-        // 故一帧最多入队一个动画请求，终端逐行浮现的观感得以保留，
-        // 而动画由 RAM 门禁自行并发（实测峰值 3 个同屏）。
+        // ① <b>开了演出 → 零间隔。</b>破解之间的等待不再由计时器管，而是由
+        //    「动画跑完端口才开」这件事本身管 —— 见 Apply(OpenPort) 与 Tick 里的
+        //    提权等待。真正的节流是「每帧只推进一个端口步」（Tick 里那道 return），
+        //    故一帧最多入队一个动画请求，终端逐行浮现的观感得以保留，
+        //    而动画由 RAM 门禁自行并发（实测峰值 3 个同屏）。
         //
-        // <b>关掉演出时仍吃 PortDelay</b>：那种情况下端口在 Apply 里立即开，没有任何
-        // 可等的东西，若也压成 0 就是 60 端口/秒的刷屏 —— 面板的 PORT INTERVAL 滑条
-        // 与命令行的 delay= 会当场失去意义（那是本仓库唯一的节奏控件）。
-        // 每帧一步的闸门不影响它：MinPortDelay 0.02s = 50 端口/秒 < 60，取不到上限。
+        // ② <b>关掉演出、且玩家显式设过间隔 → 用玩家的值。</b>这是唯一的节奏控件，
+        //    玩家拖了滑条或传了 delay= 就是要那个数，不能被自动逻辑覆盖。
+        //
+        // ③ <b>关掉演出、且玩家没设过 → NoShowPortDelay。</b>演出关掉后端口在
+        //    Apply 里立即开，<b>没有任何可等的东西</b>，再按缺省 0.6s 等就是纯空耗。
+        //    这一支修的是一个反直觉的旧行为：v1.33.3 起演出开着时端口步零间隔，
+        //    而关掉演出反而恢复 0.6s —— 「关掉演出」比「开着演出」慢一个数量级。
+        //    实测存档 167 台 / 642 可破端口：0.6s 一轮 6.4 min，0.02s 只要 13 秒。
         if (kind == HackStepKind.OpenPort)
         {
-            return Options.ShowExes ? 0f : Options.PortDelay;
+            if (Options.ShowExes)
+            {
+                return 0f;
+            }
+
+            return Options.DelayExplicit ? Options.PortDelay : HackOptions.NoShowPortDelay;
         }
 
         // 清痕是纯内存操作（WipeTraces 只做 List 扫描 + deleteFile 遍历，

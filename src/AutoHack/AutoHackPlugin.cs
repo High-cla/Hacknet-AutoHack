@@ -9,7 +9,7 @@ using Pathfinder.Meta.Load;
 /// 命令与扩展点均通过 Pathfinder 的属性自动扫描注册（AttributeManager 挂载于
 /// HacknetChainloader.LoadPlugin），无需手动调用 Register* API。
 /// </summary>
-[BepInPlugin(Guid, "AutoHack", "1.33.4")]
+[BepInPlugin(Guid, "AutoHack", "1.33.5")]
 // Pathfinder 的属性扫描是 IL hook，在 PathfinderAPIPlugin.Load() 里才安装；
 // 缺此依赖本插件会先加载，扫描覆盖不到，命令静默失效。
 [BepInDependency("com.Pathfinder.API")]
@@ -19,15 +19,17 @@ public sealed class AutoHackPlugin : BepInEx.Hacknet.HacknetPlugin
 
     public override bool Load()
     {
-        // 开机文字加速。必须在 PatchAll 之前、且在 OS 构造之前 ——
-        // 它会首次触碰 CrashModule 触发静态初始化，那一刻 BOOT_TIME 才算出来。
-        // CrashModule.BOOT_TIME 是 static 字段（CrashModule.cs:15），而 OS 在
-        // OS.cs:500-501 才 new CrashModule(...)，本 Load() 一定更早。详见 BootBoost。
-        BootBoost.Apply();
+        // 开机文字加速（BootBoost.Apply）**不在这里** —— 它已由 BootBoost 上的
+        // [ModuleInitializer] 承担，那个入口在模块首次被访问时自动跑，比本方法更早，
+        // 且不再依赖「谁记得把它写在第一行」。详见 BootBoost.Init 的说明。
 
         // 面板设置的落盘通道：用插件自己的 cfg（BepInEx/config/<GUID>.cfg）。
         // 必须在任何 OS 构造之前 —— 面板首次 Open 就要读它。
         PanelSettings.Bind(Config, Log);
+
+        // 诊断追踪通道的日志源。未定义 AUTOHACK_TRACE 时，下面所有 Trace.Write
+        // 的调用点会被编译器整条删除；Bind 本身无条件执行（一行赋值，不值得条件化）。
+        Trace.Bind(Log);
 
         // 面板/HUD 靠 patch OS.Draw / OS.Update 叠加到游戏画面上。
         HarmonyInstance.PatchAll(typeof(AutoHackPlugin).Assembly);
@@ -104,41 +106,61 @@ public sealed class AutoHackPlugin : BepInEx.Hacknet.HacknetPlugin
     /// <summary>打印 autohack 的完整帮助文本（选项说明与脚本动作说明）。</summary>
     private static void WriteHelp(OS os)
     {
-        os.write("autohack              - toggle the control panel");
-        os.write("autohack run [options] [target...] - run headless");
-        os.write("  here      only the connected node (default: servers reachable via links)");
-        os.write("  delay=s   seconds between port cracks (default 0.6, min 0.02)");
-        os.write("  direct    skip connect, crack the node already connected");
-        os.write("  stay      keep the connection at the end (this is the default)");
-        os.write("  dc        disconnect each target when done (aborts a trace)");
-        os.write("  redo      re-hack nodes already owned (default: skip them)");
-        os.write("  keep      leave my traces in /log (default: wipe them map-wide)");
-        os.write("  allnodes  sweep the whole map (default: only nodes reachable via links)");
-        os.write("  mark      drop the marker file (default: no marker)");
-        os.write("  creds     use known credentials to log in (default: off)");
-        os.write("  nocreds   never log in - always crack ports");
-        os.write("  show      play the native cracker animations (this is the default)");
-        os.write("            port interval then follows each cracker's own runtime");
-        os.write("  noshow    no animations");
-        os.write("  newip     assign a new IP after the run (this is the default)");
-        os.write("  keepip    keep the current IP");
-        os.write("  instant   run every non-port step in the same frame (fastest)");
-        os.write("  fast      shorten the pause between non-port steps (default: normal)");
-        os.write("  script=F  run a scripted action list from file F (see below)");
-        os.write("");
-        os.write("autohack <tool> [allnodes] - run one tool, no panel needed:");
+        // 帮助文本用原始字符串字面量写：逐行 os.write 时每行都要转义引号、手工对齐，
+        // 改一个字就得数空格。原始字符串按「收尾定界符的缩进」自动剥掉公共前缀，
+        // 故这里的相对缩进即最终输出。
+        //
+        // <b>仍然逐行 os.write</b>，不把整块一次喂进去：OS.write 内部走
+        // DisplayModule.cleanSplitForWidth + terminal.writeLine（OS.cs:1726-1737），
+        // 一次喂多行会变成「一条含换行的记录」，滚动/回溯语义与逐行不同。
+        // 注意 os.write("") 是空操作（:1728 的 text.Length > 0 门禁），故块内空行不产生空行。
+        WriteLines(os, """
+            autohack              - toggle the control panel
+            autohack run [options] [target...] - run headless
+              here      only the connected node (default: servers reachable via links)
+              delay=s   seconds between port cracks (default 0.6, min 0.02)
+              direct    skip connect, crack the node already connected
+              stay      keep the connection at the end (this is the default)
+              dc        disconnect each target when done (aborts a trace)
+              redo      re-hack nodes already owned (default: skip them)
+              keep      leave my traces in /log (default: wipe them map-wide)
+              allnodes  sweep the whole map (default: only nodes reachable via links)
+              mark      drop the marker file (default: no marker)
+              creds     use known credentials to log in (default: off)
+              nocreds   never log in - always crack ports
+              show      play the native cracker animations (this is the default)
+                        port interval then follows each cracker's own runtime
+              noshow    no animations
+              newip     assign a new IP after the run (this is the default)
+              keepip    keep the current IP
+              instant   run every non-port step in the same frame (fastest)
+              fast      shorten the pause between non-port steps (default: normal)
+              script=F  run a scripted action list from file F (see below)
+
+            autohack <tool> [allnodes] - run one tool, no panel needed:
+            """);
         foreach (var (tool, help) in ToolDispatch.Help)
         {
             os.write("  " + tool.PadRight(ToolDispatch.HelpVerbWidth) + help);
         }
 
-        os.write("");
-        os.write("Script files live in Content/HackerScripts/ and are plain text:");
-        os.write("  connect / neutralize / probe / login / proxy / openPort [n]");
-        os.write("  solve / porthack / mark / rm / dc / killtrace / delay s");
-        os.write("  openPort with no number cracks every crackable port on the target.");
-        os.write("  connect, neutralize and killtrace are always supplied - do not write them.");
-        os.write("  'rm' must come before 'dc' or the script is rejected.");
+        WriteLines(os, """
+            Script files live in Content/HackerScripts/ and are plain text:
+              connect / neutralize / probe / login / proxy / openPort [n]
+              solve / porthack / mark / rm / dc / killtrace / delay s
+              openPort with no number cracks every crackable port on the target.
+              connect, neutralize and killtrace are always supplied - do not write them.
+              'rm' must come before 'dc' or the script is rejected.
+            """);
+    }
+
+    /// <summary>把整块文本逐行交给 <c>os.write</c>，空行照旧是空操作（见 <see cref="WriteHelp"/>）。</summary>
+    private static void WriteLines(OS os, string block)
+    {
+        foreach (var line in block.Split('\n'))
+        {
+            os.write(line);
+        }
     }
 
     /// <summary>执行单个工具动词；allnodes 口径按动词区分后交给 ToolDispatch。</summary>

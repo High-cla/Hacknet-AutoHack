@@ -207,24 +207,25 @@ internal sealed class HackScript
         var connected = true;
         foreach (var action in actions)
         {
-            switch (action.Kind)
+            // 用 switch 表达式而非语句：每个分支都只是「这一步之后是否还连着」，
+            // 正好是一个值。语句形态要写三处 break、且赋值散在分支体里。
+            //
+            // `_ => connected` 读的是**赋值前**的值（右侧先求值再赋给左侧），
+            // 故等价于「其余动作不改连接状态」。
+            connected = action.Kind switch
             {
-                case HackStepKind.Connect:
-                    connected = true;
-                    break;
-
-                case HackStepKind.Disconnect:
-                    connected = false;
-                    break;
+                HackStepKind.Connect => true,
+                HackStepKind.Disconnect => false,
 
                 // 清痕本身已不依赖连接（HackEngine.WipeTraces 按 folderPath 直取目标
                 // /log），但脚本里的 'rm' 仍是玩家写下的**意图** —— 他以为它在目标机上
                 // 执行。dc 之后它落在自己机器上，意图与效果不符，仍属该拒的写法。
-                case HackStepKind.CleanLogs when !connected:
-                    throw new FormatException(
-                        "In '" + source + "': 'rm' comes after 'dc' with no 'connect' in between - "
-                        + "it would act on your own file system, not the target's. Swap the two lines.");
-            }
+                HackStepKind.CleanLogs when !connected => throw new FormatException(
+                    "In '" + source + "': 'rm' comes after 'dc' with no 'connect' in between - "
+                    + "it would act on your own file system, not the target's. Swap the two lines."),
+
+                _ => connected,
+            };
         }
     }
 

@@ -53,7 +53,7 @@ autohack -h                                     # 帮助
 | `skip owned` | 全网扫描时跳过已拿下的肉鸡（缺省**开**）。**只对全网扫描生效** —— 「当前节点」是刻意选择，连上再点 START 就是要打它 |
 | — | **强行提权已常驻**（v1.33.2 起，不再是开关）：porthack 门禁过不了时直接给目标写 `adminIP`。防护机（`portsToCrack=9999998`）与端口表凑不够门槛的机器只有这条路拿得下 |
 | `RUN` | 按当前设置执行 |
-| TOOLS 区 `SCAN NETWORK` / `DEC DECRYPT` / `MEMORY DUMP` / `ALL PROGRAMS` | 单击**立即执行**，无二次确认（见下表） |
+| TOOLS 区 `SCAN NETWORK` / `DEC DECRYPT` / `MEMORY DUMP` / `ALL PROGRAMS` / `MOD PROGRAMS` | 单击**立即执行**，无二次确认（见下表） |
 | TOOLS 区 `PULL FILES` / `PURGE FILES` / `DROP NODE` | 对**当前连接的节点**动手：下载 / 删除当前目录下全部文件、把节点从网络图摘掉（后两个用告警色） |
 | TOOLS 区 `UNBREAKABLE` | 加固本机，**不可逆**，用告警色标注 |
 | TOOLS 区 `WIPE TRACES` | 清掉我的痕迹，用告警色标注。范围**随 SCOPE 段走**：「当前节点」只清当前节点所在的连通分量，其余清地图全表 |
@@ -108,6 +108,7 @@ autohack -h                                     # 帮助
 | `autohack dec [allnodes]` | 解开目标上的 `#DEC_ENC` 加密文件，逐层解到明文，写入玩家 `/home/MemDumps` |
 | `autohack mem [allnodes]` | 查看本机内存转储（紧凑格式，截断显示）、导出到 `/home/MemDumps`、扫描节点上的 `.mem` 并解其内嵌 DEC |
 | `autohack exes` | 把游戏能生成的破解程序全部补进玩家 `/bin`（幂等） |
+| `autohack mods` | 扫描其它插件（workshop mod）注册的自定义 exe 与自定义端口，并把它们的 exe 补进玩家 `/bin`（幂等）。**只提供文件，不参与自动入侵** —— 这些 exe 的参数语义各异（实测 21 个里 11 个有「参数不足即退出」的硬门禁，多个开的是别人的端口），强行自动化会开错端口、刷错误、卡住动画 |
 | `autohack unbreakable` | 加固玩家自己这台机器（**不可逆**） |
 | `autohack pull` | 把**当前目录**下全部文件下载到本机 `/home/stash`（**一个夹**，不分流）。**注意**：`FileDownload` 类任务的判定不递归子目录（`Folder.containsFileWithData` 只查一级），故 `pull` 拉回的文件**不能**用于过这类任务 —— 要过请手敲 `scp <file>`（落 `/home`） |
 | `autohack purge` | 删除**当前目录**下全部文件（同游戏 `rm`；与清痕**同一实现**；**只删文件，不删文件夹**）。`clearfolder` 类任务要求目标目录一个文件不剩，**先 `cd` 对再敲** —— 站错目录会删掉任务不需要的东西而目标目录仍非空 |

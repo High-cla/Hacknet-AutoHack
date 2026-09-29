@@ -40,7 +40,7 @@ internal static class PendingRuns
     internal static bool BusyFor(OS os) => Pending.ContainsKey(os);
 
     [HarmonyPostfix]
-    [HarmonyPatch(typeof(OS), "Update")]
+    [HarmonyPatch(typeof(OS), nameof(OS.Update))]
     private static void OnOSUpdate(OS __instance, GameTime gameTime)
     {
         // 演出队列的泵由 HackOverlay 的补丁独家负责 —— 两个补丁同挂 OS.Update，

@@ -3,7 +3,7 @@
 > Hacknet 的 BepInEx / Pathfinder 插件：用游戏自身的原生机制一键入侵全网，带控制面板与脚本驱动。
 > 本文件面向要理解或修改本仓库的编码 agent。规范见 https://llmstxt.org
 
-当前 v1.33.4。构建产物直投游戏插件目录，无需手动拷贝：
+当前 v1.33.5。构建产物直投游戏插件目录，无需手动拷贝：
 
 ```
 D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
@@ -21,7 +21,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    **绝不下载 Release 附件回来比对** —— 需要确认部署新鲜度时只看构建输出目录那份。
 3. **`gh release create` 绝不自动执行** —— 等用户显式发令。`git push` 可以直接做。
 
-**四十三条最容易踩的坑 / 最该知道的机制**（都带行号，可直接 grep）
+**四十五条最容易踩的坑 / 最该知道的机制**（都带行号，可直接 grep）
 
 1. `Computer.portsOpen` 恒为 0 —— Pathfinder 用 Harmony Prefix 接管 `openPort`/`openPorts`
    并 `return false`，状态改存 `PortState.Cracked`。任何读 `portsOpen` 的判断都是错的，
@@ -42,7 +42,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    而 `/log` 里的文件名恒以 `@` 开头（`Computer.log` 拼的），故清痕不会自我污染。
 5. 管理员反扑是**延迟**的（`BasicAdministrator.disconnectionDetected`，0–20 秒）——
    不在断开前置空 `computer.admin`，肉鸡标记会在断开后丢失。这就是「全网扫描失去效果」的根因。
-6. 工具（`dec`/`mem`/`exes`/`unbreakable`）**不进** `autohack run` 的自动流程；`dec` 的
+6. 工具（`dec`/`mem`/`exes`/`mods`/`unbreakable`）**不进** `autohack run` 的自动流程；`dec` 的
    passcode 是**反推**出来的（`MAGIC = 'E' * 1822 + 32767 = 158485`，见 `FileEncrypter.cs:40`），
    反推后必须用游戏自身的 `TestingDecryptString` 反验 `"ENCODED"`，验不过即放弃。
    `unbreakable` **不可逆**，改前改后各打印一次字段。
@@ -593,6 +593,70 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     无条件先 `RebuildPanel` 就是白付一次遍历 —— 改成 `if (!force)` 才重建。
     但 `Fade` 里**刻意**保留 `os.exes.Contains`：它跑在 `Flush(force:true)` 之后，
     拿到的 `OnPanel` 是过期快照，用它会把「还在播的」判成「已离开」而不再淡出。
+
+44. **别把「扫其它插件注册的东西」放进插件 Load()，也别缓存扫描结果**（v1.33.5）——
+    `autohack mods` 要枚举 workshop mod 注册的自定义 exe 与自定义端口，两处都有坑：
+    ① **时机**。BepInEx 只加载 6 个插件（AutoUpdater / PathfinderAPI / AutoHack /
+    Hacknet Save Fix / KernelFix / HacknetHotReplace），而 `LunarOSPathfinder.dll` /
+    `ZeroDayToolKit.dll` / `SRPortToolkit.dll` 是 **Pathfinder 在扩展被激活时才装**的，
+    它们的 `RegisterExecutable` / `RegisterPort` 写在各自的 `Load()` 里，**一定晚于本插件**。
+    在 `Load()` 里扫只能扫到空表 ⇒ 必须**懒扫**（首次用工具时扫）。
+    ② **不能缓存**。切扩展时 `ExecutableManager.OnPluginUnload` 会按程序集摘掉旧条目
+    （`ExecutableManager.cs:73-76`），缓存会发霉。表只有二十来项，每次现扫可忽略。
+    ③ **exe 名单走公开 API**（`ExecutableManager.AllCustomExes`，每项带 `XmlId`/`ExeData`/`ExeType`）；
+    **端口名单只能反射** —— `PortManager` 公开面只有「按名字查」，注册表是私有的
+    `private static readonly AssemblyAssociatedList<PortRecord> CustomPorts`（`PortManager.cs:17`）。
+    故端口那一份是**诊断信息**，反射失败就如实报 0 并继续，绝不能让异常冒出去。
+    ④ **补 /bin 为什么够**：自定义 exe 与原生完全同构 —— 敲名字 →
+    `ProgramRunner.GetFileIndexOfExeProgram` 按文件名匹配 /bin（`ProgramRunner.cs:664`）→
+    取 `file.data` → IL hook 抛 `ExecutableExecuteEvent`（`ExecutableExecuteEvent.cs:118-133`）→
+    `ExecutableManager.OnExeExecute` 拿 `file.data` 比对 `CustomExeInfo.ExeData`（`:47-71`）→
+    命中即 `Activator.CreateInstance` 并挂载。**把 ExeData 原样写进 /bin 就够了**，
+    改写或截断会让它匹配不上，表现成「敲了名字没反应」而不报错。
+    ⑤ **文件名是启发式**：去掉类名结尾的 `Exe`/`EXE` 再补 `.exe`（实测 4/4 吻合 mod 自己
+    节点 XML 里写定的名字：`RedisBreakerExe`→`RedisBreaker.exe`、`SSHSwiftEXE`→`SSHSwift.exe`…）。
+    没有公开 API 能拿到 mod 声明的文件名，`XmlId`（`#SSH_SWIFT#`）与文件名也不同源。猜错不致命 ——
+    玩家敲类名同样能执行。
+    ⑥ **不做自动入侵联动**（用户定 A+B）：这些 exe 的参数语义不可通用推断 —— 实测 21 个里
+    11 个有 `Args.Length < 2` 就立即 `needsRemoval` 的硬门禁，参数各异（显示端口号 / `-s` `-f`
+    子命令 / 文件路径 / 协议名），且多个开的是**别人**的端口（`LunarEclipse` 开 moonshine 的 3653、
+    `EOSRootKitExe` 抢原生 3659、`NetSpoofExe` 抢原生 211），个别甚至给 `val2.ip` 开端口。
+    强行自动化会开错端口、刷 `ERROR FOUND!Target Port is Closed or Missing!`、卡住动画。
+    故只**提供文件**，是否使用由玩家自己决定。
+
+45. **net472 + LangVersion 13 的特性边界，以及三条性能实测** —— 本仓库目标框架是
+    .NET Framework 4.7.2、语言版本 13、**零 NuGet 包引用**。哪些 C# 特性可用不能靠记忆判断，
+    用探针工程（同一 `TargetFrameworkRootPath`，每个特性单独编译一次）实测的结论：
+
+    **可用**（编译器实现，零运行时依赖）：`init` / `record` / `readonly record struct` /
+    目标类型 `new()` / `switch` 表达式 / 属性模式 `is { }` / 原始字符串 `"""` /
+    集合表达式 `[...]` / 主构造函数 / 文件级命名空间 / `nint` 算术 / `\e` 转义 / `partial` 属性。
+
+    **补几行属性声明即可用**（与 `IsExternalInit` 同一手法，见 `src/AutoHack/IsExternalInit.cs`）：
+    `required`（CS0656）、`CallerArgumentExpression`（CS0234）、`[ModuleInitializer]`。
+
+    **不可用**（缺 BCL/运行时，非语法问题）：`Span<T>`/`Memory<T>`/`AsSpan()`、`System.HashCode`、
+    `string.Create`、`Range`/`Index`（`a[1..^1]`）、`static abstract` 接口成员、泛型数学、
+    `params ReadOnlySpan<T>`、`"abc"u8`、`field` 关键字（需 C# 14）、
+    `MethodImplOptions.AggressiveOptimization`（仅 .NET Core 3.0+）。
+    唯一有价值的是 Span 生态，但那要随插件分发 `System.Memory.dll` 等三个 DLL，
+    而本仓库的性能敏感面（每帧绘制、每帧 Tick）早已优化完 —— **不值得**。
+
+    **三条性能实测**（同一探针，Release）：
+    ① `StringComparer.OrdinalIgnoreCase` 查表 vs `ToLowerInvariant()` + `Ordinal` 字典：
+       **2.6× 快、每次查表 0 分配 vs 41 字节**（1000 万次：268ms/0B vs 707ms/412MB）。
+       但本仓库 5 处该写法全是冷路径（命令解析、每轮 642 次），`ShownCount`/`Lifetimes`/
+       `MeasureKey` 早已是 Ordinal 系 —— **没有可落地的热点**。
+    ② `in` 参数传 32 字节的 `PortInfo`：1.6× 快，但绝对量 0.38 ns/次 ⇒ 可忽略。
+    ③ `static` lambda：**零运行时收益** —— Roslyn 本来就把不捕获的 lambda 缓存进静态字段
+       （`ReferenceEquals` 实测 True），加 `static` 只是编译期「不许捕获」的契约。
+
+    **两处落地**：`[ModuleInitializer]` 接管开机文字加速（把「必须在 PatchAll 之前」这条
+    注释约定变成运行时保证 —— 打破它只会表现为「开机文字又变慢 14.5 秒」，与那次改动毫无
+    表面关联，极难回查）；`[Conditional("AUTOHACK_TRACE")]` 做零成本追踪通道
+    （**调用点在编译期整条删除**，默认构建里这些字符串在二进制中不存在 —— 实测 0 处 vs
+    开启后 6 处；开关 = `-p:AutoHackTrace=true`，csproj 里**追加**而非覆盖 `DefineConstants`，
+    否则会冲掉 SDK 自带的 TRACE/RELEASE）。
 
 
 ## README 已精简掉的内容（原样保留于此）

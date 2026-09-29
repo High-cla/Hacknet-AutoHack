@@ -25,9 +25,10 @@ internal static class ToolDispatch
     internal const string Trace = "trace";
     internal const string Ip = "ip";
     internal const string Wipe = "wipe";
+    internal const string Mods = "mods";
 
     private static readonly string[] Verbs =
-        { Scan, Dec, Mem, Exes, Unbreakable, Pull, Purge, Drop, Trace, Skip, Ip, Wipe };
+        { Scan, Dec, Mem, Exes, Mods, Unbreakable, Pull, Purge, Drop, Trace, Skip, Ip, Wipe };
 
     /// <summary>help 文本来源：子命令与其说明只写一次，命令入口与文档都读这里。</summary>
     internal static readonly (string Verb, string Help)[] Help =
@@ -44,6 +45,7 @@ internal static class ToolDispatch
         (Skip, "complete the active mission and take the next one"),
         (Ip, "assign this machine a new IP (keeps owned-node tags in sync)"),
         (Wipe, "wipe MY traces  [here]  (/log entries naming your IP; default: whole map)"),
+        (Mods, "list + add the crack exes other plugins registered into /bin"),
     };
 
     /// <summary>help 里动词列的宽度，供调用方排版。</summary>
@@ -106,6 +108,10 @@ internal static class ToolDispatch
 
             case Exes:
                 ExeTools.Run(os);
+                break;
+
+            case Mods:
+                ModTools.Run(os);
                 break;
 
             case Unbreakable:

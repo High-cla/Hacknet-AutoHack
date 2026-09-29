@@ -40,7 +40,7 @@ internal static class TraceHud
     private const int LeftMargin = 10;
 
     [HarmonyPostfix]
-    [HarmonyPatch(typeof(OS), "Draw")]
+    [HarmonyPatch(typeof(OS), nameof(OS.Draw))]
     private static void OnOSDraw(OS __instance)
     {
         if (__instance == null || !__instance.IsActive)

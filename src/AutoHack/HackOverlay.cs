@@ -71,7 +71,7 @@ internal static class HackOverlay
     }
 
     [HarmonyPrefix]
-    [HarmonyPatch(typeof(OS), "Draw")]
+    [HarmonyPatch(typeof(OS), nameof(OS.Draw))]
     private static void OnOSDrawPrefix(OS __instance)
     {
         if (!Visible(__instance))
@@ -87,7 +87,7 @@ internal static class HackOverlay
     }
 
     [HarmonyPostfix]
-    [HarmonyPatch(typeof(OS), "Draw")]
+    [HarmonyPatch(typeof(OS), nameof(OS.Draw))]
     private static void OnOSDraw(OS __instance)
     {
         if (!Visible(__instance))
@@ -203,7 +203,7 @@ internal static class HackOverlay
     }
 
     [HarmonyPostfix]
-    [HarmonyPatch(typeof(OS), "Update")]
+    [HarmonyPatch(typeof(OS), nameof(OS.Update))]
     private static void OnOSUpdate(OS __instance, GameTime gameTime)
     {
         // 演出队列独立于运行推进：跑完收尾后仍要把排着的动画播完。

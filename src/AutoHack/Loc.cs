@@ -63,6 +63,7 @@ internal static class Loc
             ["DEC DECRYPT"] = "解密 DEC",
             ["MEMORY DUMP"] = "内存转储",
             ["ALL PROGRAMS"] = "全部程序",
+            ["MOD PROGRAMS"] = "模组程序",
             ["UNBREAKABLE"] = "不可摧毁",
             ["PULL FILES"] = "拉取文件",
             ["PURGE FILES"] = "清除文件",

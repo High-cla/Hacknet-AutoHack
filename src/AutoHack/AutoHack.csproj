@@ -15,6 +15,10 @@
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <DebugType>none</DebugType>
     <NoWarn>$(NoWarn);CS0618;CS1701;CS1702</NoWarn>
+    <!-- 诊断追踪开关：-p:AutoHackTrace=true 让 Trace.Write 的调用点真正生成。
+         必须「追加」到 DefineConstants，直接 -p:DefineConstants=... 会把 SDK 自带的
+         TRACE/RELEASE/NET472 等符号一并覆盖掉。 -->
+    <DefineConstants Condition="'$(AutoHackTrace)' == 'true'">$(DefineConstants);AUTOHACK_TRACE</DefineConstants>
     <!-- 本机缺 .NET Framework 4.7.2 目标包，指向仓库内引用程序集 -->
     <TargetFrameworkRootPath Condition="Exists('$(MSBuildThisFileDirectory)refs\assemblies\netfx-all\')">$(MSBuildThisFileDirectory)refs\assemblies\netfx-all\</TargetFrameworkRootPath>
   </PropertyGroup>

@@ -121,7 +121,16 @@ internal sealed record HackOptions(
     bool ShowExes,
     bool ResetIP,
     HackSpeed Speed,
-    string Script)
+    string Script,
+
+    /// <summary>
+    /// 玩家是否<b>显式</b>指定过端口间隔 —— 命令行传了 <c>delay=</c>，或面板拖过
+    /// PORT INTERVAL 滑条（判据：面板值 ≠ <see cref="DefaultPortDelay"/>）。
+    ///
+    /// 它区分「没设过，按演出开关自动决定」与「我就是要这个数」。
+    /// 见 <c>HackRun.DelayFor</c> 的三分支。
+    /// </summary>
+    bool DelayExplicit)
 {
     // 这里曾有 WantsAntiTrace（从 Disconnect 派生的「收尾是否清追踪」）。
     // 用户定：清追踪与断开解耦 —— 清追踪是收拾自己制造的烂摊子（倒计时 + 脱机追踪 +
@@ -133,6 +142,21 @@ internal sealed record HackOptions(
 
     /// <summary>端口间隔下限。0.02s = 50 端口/秒，比真人手速快得多但仍逐条回显。</summary>
     internal const float MinPortDelay = 0.02f;
+
+    /// <summary>
+    /// <b>关掉原生演出时</b>的端口步缺省间隔。
+    ///
+    /// 取 <see cref="MinPortDelay"/>：演出关掉后端口在 <c>Apply(OpenPort)</c> 里立即开，
+    /// <b>没有任何可等的东西</b> —— 此时再按 <see cref="DefaultPortDelay"/>（0.6s）等，
+    /// 就是纯空耗。实测存档 167 台 / 642 个可破端口：0.6s 一轮要 6.4 min，0.02s 只要 13 秒。
+    ///
+    /// 这曾是反的：演出开着时端口步零间隔（等动画），关掉反而恢复 0.6s ——
+    /// 于是「关掉演出」比「开着演出」慢一个数量级，与直觉相反。
+    ///
+    /// 显式设过间隔（<c>delay=</c> 或面板滑条）时以玩家值为准，见
+    /// <see cref="DelayExplicit"/>。
+    /// </summary>
+    internal const float NoShowPortDelay = MinPortDelay;
 
     internal const float MaxPortDelay = 5f;
 
@@ -235,6 +259,10 @@ internal sealed record HackOptions(
         var scope = HackScope.Network;
         var delay = DefaultPortDelay;
 
+        // 玩家有没有显式指定过端口间隔（见 DelayExplicit）。只有 delay= 会置真；
+        // 面板那条路在 HackPanel.ToOptions 里按「滑条值 ≠ 缺省」判定。
+        var delayExplicit = false;
+
         // 缺省**开**（v1.33.2 起，此前为关）。
         //
         // 口径变了：不再是「清空对方的 /log」（那会改写目标机的操作史），
@@ -322,6 +350,7 @@ internal sealed record HackOptions(
                 float.TryParse(lower.Substring(6), NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed))
             {
                 delay = parsed < MinPortDelay ? MinPortDelay : parsed > MaxPortDelay ? MaxPortDelay : parsed;
+                delayExplicit = true;
                 continue;
             }
 
@@ -346,7 +375,7 @@ internal sealed record HackOptions(
 
         return new HackOptions(
             scope, ids, delay, wipeTraces, uploadMarker, connectFirst, disconnect, skipOwned,
-            allNodes, useCredentials, showExes, resetIP, speed, script);
+            allNodes, useCredentials, showExes, resetIP, speed, script, delayExplicit);
     }
 }
 

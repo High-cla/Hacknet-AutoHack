@@ -887,7 +887,7 @@ internal static class HackEngine
     internal static Computer[] ToolTargets(OS os, bool allNodes)
         => allNodes
             ? ConnectableComputers(os)
-            : new[] { os.connectedComp ?? os.thisComputer };
+            : [os.connectedComp ?? os.thisComputer];
 
     /// <summary>
     /// 抹除目标的 /log 目录，等价于原版终端 <c>rm log/*</c>；返回被删除的文件名，供回显与计数。
@@ -1093,7 +1093,7 @@ internal static class HackEngine
         // 相对 files.root 的索引路径 —— 用 IndexOf 实求，不硬编码 log 的位置。
         // Folder 未重写 Equals（Folder.cs:15），IndexOf 是引用比较，而 logFolder
         // 正是从 root.folders 里取出来的，故必然命中其真实下标。
-        var folderPath = new List<int> { root.folders.IndexOf(logFolder) };
+        List<int> folderPath = [root.folders.IndexOf(logFolder)];
 
         // 先快照待删名单，再交给 RemoveFiles 逐条点名删 —— 逐条走
         // Computer.deleteFile(ipFrom, <名>, path)，保住游戏的权限门禁与联机同步

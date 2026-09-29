@@ -1,5 +1,6 @@
 namespace AutoHack;
 
+using System.Runtime.CompilerServices;
 using Hacknet;
 
 /// <summary>
@@ -39,4 +40,24 @@ internal static class BootBoost
     {
         CrashModule.BOOT_TIME = BootTime;
     }
+
+    /// <summary>
+    /// 模块初始化器：本程序集被首次触碰时由编译器生成的 <c>.cctor</c> 自动调用，
+    /// <b>早于</b> BepInEx 调用插件的 <c>Load()</c>。
+    ///
+    /// <b>为什么要从 Load() 挪到这里。</b>原先是 <c>Load()</c> 的第一行，靠一句注释
+    /// 「必须在 PatchAll 之前、且在 OS 构造之前」约束后人 —— 那是<b>人工约定</b>：
+    /// 谁往 <c>Load()</c> 前面插一行就可能打破它，而打破之后的表现是「开机文字又变慢 14.5 秒」，
+    /// 与那次代码改动毫无表面关联，极难回查。<c>[ModuleInitializer]</c> 把这条约束变成
+    /// <b>运行时保证</b> —— 模块初始化器一定在本程序集里任何其它代码之前跑完。
+    ///
+    /// 时序余量反而更大了：模块首次被访问（BepInEx 反射扫描插件类型那一刻）即执行，
+    /// 比 <c>Load()</c> 还早；而 <c>CrashModule</c> 的静态初始化要到
+    /// <c>OS.cs:500-501</c> 的 <c>new CrashModule(...)</c> 才发生，覆盖必然赶在前面。
+    ///
+    /// <c>[ModuleInitializer]</c> 需要 <c>System.Runtime.CompilerServices.ModuleInitializerAttribute</c>，
+    /// net472 没有 —— 由 <c>IsExternalInit.cs</c> 一并声明。
+    /// </summary>
+    [ModuleInitializer]
+    internal static void Init() => Apply();
 }

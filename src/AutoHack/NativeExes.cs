@@ -26,7 +26,8 @@ using Pathfinder.Port;
 /// 没排上演出、被丢弃、被截断的端口，动画永远不会去开它。
 ///
 /// <b>为什么必须有队列（v1.32.8）。</b>此前是「破一个端口就地挂一个 exe」，于是同时挂在
-/// RAM 面板上的 exe 数量只受破解节奏限制 —— 端口步只等 <c>PortDelay</c>（缺省 0.6s），
+/// RAM 面板上的 exe 数量只受破解节奏限制 —— 端口步只等 <c>PortDelay</c>（当时缺省 0.6s；
+/// 该常量已在 v1.34.0 随「移除全部步进间隔」一并删除，此处保留当时的事实记录），
 /// 而单个动画要跑 4.8~22 秒（TorrentPortExe 4.8 / PacificPortExe 6 / RTSPPortExe 6.3 /
 /// SSHCrackExe 8 / SMTPoverflowExe 12 / HTTPExploitExe 14 / FTPBounceExe 15 /
 /// MedicalPortExe 22），全网扫描必然叠出十几个。RAM 总量

@@ -42,9 +42,6 @@ internal static class Loc
             ["NETWORK SWEEP"] = "全网扫描",
             ["CURRENT NODE"] = "当前节点",
 
-            // PORT INTERVAL
-            ["PORT INTERVAL"] = "端口间隔",
-
             // 勾选框
             ["use known creds"] = "用已知账密",
             ["whole map"] = "整张地图",
@@ -125,7 +122,7 @@ internal static class Loc
     /// （如 ZeroDayToolKit）会写 <c>ActiveTerms[已有键] = 新值</c> —— 原地覆盖，Count 不变，
     /// 失效键察觉不到，缓存会把旧译文一直发下去。
     /// 游戏词表<b>未</b>命中时结果只由本类的静态 <see cref="Chinese"/> 表与英文原文决定，
-    /// 运行期恒定，缓存它没有这个风险 —— 而面板专有词（RUN / SCOPE / PORT INTERVAL…）
+    /// 运行期恒定，缓存它没有这个风险 —— 而面板专有词（RUN / SCOPE / TOOLS…）
     /// 恰好都落在这一支，故缓存收益基本不受影响。
     /// </summary>
     internal static string T(string english)

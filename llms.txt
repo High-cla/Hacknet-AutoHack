@@ -3,7 +3,7 @@
 > Hacknet 的 BepInEx / Pathfinder 插件：用游戏自身的原生机制一键入侵全网，带控制面板与脚本驱动。
 > 本文件面向要理解或修改本仓库的编码 agent。规范见 https://llmstxt.org
 
-当前 v1.33.5。构建产物直投游戏插件目录，无需手动拷贝：
+当前 v1.34.0。构建产物直投游戏插件目录，无需手动拷贝：
 
 ```
 D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
@@ -21,7 +21,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    **绝不下载 Release 附件回来比对** —— 需要确认部署新鲜度时只看构建输出目录那份。
 3. **`gh release create` 绝不自动执行** —— 等用户显式发令。`git push` 可以直接做。
 
-**四十五条最容易踩的坑 / 最该知道的机制**（都带行号，可直接 grep）
+**四十六条最容易踩的坑 / 最该知道的机制**（都带行号，可直接 grep）
 
 1. `Computer.portsOpen` 恒为 0 —— Pathfinder 用 Harmony Prefix 接管 `openPort`/`openPorts`
    并 `return false`，状态改存 `PortState.Cracked`。任何读 `portsOpen` 的判断都是错的，
@@ -658,6 +658,48 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     开启后 6 处；开关 = `-p:AutoHackTrace=true`，csproj 里**追加**而非覆盖 `DefineConstants`，
     否则会冲掉 SDK 自带的 TRACE/RELEASE）。
 
+
+46. **推进的时间间隔全部移除，且「关掉演出反而更慢」的倒挂有两层**（v1.34.0）——
+    实测存档 167 台 / 642 个可破端口，`noshow` 一轮 5.2 min，其中 **292 秒是纯等待**：
+
+    ① **倒挂的第二层在非端口步**。v1.33.5 只修了端口步（`HackRun.DelayFor` 的
+    `ShowExes` 三分支），而尾部的非端口步分支只看 `Options.Speed`，与演出开关完全解耦；
+    面板又硬编码 `HackSpeed.Normal`（`HackPanel.ToOptions`），于是「关掉演出」后
+    5 个非端口步（Connect/Neutralize/Probe/SolveFirewall/Escalate）每台仍各睡 0.35s。
+    **教训：修一处「开关 A 影响节奏」时，必须把同一函数里所有分支都过一遍。**
+
+    ② **端口步每帧只推进一步的闸门：曾一度按演出开关条件化，已改回无条件**（用户定）。
+    该闸管两件事，都要求「一帧一个」：动画入队速率（一帧至多一个动画请求）与
+    **终端回显速率**（一帧至多一行 `sshcrack`）。条件化后 `noshow` 下整轮 642 个端口
+    会在同一帧刷完，终端一次涌出几百行 —— 战果看不见。**代价**：端口步恒为
+    1 帧/个 = 60 个/秒，642 端口约 10.7 秒（整轮仍由 5.2 min 降到约 11 秒）。
+    教训：把「省掉 N 帧」当成纯收益时，先确认那 N 帧里没有**输出节流**的职责。
+
+    ③ **最终形态**：删掉 `HackSpeed` 枚举、`PortDelay` 字段、四个间隔常量
+    （`DefaultPortDelay`/`MinPortDelay`/`MaxPortDelay`/`FastStepDelay`/`NoShowPortDelay`）、
+    三个节奏别名数组（`slow`/`fast`/`instant`）、`delay=` 参数、脚本的 `delay`/`config` 行、
+    面板 `PORT INTERVAL` 滑条与 `Slider`/`SliderSpec` 机制、`HackRun._timer` 与 `DelayFor`。
+    整轮只剩三道闸门：单帧步数预算 512、**端口步每帧一步（与演出开关无关）**、
+    提权前的动画等待（**仅演出开着**，上限 180s）。实测同一存档 5.2 min → 约 11 秒。
+
+    ④ **另一处**：`HackRun` 构造期先调
+    `HackEngine.RevealMap(os, options.AllNodes)` 再 `ResolveTargets` —— 用户定的
+    「先扫描后入侵」。**揭图不改目标池**：Network 口径的池是沿 `links` 的传递闭包
+    （揭图不增不减闭包），allnodes 口径的池是地图全表（与 `visibleNodes` 无关）。
+    它补的是 `ConnectableComputers` 只收集不 `discoverNode` 的缺口 —— 此前
+    「地图全开」跑完地图一台都不亮。
+
+    **（曾试过在 `noshow` 下压掉每台的 `probe` 端口报告，已撤销。）** 那是把
+    「不要动画」误读成「不要输出」—— 演出开关管的是原生破解程序要不要挂进 RAM 面板，
+    而 probe 报告是**侦察结果**（目标开了哪些端口、要破几个才够提权门槛），属战果本身。
+    压掉后 `noshow` 下只剩一串 `sshcrack`，看不到在打什么。现在两种模式都打。
+
+    ⑤ **删代码时的顺序陷阱**：`fastctx replace` 的正则模式里，替换串中的反斜杠是
+    字面量（`\\}` 会真的写进文件），而 `literal: true` 只作用于 `pattern`。
+    批量删除时还踩到两次「正则吞掉相邻行」：删 `ParseSeconds` 时连带吃掉了
+    `StripDelimiter` 的签名，删 `Clamp` 时连带吃掉了 `ClampInt` 的函数头，
+    删 `delay/config` 分支时吃掉了 `var resolved = ResolveKind(verb);`。
+    **用「起点…终点」锚点删除时，终点必须选在下一段的标题行**，且删完立刻编译。
 
 ## README 已精简掉的内容（原样保留于此）
 

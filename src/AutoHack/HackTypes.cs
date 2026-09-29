@@ -1,6 +1,5 @@
 namespace AutoHack;
 
-using System.Globalization;
 using Hacknet;
 
 /// <summary>目标选择策略。</summary>
@@ -14,19 +13,6 @@ internal enum HackScope
 
     /// <summary>仅显式指定的目标。</summary>
     Explicit,
-}
-
-/// <summary>推进节奏档位：控制非端口步是否合并到同一帧。</summary>
-internal enum HackSpeed
-{
-    /// <summary>每个非端口步之间等 <c>NonPortDelay</c>（0.35s），终端逐行浮现，贴近真人操作。</summary>
-    Normal,
-
-    /// <summary>非端口步压缩到 0.05s，仍分帧（保留一点节奏感）。</summary>
-    Fast,
-
-    /// <summary>非端口步合并到同一帧连续执行；只有端口破解按 <c>PortDelay</c> 等待。</summary>
-    Instant,
 }
 
 /// <summary>
@@ -86,22 +72,12 @@ internal enum Opt
 
     /// <summary>不换 IP。</summary>
     NoResetIP,
-
-    /// <summary>每步之间等待。</summary>
-    Slow,
-
-    /// <summary>压缩非端口步间隔。</summary>
-    Fast,
-
-    /// <summary>非端口步合并到同一帧。</summary>
-    Instant,
 }
 
 /// <summary>一次入侵的运行参数（由命令行解析）。</summary>
 internal sealed record HackOptions(
     HackScope Scope,
     IReadOnlyList<string> Targets,
-    float PortDelay,
     /// <summary>
     /// 抹掉<b>玩家自己留下的</b>痕迹 —— 目标机与玩家机 /log 里含玩家 IP 的条目。
     /// <b>缺省开</b>：留下痕迹会让带 <c>tracker="true"</c> 的机器在断开时自动排一个
@@ -120,48 +96,13 @@ internal sealed record HackOptions(
     bool UseCredentials,
     bool ShowExes,
     bool ResetIP,
-    HackSpeed Speed,
-    string Script,
-
-    /// <summary>
-    /// 玩家是否<b>显式</b>指定过端口间隔 —— 命令行传了 <c>delay=</c>，或面板拖过
-    /// PORT INTERVAL 滑条（判据：面板值 ≠ <see cref="DefaultPortDelay"/>）。
-    ///
-    /// 它区分「没设过，按演出开关自动决定」与「我就是要这个数」。
-    /// 见 <c>HackRun.DelayFor</c> 的三分支。
-    /// </summary>
-    bool DelayExplicit)
+    string Script)
 {
     // 这里曾有 WantsAntiTrace（从 Disconnect 派生的「收尾是否清追踪」）。
     // 用户定：清追踪与断开解耦 —— 清追踪是收拾自己制造的烂摊子（倒计时 + 脱机追踪 +
     // 追踪者的 /log），留着没有好处；断开是玩家的行为选择（终止会话、清空
     // navigationPath），玩家有理由不要。故清追踪改为 HackRun.Finish 里的恒定动作，
     // 不再经过开关；那个属性随之失去调用点，已删。
-
-    internal const float DefaultPortDelay = 0.6f;
-
-    /// <summary>端口间隔下限。0.02s = 50 端口/秒，比真人手速快得多但仍逐条回显。</summary>
-    internal const float MinPortDelay = 0.02f;
-
-    /// <summary>
-    /// <b>关掉原生演出时</b>的端口步缺省间隔。
-    ///
-    /// 取 <see cref="MinPortDelay"/>：演出关掉后端口在 <c>Apply(OpenPort)</c> 里立即开，
-    /// <b>没有任何可等的东西</b> —— 此时再按 <see cref="DefaultPortDelay"/>（0.6s）等，
-    /// 就是纯空耗。实测存档 167 台 / 642 个可破端口：0.6s 一轮要 6.4 min，0.02s 只要 13 秒。
-    ///
-    /// 这曾是反的：演出开着时端口步零间隔（等动画），关掉反而恢复 0.6s ——
-    /// 于是「关掉演出」比「开着演出」慢一个数量级，与直觉相反。
-    ///
-    /// 显式设过间隔（<c>delay=</c> 或面板滑条）时以玩家值为准，见
-    /// <see cref="DelayExplicit"/>。
-    /// </summary>
-    internal const float NoShowPortDelay = MinPortDelay;
-
-    internal const float MaxPortDelay = 5f;
-
-    /// <summary>Fast 档的非端口步间隔。</summary>
-    internal const float FastStepDelay = 0.05f;
 
     private static readonly string[] ConnectedAliases = ["here", "local", "current", "connected"];
     private static readonly string[] NetworkAliases = ["all", "net", "network", "scan"];
@@ -181,9 +122,6 @@ internal sealed record HackOptions(
     private static readonly string[] LeaveAliases = ["dc", "leave", "disconnect"];
     private static readonly string[] CredentialAliases = ["creds", "credentials", "login", "known"];
     private static readonly string[] NoCredentialAliases = ["nocreds", "no-login", "brute"];
-    private static readonly string[] SlowAliases = ["slow", "normal"];
-    private static readonly string[] FastAliases = ["fast", "quick"];
-    private static readonly string[] InstantAliases = ["instant", "turbo", "sameframe"];
     private static readonly string[] ShowExesAliases = ["show", "exes", "native", "anim"];
     private static readonly string[] ResetIPAliases = ["newip", "reset-ip", "resetip"];
     private static readonly string[] NoResetIPAliases = ["nonewip", "noknewip", "keep-ip", "keepip"];
@@ -226,9 +164,6 @@ internal sealed record HackOptions(
         AddAliases(map, NoShowExesAliases, Opt.NoShowExes);
         AddAliases(map, ResetIPAliases, Opt.ResetIP);
         AddAliases(map, NoResetIPAliases, Opt.NoResetIP);
-        AddAliases(map, SlowAliases, Opt.Slow);
-        AddAliases(map, FastAliases, Opt.Fast);
-        AddAliases(map, InstantAliases, Opt.Instant);
         return map;
     }
 
@@ -253,16 +188,51 @@ internal sealed record HackOptions(
     /// </summary>
     private const string ScriptPrefix = "script=";
 
+    /// <summary>
+    /// v1.34.0 随「移除全部步进间隔」删掉的命令行 token。
+    ///
+    /// <b>为什么必须点名拦下。</b>它们已不是别名，也不再被 <see cref="Parse"/> 特判，
+    /// 于是会静默掉进末尾的「显式目标」分支（<c>ids.Add(token)</c>）——
+    /// 玩家敲 <c>autohack run instant</c> 得到的是「No eligible targets」，
+    /// 只会以为目标名写错，而真实原因是那个开关没了。报出来比默默收下一个
+    /// 永远匹配不到的目标好。
+    ///
+    /// 只收「玩家可能真敲过」的那些；别名表里的其余词（<c>here</c> / <c>dc</c> …）
+    /// 仍在 <see cref="AliasMap"/> 里，走不到这里。
+    /// </summary>
+    private static readonly HashSet<string> RetiredTokens = new(StringComparer.Ordinal)
+    {
+        "slow", "normal", "fast", "quick", "instant", "turbo", "sameframe",
+    };
+
+    /// <summary>
+    /// 找出参数里第一个已被删除的 token；没有则返回 <c>null</c>。
+    /// 判据与 <see cref="Parse"/> 同一套（小写化 + 前缀），避免两处口径漂移。
+    /// </summary>
+    internal static string RetiredTokenIn(IReadOnlyList<string> args)
+    {
+        foreach (var raw in args ?? Array.Empty<string>())
+        {
+            var token = raw?.Trim();
+            if (string.IsNullOrEmpty(token))
+            {
+                continue;
+            }
+
+            var lower = token.ToLowerInvariant();
+            if (RetiredTokens.Contains(lower) || lower.StartsWith("delay=", StringComparison.Ordinal))
+            {
+                return token;
+            }
+        }
+
+        return null;
+    }
+
     internal static HackOptions Parse(IReadOnlyList<string> args)
     {
         var ids = new List<string>();
         var scope = HackScope.Network;
-        var delay = DefaultPortDelay;
-
-        // 玩家有没有显式指定过端口间隔（见 DelayExplicit）。只有 delay= 会置真；
-        // 面板那条路在 HackPanel.ToOptions 里按「滑条值 ≠ 缺省」判定。
-        var delayExplicit = false;
-
         // 缺省**开**（v1.33.2 起，此前为关）。
         //
         // 口径变了：不再是「清空对方的 /log」（那会改写目标机的操作史），
@@ -301,7 +271,6 @@ internal sealed record HackOptions(
         // 要换用 newip 显式开启，或直接用面板的 NEW IP 按钮换一次。
         var resetIP = false;
 
-        var speed = HackSpeed.Normal;
         string script = null;
 
         foreach (var raw in args ?? Array.Empty<string>())
@@ -314,7 +283,7 @@ internal sealed record HackOptions(
 
             var lower = token.ToLowerInvariant();
 
-            // 一次查找定动作；别名全部不中才轮到 delay= / script= / ids（判定顺序与旧实现一致）。
+            // 一次查找定动作；别名全部不中才轮到 script= / ids（判定顺序与旧实现一致）。
             if (AliasMap.TryGetValue(lower, out var opt))
             {
                 switch (opt)
@@ -336,21 +305,10 @@ internal sealed record HackOptions(
                     case Opt.NoShowExes: showExes = false; break;
                     case Opt.ResetIP: resetIP = true; break;
                     case Opt.NoResetIP: resetIP = false; break;
-                    case Opt.Slow: speed = HackSpeed.Normal; break;
-                    case Opt.Fast: speed = HackSpeed.Fast; break;
-                    case Opt.Instant: speed = HackSpeed.Instant; break;
                     default:
                         throw new ArgumentOutOfRangeException(nameof(opt), opt, "别名动作未在 Parse 中分派");
                 }
 
-                continue;
-            }
-
-            if (lower.StartsWith("delay=", StringComparison.Ordinal) &&
-                float.TryParse(lower.Substring(6), NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed))
-            {
-                delay = parsed < MinPortDelay ? MinPortDelay : parsed > MaxPortDelay ? MaxPortDelay : parsed;
-                delayExplicit = true;
                 continue;
             }
 
@@ -374,8 +332,8 @@ internal sealed record HackOptions(
         }
 
         return new HackOptions(
-            scope, ids, delay, wipeTraces, uploadMarker, connectFirst, disconnect, skipOwned,
-            allNodes, useCredentials, showExes, resetIP, speed, script, delayExplicit);
+            scope, ids, wipeTraces, uploadMarker, connectFirst, disconnect, skipOwned,
+            allNodes, useCredentials, showExes, resetIP, script);
     }
 }
 

@@ -61,13 +61,6 @@ internal static class PanelSettings
 
         s.Scope = Entry("scope", s.Scope).Value;
 
-        // cfg 是外部输入，可能被手改。越界值在这里夹回合法区间 ——
-        // 与命令行解析（HackOptions.Parse）同一套上下限，避免 cfg 绕过校验。
-        // Math.Clamp 是 .NET Standard 2.1 才有的 API，net472 上没有。
-        s.PortDelay = Math.Min(
-            Math.Max(Entry("port_delay", s.PortDelay).Value, HackOptions.MinPortDelay),
-            HackOptions.MaxPortDelay);
-
         // 键名从 clear_logs / clear_own_logs 改为 wipe_traces：口径变了（只删含玩家 IP
         // 的条目），旧键存的是「整目录清空」的意图，不能悄悄套用到新语义上 ——
         // 旧的 true 在新口径下过宽、旧的 false 又会把新缺省（开）压成关。
@@ -96,7 +89,6 @@ internal static class PanelSettings
         }
 
         Entry("scope", s.Scope).Value = s.Scope;
-        Entry("port_delay", s.PortDelay).Value = s.PortDelay;
         Entry("wipe_traces", s.WipeTraces).Value = s.WipeTraces;
         Entry("upload_marker", s.UploadMarker).Value = s.UploadMarker;
         Entry("connect_first", s.ConnectFirst).Value = s.ConnectFirst;

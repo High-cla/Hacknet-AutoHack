@@ -9,7 +9,7 @@ using Pathfinder.Meta.Load;
 /// 命令与扩展点均通过 Pathfinder 的属性自动扫描注册（AttributeManager 挂载于
 /// HacknetChainloader.LoadPlugin），无需手动调用 Register* API。
 /// </summary>
-[BepInPlugin(Guid, "AutoHack", "1.33.5")]
+[BepInPlugin(Guid, "AutoHack", "1.34.0")]
 // Pathfinder 的属性扫描是 IL hook，在 PathfinderAPIPlugin.Load() 里才安装；
 // 缺此依赖本插件会先加载，扫描覆盖不到，命令静默失效。
 [BepInDependency("com.Pathfinder.API")]
@@ -52,7 +52,7 @@ public sealed class AutoHackPlugin : BepInEx.Hacknet.HacknetPlugin
 
     /// <summary>
     /// autohack                                                      - 开关控制面板
-    /// autohack run [all|here] [目标...] [delay=秒] [keep] [dc] - 不开面板，直接执行
+    /// autohack run [all|here] [目标...] [keep] [dc] - 不开面板，直接执行
     ///   （强行提权已常驻：porthack 门禁过不了时直接给目标写 adminIP）
     /// </summary>
     [Command("autohack", addAutocomplete: true, caseSensitive: false)]
@@ -118,7 +118,6 @@ public sealed class AutoHackPlugin : BepInEx.Hacknet.HacknetPlugin
             autohack              - toggle the control panel
             autohack run [options] [target...] - run headless
               here      only the connected node (default: servers reachable via links)
-              delay=s   seconds between port cracks (default 0.6, min 0.02)
               direct    skip connect, crack the node already connected
               stay      keep the connection at the end (this is the default)
               dc        disconnect each target when done (aborts a trace)
@@ -128,14 +127,19 @@ public sealed class AutoHackPlugin : BepInEx.Hacknet.HacknetPlugin
               mark      drop the marker file (default: no marker)
               creds     use known credentials to log in (default: off)
               nocreds   never log in - always crack ports
-              show      play the native cracker animations (this is the default)
-                        port interval then follows each cracker's own runtime
-              noshow    no animations
+              show      play the native cracker animations (this is the default);
+                        ports open when each animation finishes
+              noshow    no animations: ports open immediately and nothing is ever
+                        waited on - this is the fastest mode
               newip     assign a new IP after the run (this is the default)
               keepip    keep the current IP
-              instant   run every non-port step in the same frame (fastest)
-              fast      shorten the pause between non-port steps (default: normal)
               script=F  run a scripted action list from file F (see below)
+
+            There is no step-interval option any more (v1.34.0 removed every
+            timing delay). A run is bounded by the per-frame step budget, by one
+            port step per frame (so cracks print one line at a time, 60/s), and -
+            while 'show' is on - by the wait for each node's animations to finish.
+            Every node still prints its full probe report in both modes.
 
             autohack <tool> [allnodes] - run one tool, no panel needed:
             """);
@@ -147,7 +151,7 @@ public sealed class AutoHackPlugin : BepInEx.Hacknet.HacknetPlugin
         WriteLines(os, """
             Script files live in Content/HackerScripts/ and are plain text:
               connect / neutralize / probe / login / proxy / openPort [n]
-              solve / porthack / mark / rm / dc / killtrace / delay s
+              solve / porthack / mark / rm / dc / killtrace
               openPort with no number cracks every crackable port on the target.
               connect, neutralize and killtrace are always supplied - do not write them.
               'rm' must come before 'dc' or the script is rejected.
@@ -197,7 +201,18 @@ public sealed class AutoHackPlugin : BepInEx.Hacknet.HacknetPlugin
             return;
         }
 
-        var options = HackOptions.Parse(args.Skip(2).ToArray());
+        var rest = args.Skip(2).ToArray();
+
+        // 已删除的开关必须在解析前拦下 —— 否则它们会静默变成「显式目标名」，
+        // 玩家看到的是「No eligible targets」，与真实原因（那个开关没了）完全脱节。
+        if (HackOptions.RetiredTokenIn(rest) is { } retired)
+        {
+            os.write("[autohack] '" + retired + "' was removed in v1.34.0 - there is no step"
+                + " interval any more. Drop it; 'noshow' is the fastest mode.");
+            return;
+        }
+
+        var options = HackOptions.Parse(rest);
 
         // 脚本在入队前校验一遍：语法错/文件缺失当场报出来，而不是等首帧构造
         // HackRun 时在游戏线程抛出。边界校验前置，错误带原始行号。

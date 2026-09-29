@@ -1,6 +1,5 @@
 namespace AutoHack;
 
-using System.Globalization;
 using Hacknet;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
@@ -43,9 +42,6 @@ internal sealed class HackPanelState
     internal int Y { get; set; } = int.MinValue;
 
     internal HackScope Scope { get; set; } = HackScope.Network;
-
-    /// <summary>端口间隔，秒。</summary>
-    internal float PortDelay { get; set; } = HackOptions.DefaultPortDelay;
 
     /// <summary>
     /// 是否抹掉<b>玩家自己留下的</b>痕迹 —— 目标机与玩家机 /log 里含玩家 IP 的条目。
@@ -141,7 +137,6 @@ internal sealed class HackPanelState
     /// </summary>
     internal readonly record struct Settings(
         HackScope Scope,
-        float PortDelay,
         bool WipeTraces,
         bool UploadMarker,
         bool ConnectFirst,
@@ -164,13 +159,12 @@ internal sealed class HackPanelState
 
     /// <summary>当前设置快照。供 <see cref="HackPanel.Draw"/> 比对是否发生了改动。</summary>
     internal Settings Fingerprint => new(
-        Scope, PortDelay, WipeTraces, UploadMarker, ConnectFirst, Disconnect,
+        Scope, WipeTraces, UploadMarker, ConnectFirst, Disconnect,
         SkipOwned, AllNodes, UseCredentials, ShowExes, ResetIP, X, Y, Collapsed);
 
     internal HackOptions ToOptions() => new(
         Scope,
         Array.Empty<string>(),
-        PortDelay,
         WipeTraces,
         UploadMarker,
         ConnectFirst,
@@ -180,16 +174,7 @@ internal sealed class HackPanelState
         UseCredentials,
         ShowExes,
         ResetIP,
-
-        // 面板不再提供节奏档位（三档 UI 已删）：面板一律走原生节奏，
-        // 命令行仍可用 slow / fast / instant 显式选档（见 HackTypes.Parse）。
-        HackSpeed.Normal,
-        Script,
-
-        // 面板没有独立的「显式设过」标志：滑条值 ≠ 缺省 就说明玩家拖过它。
-        // 拖回缺省（0.6）则视为「没设过」，交回演出开关自动决定 —— 与命令行
-        // 不传 delay= 同一语义。
-        PortDelay != HackOptions.DefaultPortDelay);
+        Script);
 }
 
 /// <summary>
@@ -219,7 +204,6 @@ internal static class HackPanel
 
     private const int SectionHeight = 20;
     private const int SegmentHeight = 26;
-    private const int SliderHeight = 18;
     private const int CheckRowHeight = 22;
     private const int ButtonHeight = 34;
     private const int OutcomeRowHeight = 16;
@@ -294,7 +278,6 @@ internal static class HackPanel
     /// </summary>
     private const int OptionsBlockHeight =
         SectionHeight + SegmentHeight + Gap
-        + SectionHeight + SliderHeight + Gap
         + CheckRowHeight * 5 + Gap;
 
     /// <summary>本帧面板占据的矩形。供 Update 阶段提前阻断下层控件点击。</summary>
@@ -429,11 +412,10 @@ internal static class HackPanel
 
     // ── 正文区块 ────────────────────────────────────────────────
 
-    /// <summary>选项块：按序绘制 SCOPE / PORT INTERVAL / 复选框三段，并给出下一块的 y。</summary>
+    /// <summary>选项块：按序绘制 SCOPE / 复选框两段，并给出下一块的 y。</summary>
     private static void DrawOptions(HackPanelState state, int left, int y, Palette c, out int next)
     {
         DrawScopeSection(state, left, ref y, c);
-        DrawPortIntervalSection(state, left, ref y, c);
         DrawCheckboxes(state, left, ref y, c);
 
         next = y + Gap;
@@ -460,22 +442,6 @@ internal static class HackPanel
         }
 
         y += SegmentHeight + Gap;
-    }
-
-    /// <summary>PORT INTERVAL 段：区标题、当前值文本与端口间隔滑条。</summary>
-    private static void DrawPortIntervalSection(HackPanelState state, int left, ref int y, Palette c)
-    {
-        Section(Loc.T("PORT INTERVAL"), left, y, c);
-        var value = state.PortDelay.ToString("0.00", CultureInfo.InvariantCulture) + " s";
-        DrawText(value, left + ContentWidth - Measure(value, 1f).X, y, state.PortDelay <= 0.15f ? c.Warn : c.Text, 1f);
-        y += SectionHeight;
-
-        state.PortDelay = Slider(
-            state.IdBase + 12,
-            new SliderSpec(left, y, ContentWidth, HackOptions.MinPortDelay, HackOptions.MaxPortDelay, 0.05f),
-            state.PortDelay, c);
-
-        y += SliderHeight + Gap;
     }
 
     /// <summary>5 行复选框：凭据 / 全网 / 跳过肉鸡 / 清痕 / 先连接 / 断开 / 标记 / 演出 / 换 IP。</summary>
@@ -656,82 +622,6 @@ internal static class HackPanel
         // 标签始终绘制 —— 原生 CheckBox 只在悬停时才画，这正是旧面板显脏的主因。
         DrawText(Ellipsize(label, labelWidth - 24), x + 24, y + 1, on ? c.Text : c.Dim, 1f);
         return on;
-    }
-
-    /// <summary>滑条的几何（x/y/width）与取值域（min/max/step）规格。</summary>
-    private readonly struct SliderSpec
-    {
-        internal SliderSpec(int x, int y, int width, float min, float max, float step)
-        {
-            X = x;
-            Y = y;
-            Width = width;
-            Min = min;
-            Max = max;
-            Step = step;
-        }
-
-        internal readonly int X;
-        internal readonly int Y;
-        internal readonly int Width;
-        internal readonly float Min;
-        internal readonly float Max;
-        internal readonly float Step;
-    }
-
-    /// <summary>
-    /// 自维护状态机的滑条。不借用 <see cref="Track"/>：拖拽中 <c>GuiData.active == id</c>，
-    /// 而 <c>Track</c> 在抬起那一帧会先把 active 复位，导致最后一段位移丢失。
-    /// 此处先落值再复位，保证松手位置被采纳。
-    /// </summary>
-    private static float Slider(int id, SliderSpec spec, float value, Palette c)
-    {
-        var hot = new Rectangle(spec.X, spec.Y - 4, spec.Width, SliderHeight + 8).Contains(GuiData.getMousePoint());
-
-        if (hot)
-        {
-            GuiData.hot = id;
-
-            if (GuiData.mouseWasPressed() && GuiData.active == -1)
-            {
-                GuiData.active = id;
-            }
-
-            if (GuiData.active == -1)
-            {
-                var scroll = GuiData.getMouseWheelScroll();
-                if (scroll != 0)
-                {
-                    value += spec.Step * scroll;
-                }
-            }
-        }
-        else if (GuiData.hot == id)
-        {
-            GuiData.hot = -1;
-        }
-
-        if (GuiData.active == id)
-        {
-            var t = Clamp((GuiData.getMousePoint().X - spec.X) / (float)spec.Width, 0f, 1f);
-            value = spec.Min + t * (spec.Max - spec.Min);
-
-            if (GuiData.mouse.LeftButton == ButtonState.Released)
-            {
-                GuiData.active = -1;
-            }
-        }
-
-        value = Clamp(value, spec.Min, spec.Max);
-
-        var ratio = spec.Max - spec.Min <= 0f ? 0f : (value - spec.Min) / (spec.Max - spec.Min);
-        Fill(new Rectangle(spec.X, spec.Y + 5, spec.Width, 6), c.Track);
-        Fill(new Rectangle(spec.X, spec.Y + 5, (int)(spec.Width * ratio), 6), c.Accent);
-
-        var knob = spec.X + (int)(spec.Width * ratio);
-        Fill(new Rectangle(knob - 2, spec.Y, 4, 16), hot || GuiData.active == id ? Color.White : c.Accent);
-
-        return value;
     }
 
     private static bool PrimaryButton(int id, Rectangle r, string text, Color accent, Color ink)
@@ -1090,9 +980,6 @@ internal static class HackPanel
 
     private static Color Darken(Color color, float amount)
         => Color.Lerp(color, Color.Black, amount);
-
-    private static float Clamp(float value, float min, float max)
-        => value < min ? min : value > max ? max : value;
 
     private static int ClampInt(int value, int min, int max)
         => value < min ? min : value > max ? max : value;

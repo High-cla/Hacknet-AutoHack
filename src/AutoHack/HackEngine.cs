@@ -567,6 +567,56 @@ internal static class HackEngine
     internal static Computer[] ReachableFrom(OS os, Computer origin) => Closure(os, origin);
 
     /// <summary>
+    /// 先把地图揭开，再开始入侵 —— 用户定的次序（「先扫描，后入侵」）。
+    ///
+    /// <b>为什么不改目标池。</b>Network 口径的池来自 <see cref="ReachableComputers"/>，
+    /// 那是沿 <c>links</c> 的传递闭包；揭图只是把闭包里的下标写进 <c>visibleNodes</c>，
+    /// 不增不减闭包本身。allnodes 口径的池来自 <see cref="ConnectableComputers"/>，
+    /// 那是地图全表，与 <c>visibleNodes</c> 完全无关。故这一步是纯粹的观感前置。
+    ///
+    /// <b>它补的是什么。</b>Network 口径本来就在顺带揭图（<see cref="Closure"/> 的
+    /// BFS 逐节点调 <c>NetworkMap.discoverNode</c>），而 allnodes 口径走的是
+    /// <see cref="ConnectableComputers"/> —— 那条路只收集、不 <c>discoverNode</c>，
+    /// 于是「地图全开」跑完，地图上仍是一台都没亮。这里的 <paramref name="allNodes"/>
+    /// 分支正是补这个缺口。
+    ///
+    /// 标记一律走原生 <c>NetworkMap.discoverNode</c>（NetworkMap.cs:415-423），
+    /// 与游戏自身的「已发现」同源，不做自绘的伪发现。
+    /// </summary>
+    /// <param name="allNodes">true = 地图全表；false = 当前节点所在的无向连通分量。</param>
+    internal static void RevealMap(OS os, bool allNodes)
+    {
+        var map = os?.netMap;
+        if (map?.nodes == null || map.nodes.Count == 0)
+        {
+            return;
+        }
+
+        if (!allNodes)
+        {
+            // 连通分量口径：ReachableFrom 的 BFS 已带 reveal，直接复用 —— 不另立第二套遍历。
+            // 未连接时没有「当前节点」，此时什么都不揭（与 scan 工具的判据一致）。
+            if (os.connectedComp != null)
+            {
+                ReachableFrom(os, os.connectedComp);
+            }
+
+            return;
+        }
+
+        // 地图全表：逐个标记。discoverNode 内部是 visibleNodes.Contains(nodes.IndexOf(c))
+        // （NetworkMap.cs:417），两次线性扫描，故这里是 O(V²)。实测存档 167 台无感；
+        // 千级地图才需要改走哈希集，本次不做（YAGNI）。
+        foreach (var comp in map.nodes)
+        {
+            if (comp != null && !comp.disabled)
+            {
+                map.discoverNode(comp);
+            }
+        }
+    }
+
+    /// <summary>
     /// 同 <see cref="ReachableFrom"/>，但<b>不</b>把走到的节点标成「已发现」。
     ///
     /// 清痕要沿连线走到玩家此前访问过的机器，但那不是侦察 ——

@@ -13,7 +13,7 @@ internal sealed record TargetOutcome(string Name, int Opened, int Total, bool Es
 /// 端口一律按 Pathfinder 的协议名操作（<c>openPort(protocol, ipFrom)</c>），
 /// 而非原版按端口号 —— 原版那条路径已被框架 Prefix 拦下。
 ///
-/// 三个必须尊重的游戏机制：
+/// 五条必须尊重的游戏机制：
 /// 1. 管理员反扑：断开连接时 OS.handleDisconnection() 会调
 ///    admin?.disconnectionDetected()，BasicAdministrator 在 0~20 秒后关掉全部端口并把
 ///    adminIP 还原成机器自己 —— 肉鸡标记当场丢失，这就是「全网扫描失去效果」的根因。
@@ -30,12 +30,15 @@ internal sealed record TargetOutcome(string Name, int Opened, int Total, bool Es
 ///    （OS.cs:2165）。解除即把 proxyOverloadTicks 收敛到 0、proxyActive 置 false ——
 ///    与 ShellExe 过载跑完的终态逐字节相同，只是不等那 30 秒。
 ///    刻意不照抄 ShellExe.cs:105 的 hostileActionTaken() —— 那只会点燃追踪。
+/// 5. <b>推进没有任何时间节流</b>（v1.34.0 起）。此前非端口步吃 NormalStepDelay
+///    （0.35s）、端口步吃 PortDelay（缺省 0.6s），实测存档 167 台 / 642 可破端口
+///    一轮要 5 分钟以上，其中 292 秒纯粹是「等」—— 而关掉演出后端口在
+///    ApplyOpenPort 里立即开，压根没有可等的东西。现在整轮只剩三道闸门：
+///    单帧步数预算、<b>端口步每帧一步（与演出开关无关）</b>、提权前的动画等待
+///    （仅演出开着时）。实测同一存档：noshow 一轮由 5.2 min 降到约 11 秒。
 /// </summary>
 internal sealed class HackRun
 {
-    /// <summary>Normal 档的非端口步间隔（真人节奏）。</summary>
-    private const float NormalStepDelay = 0.35f;
-
     /// <summary>
     /// 等本台端口开完的上限（秒），超时就把剩下的端口直接开掉并继续。
     ///
@@ -57,7 +60,6 @@ internal sealed class HackRun
     private readonly List<HackStep> _steps;
 
     private int _index;
-    private float _timer;
 
     /// <summary>本次运行中靠已知凭据登入（即已提权）的机器，其破端口类步骤整体跳过。</summary>
     private readonly HashSet<Computer> _loggedIn = new();
@@ -91,6 +93,13 @@ internal sealed class HackRun
         // 的错误行。放进 Tick 会让错误每帧重复，放进 BuildSteps 会让「目标为空」
         // 与「脚本坏了」两种情况混在一起。
         _script = string.IsNullOrEmpty(options.Script) ? null : HackScript.Load(options.Script);
+
+        // 先揭图，再解析目标 —— 用户定的次序（「先扫描，后入侵」）。
+        //
+        // 只改「地图上看得见什么」，不改目标池：ReachableComputers 的池是沿 links
+        // 的传递闭包，揭图不改变闭包；ConnectableComputers 的池是地图全表，
+        // 与 visibleNodes 无关。故这一步是纯粹的观感前置，零语义风险。
+        HackEngine.RevealMap(os, options.AllNodes);
 
         var plan = HackEngine.ResolveTargets(os, options);
         _targets = plan.Targets;
@@ -135,15 +144,13 @@ internal sealed class HackRun
             return;
         }
 
-        _timer += deltaSeconds;
-
-        // Instant 档：非端口步不等时间，一帧内连跑到底，直到撞上一个端口步
-        // 或本帧的预算耗尽。
-        //
-        // 端口步在开了演出时零间隔（DelayFor），真正的节流是循环末尾那道
-        // 「端口步只推进一个就 return」—— 于是每帧至多入队一个动画请求，
-        // 终端仍逐行浮现，而动画由 RAM 门禁自行并发。关掉演出时端口步吃
-        // Options.PortDelay，那道闸门也就取不到上限（MinPortDelay 0.02s = 50/秒 < 60）。
+        // 推进不再有任何时间节流（v1.34.0 起，见类注释）。deltaSeconds 只服务于
+        // 提权等待的上限计时（见 WaitForNativeAnimation），不参与步进节流。
+        // 剩下的三道闸门：
+        // ① 端口步每帧只推进一步（与演出开关无关，见循环末尾）—— 它同时管
+        //    动画入队速率与终端回显速率；
+        // ② 提权前的原生动画等待 —— 仅当演出开着（见 WaitForNativeAnimation）；
+        // ③ 单帧步数预算 MaxStepsPerFrame。
         var budget = MaxStepsPerFrame;
         while (!Finished && budget-- > 0)
         {
@@ -177,20 +184,23 @@ internal sealed class HackRun
                 return;
             }
 
-            var delay = DelayFor(step.Kind);
-            if (_timer < delay)
-            {
-                return;
-            }
-
-            _timer = 0f;
             _waitSeconds = 0f;
             Apply(os, step);
             _index++;
 
-            // 端口步每帧只推进一步。DelayFor 已把它压到 0，若不加这道闸，
-            // 一帧 512 步的预算会让单台十几个端口同帧全部入队 —— 终端一帧刷十几行，
-            // 且动画请求全部挤进队列，反而看不清「一次破解」。
+            // 端口步每帧只推进一步 —— **与演出开关无关**（用户定，v1.34.0）。
+            //
+            // 这道闸同时管两件事，两件都要求「一帧一个」：
+            // ① **动画入队速率**（演出开着时）：一帧至多入队一个动画请求，
+            //    动画由 RAM 门禁自行并发（实测峰值 3 个同屏）；
+            // ② **终端回显速率**（两种模式都要）：一帧至多一行破解指令。
+            //
+            // 去掉它，一帧 512 步的预算会把整台的端口（noshow 下是整轮 642 个）
+            // 挤进同一帧 —— 终端一次刷出十几到几百行 sshcrack，玩家根本看不清
+            // 破了哪个端口，动画请求也会全挤进队列。
+            //
+            // 代价是端口步恒为 1 帧/个（60 个/秒）：642 个端口约 10.7 秒。
+            // 这是刻意的取舍 —— 战果要看得见，而 60/秒已远快于任何人工节奏。
             if (step.Kind == HackStepKind.OpenPort)
             {
                 return;
@@ -276,68 +286,6 @@ internal sealed class HackRun
             or HackStepKind.OpenPort
             or HackStepKind.SolveFirewall
             or HackStepKind.Escalate;
-    }
-
-    /// <summary>该步骤需等待的秒数。Instant 档把非端口步压到 0。</summary>
-    private float DelayFor(HackStepKind kind)
-    {
-        // 端口步的间隔分三种情形：
-        //
-        // ① <b>开了演出 → 零间隔。</b>破解之间的等待不再由计时器管，而是由
-        //    「动画跑完端口才开」这件事本身管 —— 见 Apply(OpenPort) 与 Tick 里的
-        //    提权等待。真正的节流是「每帧只推进一个端口步」（Tick 里那道 return），
-        //    故一帧最多入队一个动画请求，终端逐行浮现的观感得以保留，
-        //    而动画由 RAM 门禁自行并发（实测峰值 3 个同屏）。
-        //
-        // ② <b>关掉演出、且玩家显式设过间隔 → 用玩家的值。</b>这是唯一的节奏控件，
-        //    玩家拖了滑条或传了 delay= 就是要那个数，不能被自动逻辑覆盖。
-        //
-        // ③ <b>关掉演出、且玩家没设过 → NoShowPortDelay。</b>演出关掉后端口在
-        //    Apply 里立即开，<b>没有任何可等的东西</b>，再按缺省 0.6s 等就是纯空耗。
-        //    这一支修的是一个反直觉的旧行为：v1.33.3 起演出开着时端口步零间隔，
-        //    而关掉演出反而恢复 0.6s —— 「关掉演出」比「开着演出」慢一个数量级。
-        //    实测存档 167 台 / 642 可破端口：0.6s 一轮 6.4 min，0.02s 只要 13 秒。
-        if (kind == HackStepKind.OpenPort)
-        {
-            if (Options.ShowExes)
-            {
-                return 0f;
-            }
-
-            return Options.DelayExplicit ? Options.PortDelay : HackOptions.NoShowPortDelay;
-        }
-
-        // 清痕是纯内存操作（WipeTraces 只做 List 扫描 + deleteFile 遍历，
-        // 无磁盘 IO、无 Thread.Sleep），且每台至多回显一行摘要 ——
-        // 没有需要人眼跟上的逐条节奏。故不吃节流：一整屏机器同帧抹完。
-        // 单帧步数仍受 MaxStepsPerFrame 约束，不会失控。
-        if (kind == HackStepKind.CleanLogs)
-        {
-            return 0f;
-        }
-
-        // 反追踪同理不吃节流：它只把 traceTracker.active 置假并回正速度系数
-        // （TraceTracker.cs:116-120），纯内存、无 IO、无动画；未激活时
-        // HackEngine.KillTrace 直接返回 false，连一行都不输出。
-        // 正因为零成本，才敢在每个端口后都插一次（见 BuildSteps）。
-        if (kind == HackStepKind.KillTrace)
-        {
-            return 0f;
-        }
-
-        // 脚本自带 delay 行时以它为准（游戏 HackerScript 的 config 第 4 参同义），
-        // 否则回到 speed 档位 —— 两者正交：档位管「多快」，脚本管「什么次序」。
-        if (_script?.StepDelay is { } scripted)
-        {
-            return scripted;
-        }
-
-        return Options.Speed switch
-        {
-            HackSpeed.Instant => 0f,
-            HackSpeed.Fast => HackOptions.FastStepDelay,
-            _ => NormalStepDelay,
-        };
     }
 
     private void Apply(OS os, HackStep step)
@@ -490,6 +438,13 @@ internal sealed class HackRun
         {
             Echo(os, step.Command ?? "probe");
         }
+        // 端口报告**无条件**打（v1.34.0 修正）。
+        //
+        // 曾短暂地在 noshow 下压掉它，理由是「167 台上千行太吵」。那是把
+        // 「不要动画」误读成「不要输出」—— 演出开关管的是原生破解程序要不要
+        // 挂进 RAM 面板，而 probe 报告是**侦察结果**（目标开了哪些端口、
+        // 要破几个才够提权门槛），属于战果本身，不是过程演出。
+        // 没有它，noshow 下玩家只能看到一串 sshcrack，看不到在打什么。
         foreach (var line in HackEngine.ProbeReport(target))
         {
             os.write(line);
@@ -939,8 +894,8 @@ internal sealed class HackRun
             // 每个端口后立刻清一次追踪（用户定的行为；此前只在每台末尾清一次）。
             //
             // 计时上两者都安全，不是缺陷修复：traceTime = max(10 - security, 3) * 15，
-            // 最小 45 秒（Computer.cs:224），而单台的端口步总耗时 = 端口数 × PortDelay，
-            // 量级是秒 —— 每台清一次就已经比倒计时快一个数量级。
+            // 最小 45 秒（Computer.cs:224），而单台的端口步总耗时是毫秒量级
+            // （v1.34.0 起已无步进间隔）—— 每台清一次就已经比倒计时快好几个数量级。
             // 每端口一次的实际差别是「追踪状态在端口之间也归零」：演出 exe 的构造体
             // 会调 hostileActionTaken()（PacificPortExe.cs:26、SSHCrackExe.cs:90、
             // SMTPoverflowExe.cs:61 等），traceTime > 0 时即

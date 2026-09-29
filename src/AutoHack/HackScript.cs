@@ -10,7 +10,7 @@ using Pathfinder.Util;
 ///
 /// 格式沿用游戏自己的 HackerScript（<c>Content/HackerScripts/*.txt</c>）的行式写法：
 /// 每行一个动作，行尾可带 <c>$#%#$</c> 分隔符（游戏要求，此处兼容并可选），
-/// <c>delay &lt;秒&gt;</c> 或 <c>config</c> 行设定每步间隔，<c>#</c> 开头为注释
+/// <c>#</c> 开头为注释。
 /// （游戏本身没有注释语法 —— 官方文档明说「没有对应命令的行就不执行」，
 /// 这里补一个显式注释，是唯一比游戏宽松的地方）。
 ///
@@ -32,17 +32,13 @@ internal sealed class HackScript
     /// <summary>脚本默认所在目录（相对游戏的 Content 前缀）。</summary>
     internal const string DefaultDirectory = "HackerScripts";
 
-    private HackScript(List<Action> actions, float? stepDelay, string source)
+    private HackScript(List<Action> actions, string source)
     {
         Actions = actions;
-        StepDelay = stepDelay;
         Source = source;
     }
 
     internal IReadOnlyList<Action> Actions { get; }
-
-    /// <summary>脚本自行指定的每步间隔（<c>delay</c> 行）；null = 沿用 speed 档位。</summary>
-    internal float? StepDelay { get; }
 
     /// <summary>实际读到的文件路径，供终端回显（让玩家确认究竟跑了哪份脚本）。</summary>
     internal string Source { get; }
@@ -53,7 +49,8 @@ internal sealed class HackScript
     /// 单独列出来只为把错误说清楚 —— 它们要么是 NPC 视角的破坏动作
     /// （forkbomb/flash/trackseq/openCDTray），要么改的是目标 UI
     /// （hide* / show* / clearTerminal），要么对玩家终端无意义
-    /// （config/delay 已单独处理，systakeover 是写真实磁盘的剧情序列，绝不可用）。
+    /// （config/delay 是节奏设置，本插件已不再有步进间隔，见 HackRun 类注释；
+    /// systakeover 是写真实磁盘的剧情序列，绝不可用）。
     /// </summary>
     private static readonly HashSet<string> UnsupportedVerbs = new(StringComparer.Ordinal)
     {
@@ -107,7 +104,6 @@ internal sealed class HackScript
     internal static HackScript Parse(string text, string source)
     {
         var actions = new List<Action>();
-        float? stepDelay = null;
         var lineNumber = 0;
 
         foreach (var rawLine in (text ?? string.Empty).Split('\n'))
@@ -123,34 +119,6 @@ internal sealed class HackScript
 
             var tokens = line.Split(Utils.spaceDelim, StringSplitOptions.RemoveEmptyEntries);
             var verb = tokens[0].ToLowerInvariant();
-
-            // delay/config 不是动作，是整份脚本的节奏设置。游戏脚本里 config 还负责
-            // 指定目标与源机，此处目标由 scope 解析（here/network/allnodes/显式），
-            // 二者正交 —— 脚本只描述「怎么打」，不描述「打谁」。
-            if (verb == "delay")
-            {
-                if (tokens.Length > 1)
-                {
-                    stepDelay = ParseSeconds(tokens[1], lineNumber);
-                }
-
-                continue;
-            }
-
-            // config 行是游戏脚本的「指定目标 + 源机 + 每行延迟」（官方格式
-            // config [目标] [源机] [延迟]）。目标与源机对 AutoHack 无意义 ——
-            // 目标由 scope 解析，源机恒是玩家自己 —— 但延迟同样适用，
-            // 故只取第 4 个参数，其余宽容忽略。
-            // 注意：这只是兼容写法，游戏自带的脚本并不能直接跑 —— 见 UnsupportedVerbs。
-            if (verb == "config")
-            {
-                if (tokens.Length > 3)
-                {
-                    stepDelay = ParseSeconds(tokens[3], lineNumber);
-                }
-
-                continue;
-            }
 
             var resolved = ResolveKind(verb);
             if (resolved == null)
@@ -187,7 +155,7 @@ internal sealed class HackScript
 
         Validate(actions, source);
 
-        return new HackScript(actions, stepDelay, source);
+        return new HackScript(actions, source);
     }
 
     /// <summary>
@@ -240,17 +208,6 @@ internal sealed class HackScript
         }
 
         return null;
-    }
-
-    private static float ParseSeconds(string token, int lineNumber)
-    {
-        if (!float.TryParse(token, NumberStyles.Float, CultureInfo.InvariantCulture, out var seconds))
-        {
-            throw new FormatException(
-                "Line " + lineNumber + ": expected a number of seconds, got '" + token + "'.");
-        }
-
-        return seconds < 0f ? 0f : seconds;
     }
 
     private static string StripDelimiter(string line)

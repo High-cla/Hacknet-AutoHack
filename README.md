@@ -128,52 +128,12 @@ dc    $#%#$
 | `rm` | 清除 `/log` |
 | `dc` | 断开连接 |
 
-脚本里**没有** `delay` / `config` 行：v1.34.0 起本插件不再有步进间隔（见上「面板」一节的推进说明），写了会被当成未知动作拒绝。
-
-**三个动作不用写**，AutoHack 恒定补上 —— 它们是正确性要求而非风格偏好：`connect`（未连接时）、`neutralize`（解除管理员反扑，否则断开后 0~20 秒肉鸡标记丢失）、`killtrace`（收尾反追踪）。
-
-**`rm` 必须排在 `dc` 之前**，否则整份脚本被拒绝并说明原因。`rm` 的作用域是「当前连接」（`Programs.rm` 读 `os.connectedComp`），断开之后再执行，删的是**玩家自己**的文件系统 —— 这正是玩家手敲时「命令敲对了却没有效果」的根因。
-
-> **不能直接跑游戏自带的脚本。** 游戏那 28 个动作里**没有提权**，唯一像「接管」的 `systakeover` 会往真实磁盘写 `VMBootloaderTrap.dll` 与 `OpenCMD.bat`（`HostileHackerBreakinSequence.cs:15-21`），是剧情级破坏序列。它的 `connect` 也只是 `parseInputMessage("cConnection …")` —— 目标机视角记「有人连进来」，**根本不设 `os.connectedComp`**（`HackerScriptExecuter.cs:121`），驱动不了玩家终端。喂错动作时插件会明确区分「这是游戏 NPC 动作，此处没有对应物」与「拼错了」，而不是笼统报「未知动作」。
-
 ### 设置持久化
 
 面板里的每一项设置（含面板位置与收起状态）都写进 `BepInEx/config/com.highcla.autohack.cfg`，重开游戏后原样恢复。
 
 - 面板是**唯一**的设置界面 —— 没有第二套 UI，也就不存在两处设置互相漂移。cfg 只作落盘载体，手改它同样生效；非法值由 BepInEx 忽略并退回该项缺省，不会让游戏出错。
 - 落盘时机是**指针抬起**而非每次改动：拖动面板或拉滑条期间每帧都在改值，逐帧写盘等于把磁盘打满。点击类控件在点击那一帧即落盘。
-
-### 自动换 IP
-
-每轮入侵收尾时，玩家机自动换一个新 IP，并把**全图所有已控机器**的归属迁移过去。这是游戏原生的「换 IP 保命」动作（ISP 服务器上的 `Assign New IP`，`ISPDaemon.cs:122-142`），本插件把它自动化。
-
-- **为什么**：追踪者判定依据是日志里出现过的玩家 IP —— 换掉 IP 等于让已有记录失去指向。这是游戏设计给玩家的最后手段（CSEC 任务链的追踪危机里，就要求玩家去 ISP 服务器手动改）。
-- **归属迁移**：提权时游戏把玩家当时的 IP 写进目标机（`adminIP`），判据是 `adminIP == 玩家IP`。换 IP 会让该判据全部落空，故收尾时把全图里仍标记着旧 IP 的机器一并改成新 IP，已有战绩不丢。
-- **回显**：终端写明 `new local IP: <旧> -> <新> (N owned node(s) re-tagged)`；`N` 为 0 表示当前没有被控机器。
-- **两种用法**：面板 TOOLS 区的 `NEW IP` 按钮（单击立即换一次，与命令行 `autohack ip` 同一实现）；或 `new IP after run` 复选框（每轮收尾自动换）。
-- **缺省关**（v1.32.6 起，此前为开）：换 IP 会**打断要求 IP 不变的任务链** —— lelzSec 那条明写「Your IP's been whitelisted (so dont go changing it for now)」，白名单记的是当时的 IP。要每轮自动换就勾上复选框或命令行传 `newip`；只换这一次用按钮/`autohack ip`。
-
-### 自身加固（不可逆）
-
-对玩家自己的机器置：`portsNeededForCrack = 9999998`、`traceTime = 1`、`hasProxy/proxyActive/proxyOverloadTicks/startingOverloadTicks` **四字段同步**置 `9999998`（`addProxy` 的语义就是一次设定四者，`Computer.cs:243-252` —— 只改 `hasProxy` 会让 `DisplayModule` 按 `0/0` 算进度条）、`firewall.solution` 换 12 位随机串。执行前后各打印一次全部字段，便于核对与手工还原。
-
-端口走 Pathfinder 的 `PortState.SetCracked`（15 个原版协议），**不写原版 `portsOpen`** —— Pathfinder 已用 Harmony Prefix 接管 `openPort`/`openPorts`（`ComputerExtensions.cs:184-204`），原版列表永不更新。
-
-### 模组端口
-
-其它插件（workshop mod）注册的自定义端口，游戏原生**进不了自动入侵**：判据是 `PortExploits.cracks` 里有该端口的破解程序，而它只含原生 36 个端口 —— 实测三个模组注册的 16 个端口（LunarOS 3 / SRPortToolkit 8 / ZeroDayToolKit 5）一个都不在其中，且没有任何模组往 `cracks` 里写过。故本插件加一张**手动白名单**，缺省空：
-
-```
-autohack run noshow modports=mqtt,ntp,Redis
-```
-
-- **端口由插件直接开**，不跑模组自己的破解程序。回显的是占位命令 `portcrack <端口>`，一眼可辨不是真程序 —— 那些 exe 的参数语义各异（`RedisBreaker` 要显示端口号、`SSHPacket` 要 `-s` 子命令、`LunarEclipse` 开的是别人家的端口），编一条「看起来像真的」的命令只会让玩家敲了报错。
-- **收益是真实的**：提权门槛判据是「已开端口数 **>** `portsNeededForCrack`」。实测存档有 13 台机器门槛 2~8 而端口表只有 1~4 个，破满也差 1~6 个，只能走强行提权兜底。**每多开一个模组端口，就少一台机器需要兜底。**
-- **缺省一个都不开**：这些端口是各模组的剧情拼图（`moonshine` 是 LunarEclipse 跑完才开的、`lunardefender` 存在时 `PortBackdoor` 会被 LunarOS 的 Prefix 拦下并报「Execution failed」）。提前开等于替玩家跳过解谜，故必须显式点名。
-- **两种开法**：逐个点名 `modports=mqtt,ntp`（精确控制），或 `modports=*` 全开。面板上对应 `auto mod ports` 复选框（就是 `*`）—— 不想记协议名时勾它。
-- **先看有哪些**：`autohack ports` 打出当前节点的端口表（协议名 / 显示端口 / **原始端口号** / 破解状态），并在末尾提示那台机器上的模组端口。注意它是**按机器**读的 —— 换一台机器可能还有别的模组端口，所以「全开」用 `*` 比抄一份名单更稳。
-- **名字写错会提示**：模组未加载或拼错时端口表里根本没有那个协议，整轮会安静地少开几个端口。故开跑前报一行 `no plugin has registered a port named '...'`。只提示不拦截。
-- 协议名匹配**大小写不敏感**（`Redis` / `IMP` / `mqtt` 混用），但「是否注册」的检查用框架的 Ordinal 比较 —— 写了 `redis` 而注册名是 `Redis` 时功能正常，但会多报一行未注册提示。
 
 ## 构建
 

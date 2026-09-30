@@ -2,7 +2,7 @@
 
 仓库：<https://github.com/High-cla/Hacknet-AutoHack> · 许可：[MIT](LICENSE)
 
-基于 Hacknet + Pathfinder 的自动入侵插件，带**交互式控制面板**。**优先使用游戏原生机制**：每个动作都走原生 API（`Programs.connect` / `Computer.openPort` / `Computer.giveAdmin` / `makeFile`）执行，并把对应指令回显进终端，行为与真人敲 `connect` / `probe` / `sshcrack 22` / `porthack` 一致 —— **终端看到什么，游戏状态就变什么**。端口步是这条规则的强化版：命令与端口都跟着原生动画走，动画**挂上面板那一刻**才回显、**跑完那一刻**才开端口（见下「面板」的 `native exes` 行）。四个游戏机制被显式处理：**管理员反扑**（断开时 `disconnectionDetected` 会关端口并把 `adminIP` 还原成机器自己，故离开前先解除反扑）、**跳板**（`proxyActive` 会拦下破解程序，先过载绕过）、**追踪**（`TraceTracker` 只在连着被追踪目标时推进，跑完即 `dc` 中止）、以及**强行提权**（porthack 门禁过不了时直接写 `adminIP`，见下）。
+基于 Hacknet + Pathfinder 的自动入侵插件，带**交互式控制面板**。**优先使用游戏原生机制**：每个动作都走原生 API（`Programs.connect` / `Computer.openPort` / `Computer.giveAdmin` / `makeFile`）执行，并把对应指令回显进终端，行为与真人敲 `connect` / `probe` / `sshcrack 22` / `porthack` 一致 —— **终端看到什么，游戏状态就变什么**。端口步是这条规则的强化版：命令与端口都跟着原生动画走，动画**挂上面板那一刻**才回显、**跑完那一刻**才开端口（见下「面板」的 `native exes` 行）。四个游戏机制被显式处理：**管理员反扑**（断开时 `disconnectionDetected` 会关端口并把 `adminIP` 还原成机器自己，故离开前先解除反扑）、**跳板**（`proxyActive` 会拦下破解程序，先过载绕过）、**追踪**（`TraceTracker` 只在连着被追踪目标时推进，跑完即 `dc` 中止）、以及**强行提权**（porthack 门禁过不了时直接写 `adminIP`）。
 
 ## 安装
 
@@ -46,7 +46,7 @@ autohack -h                                     # 帮助
 | `new IP after run` | 跑完把本机换成新 IP（缺省**关**）—— 游戏原生的「换 IP 保命」，并把全图已控机器的归属迁到新 IP |
 | `disconnect when done` | 每个目标跑完是否 `dc`（缺省**关**）—— 断开会终止会话、清空 `navigationPath`，属行为选择。**只管断开**：清追踪已是每轮收尾的恒定动作，不再由开关控制 |
 | `skip owned` | 全网扫描时跳过已拿下的肉鸡（缺省**开**）。**只对全网扫描生效** —— 「当前节点」是刻意选择，连上再点 START 就是要打它 |
-| `auto mod ports` | 允许自动入侵去开**全部已注册的模组端口**（缺省**关**），等价于命令行 `modports=*`。勾上后不必再逐个点名协议 —— 见「模组端口」 |
+| `auto mod ports` | 允许自动入侵去开**全部已注册的模组端口**（缺省**关**），等价于命令行 `modports=*`。勾上后不必再逐个点名协议 —— 这些端口由插件直接开，不跑模组自己的破解程序 |
 | — | **强行提权已常驻**（v1.33.2 起，不再是开关）：porthack 门禁过不了时直接给目标写 `adminIP`。防护机（`portsToCrack=9999998`）与端口表凑不够门槛的机器只有这条路拿得下。提权落定后补一行原生收尾文案 `--Porthack Complete--`（v1.40.0，与 `PortHackExe.Completed()` 同串） |
 | `RUN` | 按当前设置执行 |
 | TOOLS 区 `SCAN NETWORK` / `DEC DECRYPT` / `MEMORY DUMP` / `ALL PROGRAMS` / `MOD PROGRAMS` / `PORT LIST` | 单击**立即执行**，无二次确认（见下表） |
@@ -77,7 +77,7 @@ autohack -h                                     # 帮助
 | `dc` | 每个目标跑完断开（反追踪：追踪只在连着目标时推进） |
 | `redo` | 全网扫描时**连已控节点一起重打**（缺省跳过肉鸡） |
 | `script=文件` | 用一份**动作表**取代内置次序（见「脚本模式」） |
-| `modports=协议,...` | 额外破解**其它插件注册的模组端口**（缺省**一个都不开**）。名字用各模组注册的协议名，如 `modports=mqtt,ntp,Redis`，**大小写不敏感**；可写多次累加。**`modports=*` = 全部已注册的模组端口**（与面板 `auto mod ports` 复选框等价）—— 不想逐个点名时用它。这些端口**直接开**，不跑模组自己的破解程序 —— 那 21 个 exe 的参数语义各异（实测 11 个「参数不足即退出」、多个开的是别人家的端口），没有可通用推断的形式（见下「模组端口」） |
+| `modports=协议,...` | 额外破解**其它插件注册的模组端口**（缺省**一个都不开**）。名字用各模组注册的协议名，如 `modports=mqtt,ntp,Redis`，**大小写不敏感**；可写多次累加。**`modports=*` = 全部已注册的模组端口**（与面板 `auto mod ports` 复选框等价）—— 不想逐个点名时用它。这些端口**直接开**，不跑模组自己的破解程序 —— 那 21 个 exe 的参数语义各异（实测 11 个「参数不足即退出」、多个开的是别人家的端口），没有可通用推断的形式 |
 
 > `allnodes` 与缺省口径的差额实测（同一存档 147 节点）：沿连线广度优先 **7** 个目标，地图全表 **110** 个。
 > 差额是「可以直接敲 IP 连上、但不在连线上」的机器 —— `Programs.connect` 遍历的是
@@ -91,7 +91,7 @@ autohack -h                                     # 帮助
 | `autohack dec [allnodes]` | 解开目标上的 `#DEC_ENC` 加密文件，逐层解到明文，写入玩家 `/home/MemDumps` |
 | `autohack mem [allnodes]` | 查看本机内存转储（紧凑格式，截断显示）、导出到 `/home/MemDumps`、扫描节点上的 `.mem` 并解其内嵌 DEC |
 | `autohack exes` | 把游戏能生成的破解程序全部补进玩家 `/bin`（幂等） |
-| `autohack mods` | 扫描其它插件（workshop mod）注册的自定义 exe 与自定义端口，并把它们的 exe 补进玩家 `/bin`（幂等）。**只提供文件，不参与自动入侵** —— 这些 exe 的参数语义各异（实测 21 个里 11 个有「参数不足即退出」的硬门禁，多个开的是别人的端口），强行自动化会开错端口、刷错误、卡住动画。它列出的端口可以喂给 `autohack run modports=...`（见「模组端口」） |
+| `autohack mods` | 扫描其它插件（workshop mod）注册的自定义 exe 与自定义端口，并把它们的 exe 补进玩家 `/bin`（幂等）。**只提供文件，不参与自动入侵** —— 这些 exe 的参数语义各异（实测 21 个里 11 个有「参数不足即退出」的硬门禁，多个开的是别人的端口），强行自动化会开错端口、刷错误、卡住动画。它列出的端口可以喂给 `autohack run modports=...` |
 | `autohack ports` | 打出**当前节点**（未连接时本机）的端口清单：显示端口、协议名、显示名、**原始端口号**、是否有原生破解程序、是否已破。补的是 `probe` 的缺口 —— 它只打 `端口号 - 显示名`，而 `modports=` 要的是**协议名**（此前只能靠反编译模组才知道）。显示端口与原始端口并排打，是因为 `unbreakable` 随机化过端口号后两者不再相等，而 `openPort` 走的是原始端口。**只读**，不改任何端口状态 |
 | `autohack unbreakable` | 加固玩家自己这台机器（**不可逆**） |
 | `autohack pull` | 把**当前目录**下全部文件下载到本机 `/home/stash`（**一个夹**，不分流）。**注意**：`FileDownload` 类任务的判定不递归子目录（`Folder.containsFileWithData` 只查一级），故 `pull` 拉回的文件**不能**用于过这类任务 —— 要过请手敲 `scp <file>`（落 `/home`） |

@@ -12,7 +12,7 @@
 <Hacknet>/BepInEx/plugins/AutoHack.dll
 ```
 
-> 推荐搭配https://github.com/LDTchara/KernelFix, 使用另有独立插件 **HacknetSaveFix**（修游戏本体存档 NRE，见「架构」）—— 它**单独发版**（[HacknetSaveFix 1.0.0](https://github.com/High-cla/Hacknet-AutoHack/releases/tag/v1.0.0)），取 `HacknetSaveFix.dll` 放进同一个 `plugins/` 目录即可。两者互不依赖，可各自单独安装或卸载。
+> 推荐搭配https://github.com/LDTchara/KernelFix,使用. 另有独立插件 **HacknetSaveFix**（修游戏本体存档 NRE，见「架构」）—— 它**单独发版**（[HacknetSaveFix 1.0.0](https://github.com/High-cla/Hacknet-AutoHack/releases/tag/v1.0.0)），取 `HacknetSaveFix.dll` 放进同一个 `plugins/` 目录即可。两者互不依赖，可各自单独安装或卸载。
 
 ## 使用
 

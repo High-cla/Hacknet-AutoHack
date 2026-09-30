@@ -68,10 +68,36 @@ internal static class PortTools
                      + (port.Cracked ? "  CRACKED" : string.Empty));
         }
 
-        var mod = ports.Count - native;
+        var mods = new List<string>();
+        foreach (var port in ports)
+        {
+            // 判据与 HackEngine.CrackablePorts 逐条对齐，否则会给出**点了没用的**建议：
+            // · 有原生破解程序的端口本来就参与自动入侵，写进 modports= 是多余的
+            //   （白名单只对「原生表里没有」的协议起作用）；
+            // · CodePort <= 0 的端口（ZeroDayToolKit 的 backdoor 缺省就是 0）
+            //   在 CrackablePorts 里被显式排除 —— 端口号 0 开了也匹配不到任何东西。
+            // 去重按协议名：同一协议在一台机器上只出现一次，但防御性挡一下。
+            if (port.CodePort > 0
+                && !HackEngine.HasCrackProgram(port.CodePort)
+                && !mods.Contains(port.Protocol))
+            {
+                mods.Add(port.Protocol);
+            }
+        }
+
         os.write("[autohack] ports: " + ports.Count + " total, " + cracked + " cracked, "
                  + native + " with a crack program"
-                 + (mod > 0 ? ", " + mod + " mod port(s) - add modports=<protocol> to auto-crack them" : string.Empty));
+                 + (mods.Count > 0 ? ", " + mods.Count + " mod port(s)" : string.Empty));
+
+        if (mods.Count > 0)
+        {
+            // 两行，都只是提示文本 —— 本工具不写任何白名单（那是每轮的运行参数，
+            // 不是可持久化的状态；见 ModPortPolicy 的类注释）。
+            // 第一行推荐通配：它是**完整**答案，不会漏掉这台机器上没出现的协议。
+            os.write("[autohack] ports: " + mods.Count + " mod port(s) here -> " + string.Join(",", mods));
+            os.write("[autohack] ports: to auto-crack them all -> modports=*   "
+                     + "(panel: tick 'auto mod ports'; the list above is only what THIS machine has)");
+        }
     }
 
     /// <summary>左对齐补白；超宽不截断 —— 宁可排版跑偏，也不吞掉名字。</summary>

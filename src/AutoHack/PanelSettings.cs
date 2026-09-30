@@ -70,6 +70,7 @@ internal static class PanelSettings
         s.ConnectFirst = Entry("connect_first", s.ConnectFirst).Value;
         s.Disconnect = Entry("disconnect_when_done", s.Disconnect).Value;
         s.SkipOwned = Entry("skip_owned", s.SkipOwned).Value;
+        s.AutoModPorts = Entry("auto_mod_ports", s.AutoModPorts).Value;
         s.AllNodes = Entry("all_nodes", s.AllNodes).Value;
         s.UseCredentials = Entry("use_credentials", s.UseCredentials).Value;
         s.ShowExes = Entry("native_exes", s.ShowExes).Value;
@@ -94,6 +95,7 @@ internal static class PanelSettings
         Entry("connect_first", s.ConnectFirst).Value = s.ConnectFirst;
         Entry("disconnect_when_done", s.Disconnect).Value = s.Disconnect;
         Entry("skip_owned", s.SkipOwned).Value = s.SkipOwned;
+        Entry("auto_mod_ports", s.AutoModPorts).Value = s.AutoModPorts;
         Entry("all_nodes", s.AllNodes).Value = s.AllNodes;
         Entry("use_credentials", s.UseCredentials).Value = s.UseCredentials;
         Entry("native_exes", s.ShowExes).Value = s.ShowExes;

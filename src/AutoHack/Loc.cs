@@ -62,6 +62,7 @@ internal static class Loc
             ["ALL PROGRAMS"] = "全部程序",
             ["MOD PROGRAMS"] = "模组程序",
             ["PORT LIST"] = "端口列表",
+            ["auto mod ports"] = "自动开模组端口",
             ["UNBREAKABLE"] = "不可摧毁",
             ["PULL FILES"] = "拉取文件",
             ["PURGE FILES"] = "清除文件",

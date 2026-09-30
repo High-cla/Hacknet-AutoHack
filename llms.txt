@@ -3,7 +3,7 @@
 > Hacknet 的 BepInEx / Pathfinder 插件：用游戏自身的原生机制一键入侵全网，带控制面板与脚本驱动。
 > 本文件面向要理解或修改本仓库的编码 agent。规范见 https://llmstxt.org
 
-当前 v1.36.0。构建产物直投游戏插件目录，无需手动拷贝：
+当前 v1.37.0。构建产物直投游戏插件目录，无需手动拷贝：
 
 ```
 D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
@@ -751,6 +751,13 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     ⑦ **验证方式**：差分测试镜像新旧谓词，13 个端口样本（原生 / 模组 16 个 / 非法）
     × 2 个 cracked 状态 × 9 组白名单 = **234 用例**：缺省行为逐位不变（0 处不一致）、
     非缺省只增不减（0 处丢原生）、越权新增 0、非正端口被加 0。
+
+    ⑧ **通配 `modports=*`**：允许全部已注册的模组端口。`ModPortPolicy.Allows` 逐个比时先判 `*`，
+    `Unknown` 遇到 `*` 直接短路（不短路就会误报「没有插件注册过名为 '*' 的端口」）。
+    面板 `auto mod ports` 复选框写出的就是这个常量 —— **它不是「记住上次用了哪些协议」**：
+    白名单内容恒为 `*`，由策略对所有已注册协议求值，不枚举、不缓存任何具体名字，
+    故换存档/换扩展/模组装卸都不会让名单漂移。逐个点名仍走命令行 `modports=a,b`。
+    差分验证：12 组白名单 × 10 个协议名 = 120 用例，**丢能力 0、越权新增 0**（不含 `*` 的集合逐位不变）。
 
 48. **端口破够就提权 —— porthack 只看端口总数，不看是哪些端口**（v1.35.1）——
     门禁是 `OS.cs:1916` 的 `num2 > connectedComp.portsNeededForCrack`；Pathfinder 的

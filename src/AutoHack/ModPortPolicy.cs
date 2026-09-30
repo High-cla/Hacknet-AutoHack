@@ -22,10 +22,16 @@ using Pathfinder.Port;
 /// 端口清单不能自动变成「允许开」—— 这些端口是各模组的剧情拼图，提前开等于替玩家跳过解谜。
 ///
 /// <b>手动表只需要回答「允许开哪些协议」</b>，不需要回答「哪台机器有哪个端口」——
-/// 后者由 <c>comp.GetAllPortStates()</c> 直接给出（见 <see cref="HackEngine.Ports"/>）。
+/// 后者由机器的端口表直接给出（见 <see cref="HackEngine.Ports"/>）。
 ///
 /// <b>默认空 = 完全 opt-in。</b>命令行 <c>modports=mqtt,ntp</c> 逐协议累加；不写则一个都不开，
 /// 行为与本特性不存在时逐位相同。
+///
+/// <b>两个「允许」全部」的入口</b>：命令行 <c>modports=*</c>，或面板上的
+/// <c>auto mod ports</c> 复选框（它写出的就是 <c>*</c>）。两者等价 —— 面板只是把它
+/// 变成了一个勾选框，省得玩家去终端里敲。**这一条不是「自动填写」**：白名单内容仍是
+/// 常量 <c>*</c>，由策略在运行时对所有已注册协议求值；它不枚举、不写死任何具体协议名，
+/// 故不会因为「某台机器的端口表里恰好有什么」而漂移。
 ///
 /// <b>类名为什么是 Policy 而不是 Ports。</b><see cref="HackOptions"/> 上那个属性就叫
 /// <c>ModPorts</c>，同名静态类会被实例成员遮蔽 —— 在 <c>HackOptions</c> 的方法里写
@@ -47,6 +53,12 @@ internal static class ModPortPolicy
 {
     /// <summary>命令行前缀，与 <c>script=</c> 同为「带载荷的 token」形态。</summary>
     internal const string Prefix = "modports=";
+
+    /// <summary>
+    /// 通配符：<c>modports=*</c> = 允许**全部**已注册的模组端口，不必逐个点名。
+    /// 面板上那个复选框用的就是它（见 <see cref="HackPanelState.AutoModPorts"/>）。
+    /// </summary>
+    internal const string Wildcard = "*";
 
     /// <summary>载荷分隔符：逗号为主，空格与分号一并收下（玩家手写习惯不一）。</summary>
     private static readonly char[] Separators = [',', ' ', ';', '\t'];
@@ -88,7 +100,32 @@ internal static class ModPortPolicy
 
         foreach (var name in allowed)
         {
-            if (string.Equals(name, protocol, StringComparison.OrdinalIgnoreCase))
+            // 通配符先判：`modports=*` 与 `modports=*,mqtt` 同义，
+            // 不要求玩家在混写时还要遵守某种次序。
+            if (name == Wildcard || string.Equals(name, protocol, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// 这组白名单是否是通配（等价于「全部已注册的模组端口都允许」）。
+    /// 供 <see cref="Unknown"/> 跳过逐名检查 —— <c>*</c> 本身当然不是注册名，
+    /// 不特判就会误报一行「没有任何插件注册过名为 '*' 的端口」。
+    /// </summary>
+    internal static bool IsWildcard(IReadOnlyCollection<string> allowed)
+    {
+        if (allowed == null)
+        {
+            return false;
+        }
+
+        foreach (var name in allowed)
+        {
+            if (name == Wildcard)
             {
                 return true;
             }
@@ -109,7 +146,7 @@ internal static class ModPortPolicy
     internal static IReadOnlyList<string> Unknown(IReadOnlyCollection<string> allowed)
     {
         var missing = new List<string>();
-        if (allowed == null)
+        if (allowed == null || IsWildcard(allowed))
         {
             return missing;
         }

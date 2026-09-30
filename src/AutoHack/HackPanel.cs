@@ -108,6 +108,21 @@ internal sealed class HackPanelState
     internal bool SkipOwned { get; set; } = true;
 
     /// <summary>
+    /// 允许自动入侵去开**全部已注册的模组端口**（缺省**关**），等价于命令行 <c>modports=*</c>。
+    ///
+    /// <b>为什么缺省关。</b>这些端口是各 workshop 模组的剧情拼图 —— 提前开等于替玩家
+    /// 跳过解谜（<c>lunardefender</c> 存在时 PortBackdoor 会被 LunarOS 拦下并报
+    /// 「Execution failed」；<c>moonshine</c> 要 <c>LunarEclipse</c> 跑完才开）。
+    /// 见 <see cref="ModPortPolicy"/>。
+    ///
+    /// <b>这条不是「记住上次用了哪些协议」。</b>它写出的白名单内容是常量 <c>*</c>，
+    /// 由策略在运行时对所有已注册协议求值 —— 不枚举、不缓存任何具体协议名，
+    /// 故勾上之后换存档、换扩展、模组装卸都不会让名单漂移。
+    /// 要逐个点名（比如只开 <c>Redis</c> 不开别的）走命令行 <c>modports=a,b</c>。
+    /// </summary>
+    internal bool AutoModPorts { get; set; } = false;
+
+    /// <summary>
     /// 收尾是否把玩家机换成一个新 IP（缺省**开**）。
     ///
     /// 走游戏原生的「换 IP 保命」动作（ISP 服务器的 `Assign New IP`，见 IpTools）。
@@ -142,6 +157,7 @@ internal sealed class HackPanelState
         bool ConnectFirst,
         bool Disconnect,
         bool SkipOwned,
+        bool AutoModPorts,
         bool AllNodes,
         bool UseCredentials,
         bool ShowExes,
@@ -160,7 +176,7 @@ internal sealed class HackPanelState
     /// <summary>当前设置快照。供 <see cref="HackPanel.Draw"/> 比对是否发生了改动。</summary>
     internal Settings Fingerprint => new(
         Scope, WipeTraces, UploadMarker, ConnectFirst, Disconnect,
-        SkipOwned, AllNodes, UseCredentials, ShowExes, ResetIP, X, Y, Collapsed);
+        SkipOwned, AutoModPorts, AllNodes, UseCredentials, ShowExes, ResetIP, X, Y, Collapsed);
 
     internal HackOptions ToOptions() => new(
         Scope,
@@ -174,9 +190,10 @@ internal sealed class HackPanelState
         UseCredentials,
         ShowExes,
         ResetIP,
-        // 模组端口白名单是命令行专属（modports=a,b）：面板没有文本输入控件，
-        // 为它造一套编辑 UI 的收益不抵复杂度 —— 与 Script 同一取舍（见 HackPanelState.Script）。
-        Array.Empty<string>(),
+        // 模组端口白名单：面板只给「全部开 / 全部不开」两态（见 HackPanelState.AutoModPorts）。
+        // 逐个点名（modports=Redis,mqtt）仍是命令行专属 —— 那需要一套文本输入 UI，
+        // 收益不抵复杂度（与 Script 同一取舍，见 HackPanelState.Script）。
+        AutoModPorts ? new[] { ModPortPolicy.Wildcard } : Array.Empty<string>(),
         Script);
 }
 
@@ -417,7 +434,10 @@ internal static partial class HackPanel
         y += SegmentHeight + Gap;
     }
 
-    /// <summary>5 行复选框：凭据 / 全网 / 跳过肉鸡 / 清痕 / 先连接 / 断开 / 标记 / 演出 / 换 IP。</summary>
+    /// <summary>
+    /// 5 行复选框：凭据 / 全网 / 跳过肉鸡 / 清痕 / 先连接 / 断开 / 标记 / 演出 / 换 IP / 模组端口。
+    /// 每行两个，右列在最后一行留空。
+    /// </summary>
     private static void DrawCheckboxes(HackPanelState state, int left, ref int y, Palette c)
     {
         state.UseCredentials = Check(state.IdBase + 16, left, y, ColumnWidth, state.UseCredentials, Loc.T("use known creds"), c);
@@ -441,10 +461,12 @@ internal static partial class HackPanel
         y += CheckRowHeight;
 
         state.ResetIP = Check(state.IdBase + 25, left, y, ColumnWidth, state.ResetIP, Loc.T("new IP after run"), c);
+        state.AutoModPorts = Check(state.IdBase + 26, left + ColumnWidth + 8, y, ColumnWidth, state.AutoModPorts, Loc.T("auto mod ports"), c);
         y += CheckRowHeight;
 
-        // 这里曾有第六行（force escalate 复选框，IdBase + 26），v1.33.2 起常驻 ——
-        // 那个开关缺省就是开，留着等于给唯一出路配了个自毁按钮。
+        // 这里曾有「force escalate」复选框（旧 IdBase + 26），v1.33.2 起常驻 ——
+        // 那个开关缺省就是开，留着等于给唯一出路配了个自毁按钮；
+        // 该偏移现由 auto mod ports 复用（旧的 26 从此有了新主人）。
         // 同一版还并掉了「wipe target logs」与「wipe my logs」两个复选框：
         // 它们现在是同一个口径（只删含玩家 IP 的日志条目）下的一个开关。
     }

@@ -95,12 +95,21 @@ internal sealed partial class HackRun
         // 与「脚本坏了」两种情况混在一起。
         _script = string.IsNullOrEmpty(options.Script) ? null : HackScript.Load(options.Script);
 
-        // 先揭图，再解析目标 —— 用户定的次序（「先扫描，后入侵」）。
+        // 只有「全网扫描 + whole map」需要揭图：ConnectableComputers 只收集、
+        // 不 discoverNode，不揭就是「地图全开跑完一台都不亮」。
         //
-        // 只改「地图上看得见什么」，不改目标池：ReachableComputers 的池是沿 links
-        // 的传递闭包，揭图不改变闭包；ConnectableComputers 的池是地图全表，
-        // 与 visibleNodes 无关。故这一步是纯粹的观感前置，零语义风险。
-        HackEngine.RevealMap(os, options.AllNodes);
+        // 单节点（CURRENT NODE / here）与显式点名（ids=…）刻意不揭（v1.39.0，用户定）：
+        // 它们的池取自 ConnectedPool / 点名表，与 visibleNodes 无关 —— 只打这一台，
+        // 却在图上点亮整片连通分量（勾了 whole map 更是点亮全图）。
+        // Network 非 allnodes 同理不揭：ReachableComputers 的 BFS 自己就逐节点
+        // discoverNode（见 Closure→Expand），这里再揭一遍是重复遍历。
+        //
+        // 标记走原生 NetworkMap.discoverNode（NetworkMap.cs:415-423），
+        // 与游戏自身的「已发现」同源，不做自绘的伪发现。
+        if (options.Scope == HackScope.Network && options.AllNodes)
+        {
+            HackEngine.RevealWholeMap(os);
+        }
 
         var plan = HackEngine.ResolveTargets(os, options);
         _targets = plan.Targets;

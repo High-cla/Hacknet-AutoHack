@@ -3,7 +3,7 @@
 > Hacknet 的 BepInEx / Pathfinder 插件：用游戏自身的原生机制一键入侵全网，带控制面板与脚本驱动。
 > 本文件面向要理解或修改本仓库的编码 agent。规范见 https://llmstxt.org
 
-当前 v1.38.0。构建产物直投游戏插件目录，无需手动拷贝：
+当前 v1.39.0。构建产物直投游戏插件目录，无需手动拷贝：
 
 ```
 D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
@@ -703,12 +703,19 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     整轮只剩三道闸门：单帧步数预算 512、**端口步每帧一步（与演出开关无关）**、
     提权前的动画等待（**仅演出开着**，上限 180s）。实测同一存档 5.2 min → 约 11 秒。
 
-    ④ **另一处**：`HackRun` 构造期先调
-    `HackEngine.RevealMap(os, options.AllNodes)` 再 `ResolveTargets` —— 用户定的
-    「先扫描后入侵」。**揭图不改目标池**：Network 口径的池是沿 `links` 的传递闭包
-    （揭图不增不减闭包），allnodes 口径的池是地图全表（与 `visibleNodes` 无关）。
-    它补的是 `ConnectableComputers` 只收集不 `discoverNode` 的缺口 —— 此前
-    「地图全开」跑完地图一台都不亮。
+    ④ **揭图只在「全网扫描 + `allnodes`」发生**（v1.39.0 收窄，用户定）：
+    `HackRun` 构造期 `if (options.Scope == HackScope.Network && options.AllNodes)`
+    才调 `HackEngine.RevealWholeMap(os)`，随后 `ResolveTargets`。
+    **揭图不改目标池**（Network 池是 `links` 传递闭包、allnodes 池是地图全表，
+    都不读 `visibleNodes`），它补的是 `ConnectableComputers` 只收集不
+    `discoverNode` 的缺口 —— 不揭就是「地图全开跑完地图一台都不亮」。
+
+    **单节点（`CURRENT NODE` / `here`）与显式点名（`ids=…`）刻意不揭**：
+    它们的池取自 `ConnectedPool(os.connectedComp)` / 点名表，与 `visibleNodes` 无关，
+    旧行为是「只打这一台、却在图上点亮整片连通分量」（勾了 `whole map` 更是点亮全图）。
+    `Network` 非 `allnodes` 同理不揭 —— `ReachableComputers` 的 BFS 自己就逐节点
+    `discoverNode`（`Closure`→`Expand`），先前那次是重复遍历。
+    随之删掉 `HackEngine.RevealMap(os, bool allNodes)`（原本一个转发层，收窄后无调用者）。
 
     **（曾试过在 `noshow` 下压掉每台的 `probe` 端口报告，已撤销。）** 那是把
     「不要动画」误读成「不要输出」—— 演出开关管的是原生破解程序要不要挂进 RAM 面板，

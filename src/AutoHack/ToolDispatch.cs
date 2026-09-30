@@ -34,7 +34,7 @@ internal static class ToolDispatch
     /// <summary>help 文本来源：子命令与其说明只写一次，命令入口与文档都读这里。</summary>
     internal static readonly (string Verb, string Help)[] Help =
     {
-        (Scan, "reveal the whole network component around the current node"),
+        (Scan, "scan [allnodes]  reveal the component around the current node - or the whole map"),
         (Dec, "dec [allnodes]  decrypt every #DEC_ENC file into /home/MemDumps"),
         (Mem, "mem [allnodes]  show + export this machine's memory, scan for dumps"),
         (Exes, "fill /bin with every crack program the game can produce"),
@@ -136,7 +136,7 @@ internal static class ToolDispatch
         switch (verb)
         {
             case Scan:
-                ScanTools.Run(os);
+                ScanTools.Run(os, allNodes);
                 break;
 
             case Dec:

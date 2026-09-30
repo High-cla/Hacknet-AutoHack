@@ -51,7 +51,8 @@ using Pathfinder.Port;
 /// （贪心升序装箱 190+208+210 = 608，再加 242 就超 761）。
 /// 实测 167 台 / 642 可破端口：峰值 RAM 760/761、642 端口全开、0 超时、0 丢弃。
 /// 超出 <see cref="MaxQueued"/> 的新请求丢弃：演出是可丢的装饰，端口由调用方补开
-/// （<see cref="Show"/> 返回 false）。
+/// （<see cref="Show"/> 返回 false）；而被挤出队尾的旧项由本类就地补开 + 回显
+/// （见 <see cref="Show"/> 内的裁剪分支与 <see cref="ClearQueueEntry"/>）。
 ///
 /// <b>演出会点燃追踪。</b>9 个白名单 exe 里有 8 个调 <c>hostileActionTaken()</c>
 /// （3 个在构造函数、5 个在 <c>LoadContent</c>），目标 <c>traceTime &gt; 0</c> 时即
@@ -127,9 +128,12 @@ internal static class NativeExes
     /// <param name="Target">这个动画要打在谁身上。截断时按它补开端口用 ——
     /// 不能反查 <c>os.connectedComp</c>，那时早已换台（见 <see cref="Show"/>）。</param>
     /// <param name="Port">这个动画负责开的那个端口。补开与等待判据都用它。</param>
+    /// <param name="Echo">这个动画<b>真正挂上 RAM 面板</b>那一帧要回显的那行命令
+    /// （见 <see cref="Tick"/>）。缺省口径下终端与画面一一对应：没排上演出、被丢弃、
+    /// 队列满被挤掉的情形都不回显它，由调用方在补开端口时回显（见 <see cref="Show"/>）。</param>
     private readonly record struct Pending(
         ExeModule Exe, string ExeName, int RamCost, Life Life, float Tiebreak,
-        Computer Target, PortInfo Port);
+        Computer Target, PortInfo Port, Action Echo);
 
     /// <summary>
     /// 一个<b>已经挂上面板</b>的动画。与 <see cref="Pending"/> 同构，只是少了调度字段 ——
@@ -289,6 +293,31 @@ internal static class NativeExes
         => p.RamCost / RamTierMb * SecondTierCount + (int)(p.Life.TotalSeconds / SecondTierSec);
 
     /// <summary>
+    /// 给一个<b>从队列里清掉、再也不会播出</b>的动画清账：补开它负责的端口，并回显它那行命令。
+    ///
+    /// <para><b>排队项与已挂上面板的项必须分开处理。</b>面板上那些已经过了
+    /// <see cref="Tick"/> 的 <c>addExe</c>，命令早在挂载那一帧回显过（见 <see cref="Tick"/>），
+    /// 谁再调一次 <c>Echo</c> 就是重复行。本方法只管队列侧的清账。</para>
+    ///
+    /// <para><b>为什么回显也在这里。</b>命令的归属是「这个动画有没有播出」—— 排过队却
+    /// 再也不会播（整轮收尾截断、队列满被挤出）的，其命令与端口一样都不能丢，
+    /// 故两者在同一处结清，见 <see cref="Show"/> 的返回契约。</para>
+    /// </summary>
+    /// <returns>本次是否真的补开了端口（<see cref="Flush"/> 用它计数）。</returns>
+    private static bool ClearQueueEntry(OS os, Pending pending)
+    {
+        var opened = false;
+        if (!IsOpen(pending.Target, pending.Port))
+        {
+            HackEngine.OpenPort(pending.Target, pending.Port, os.thisComputer?.ip);
+            opened = true;
+        }
+
+        pending.Echo?.Invoke();
+        return opened;
+    }
+
+    /// <summary>
     /// 为一次端口破解排一个原生动画。<paramref name="target"/> 必须正是当前连接目标 ——
     /// 否则动画会打在本机上（见类注释约束 1）。未连接、无对应程序、程序不在白名单时静默跳过；
     /// 目标已提权时也跳过（见方法内）；队列满时只有排序键比队尾更小才挤进来。
@@ -298,7 +327,12 @@ internal static class NativeExes
     /// 与 <see cref="HackEngine.OpenPort"/> 落在同一个 <c>PortState.Cracked</c> 上，
     /// 见类注释）。故调用方只需要知道一件事：<b>这次有没有动画可等</b>。
     ///
-    /// 返回 <c>false</c> 的每一种情形，调用方都必须立即补开端口，否则它永远不开：
+    /// <b>命令回显由本方法代理。</b><paramref name="echo"/> 是「这个动画要回显的那行终端命令」，
+    /// 由本类在实例真正 <c>addExe</c> 的那一帧调用（见 <see cref="Tick"/>）—— 调用方传进来的
+    /// 那一刻<b>不回显</b>。这样终端上那行破解命令与画面上的动画严格一一对应。
+    ///
+    /// 返回 <c>false</c> 的每一种情形，调用方都必须立即<b>回显该行命令并补开端口</b>：
+    /// 端口不补则永远不开，命令不补则终端与战果对不上。
     /// <list type="bullet">
     /// <item>未连接目标 —— 动画会打在本机上（类注释约束 1），不能演，但端口该开；</item>
     /// <item>目标已控 —— 不排演出，但 redo 模式下端口照样要开；</item>
@@ -307,7 +341,7 @@ internal static class NativeExes
     ///   <c>Completed()</c> 永不执行，端口就此丢失。</item>
     /// </list>
     /// </summary>
-    internal static bool Show(OS os, Computer target, PortInfo port)
+    internal static bool Show(OS os, Computer target, PortInfo port, Action echo)
     {
         if (os == null || target == null || !ReferenceEquals(os.connectedComp, target))
         {
@@ -347,15 +381,19 @@ internal static class NativeExes
             return false;
         }
 
-        var pending = new Pending(exe, exeName, exe.ramCost, life, (float)Utils.random.NextDouble(), target, port);
+        var pending = new Pending(exe, exeName, exe.ramCost, life, (float)Utils.random.NextDouble(), target, port, echo);
 
         if (Queue.Count >= MaxQueued)
         {
             // 队列满：只有排序键比队尾（键最大的那个）更小才挤得进来，否则丢弃新来的。
             // 这样队列始终装着「键最小的 MaxQueued 个」，而不是先到先得 —— 与
             // 「没出现过的优先、同次数时内存小时间短优先」同一套取舍。
-            // 被挤掉的实例只是不再演出：它从未 addExe，不会开端口、不影响战果
-            // （构造期点火的那三个 exe 的 hostileActionTaken 已经触发过，与旧实现一致，
+            // 两条子路径的善后不同：
+            // · 走到下面 return false 的**新请求**自己不演出 —— 它从未 addExe，
+            //   端口与命令都由调用方立即补上（Show 的返回契约）；
+            // · 被挤出队尾的**老项**由本类就地结清（见 ClearQueueEntry）——
+            //   原实现把它从队列拿掉就走，端口与命令双双丢失。
+            // 两者构造期点火的那三个 exe 的 hostileActionTaken 都已经触发过（与旧实现一致，
             // 且泵每帧都会把它扑掉 —— 见 KillTrace）。
             if (Compare(pending, Queue[Queue.Count - 1]) >= 0)
             {
@@ -363,7 +401,14 @@ internal static class NativeExes
                 return false;
             }
 
+            // 被挤出的是**已经在队列里的老项**，它同样从未 addExe —— Completed() 永不执行，
+            // 端口会永久丢失。原实现把它从队列拿掉就走，是 Flush 那条契约
+            // （凡丢弃必补开）的漏网之鱼；回显同理（用户定：命令跟随动画）。
+            // 实测规模下队深从未触顶（峰值 3 个同屏、总入队远小于 32），故这是潜在缺陷而非现症。
+            var evicted = Queue[Queue.Count - 1];
             Queue.RemoveAt(Queue.Count - 1);
+            Trace.Write("show " + evicted.ExeName + " evicted for " + pending.ExeName + ": queue full (" + MaxQueued + ")");
+            ClearQueueEntry(os, evicted);
         }
 
         Queue.Add(pending);
@@ -467,6 +512,12 @@ internal static class NativeExes
             // 留到预算释放后再挂，不是丢弃。
             os.addExe(head.Exe);
 
+            // 命令回显挂在这里，而不是入队那一刻（用户定）：终端那行破解命令与画面严格
+            // 一一对应 —— 只有真的挂上 RAM 面板、真的会播出动画的这一次才回显它。
+            // 入队后被挤掉、被丢弃、因预算不足始终没挂上的，Show 返回 false，
+            // 由调用方在补开端口时回显该行（见 Show 的返回契约）。
+            head.Echo?.Invoke();
+
             // 登记归属：停播时要按实例精确摘出来（见 Live）。
             Live.Add(new Running(head.Exe, head.Target, head.Port));
 
@@ -553,7 +604,9 @@ internal static class NativeExes
     /// <item><b>整轮收尾</b>（<see cref="StopAll"/>）：清队列 + 置 <c>isExiting</c>，
     ///   <c>ExeModule.Update</c> 在 <c>fade &lt;= 0</c> 时置 <c>needsRemoval</c>，
     ///   之后 <c>OS.Update</c> 摘除它、<c>Update</c> 不再被调 —— 端口永不开。</item>
-    /// <item><b>队列满被丢弃</b>：那个实例从未 <c>addExe</c>，也就永远不 <c>Update</c>。</item>
+    /// <item><b>队列满被丢弃 / 被挤出</b>：那个实例从未 <c>addExe</c>，也就永远不 <c>Update</c>。
+    ///   新请求那条由调用方补（<see cref="Show"/> 返回 false），被挤出的老项由
+    ///   <see cref="Show"/> 自己就地结清 —— 两条都不必等 <c>Flush</c>。</item>
     /// <item><b>换 OS</b>（<see cref="Reset"/>）：连同 <c>os.exes</c> 一起丢弃。</item>
     /// </list>
     /// 不补就是<b>丢战果</b>：终端上端口看起来破了，实际 <c>PortState.Cracked</c> 仍是假。
@@ -583,9 +636,8 @@ internal static class NativeExes
             }
 
             Queue.RemoveAt(i);
-            if (!IsOpen(pending.Target, pending.Port))
+            if (ClearQueueEntry(os, pending))
             {
-                HackEngine.OpenPort(pending.Target, pending.Port, ip);
                 opened++;
             }
         }
@@ -665,9 +717,10 @@ internal static class NativeExes
     ///
     /// <b>不淡出 <see cref="Live"/> 里的实例</b>：换 OS 意味着那些 exe 连同旧 OS 的
     /// <c>exes</c> 列表一起被丢弃，去碰它们没有意义。只清列表本身。</summary>
-    /// <b>刻意不补开端口。</b>换 OS 时队列里排的是<b>旧 OS</b> 的机器，而此刻能拿到的
-    /// 只有新 OS 的玩家 IP —— 拿它去开旧机器的端口是错的。而旧 OS 已经整个被丢弃
-    /// （回主菜单再进档），那些端口开不开都不再有意义。
+    /// <b>刻意不补开端口，也不回显。</b>换 OS 时队列里排的是<b>旧 OS</b> 的机器，而此刻
+    /// 能拿到的只有新 OS 的玩家 IP —— 拿它去开旧机器的端口是错的；回显同理，
+    /// 旧 OS 的终端已经不存在了。而旧 OS 已经整个被丢弃（回主菜单再进档），
+    /// 那些端口开不开都不再有意义。故这里<b>不</b>走 <see cref="ClearQueueEntry"/>。
     internal static void Reset()
     {
         Queue.Clear();

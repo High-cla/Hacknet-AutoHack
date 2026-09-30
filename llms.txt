@@ -3,7 +3,7 @@
 > Hacknet 的 BepInEx / Pathfinder 插件：用游戏自身的原生机制一键入侵全网，带控制面板与脚本驱动。
 > 本文件面向要理解或修改本仓库的编码 agent。规范见 https://llmstxt.org
 
-当前 v1.37.0。构建产物直投游戏插件目录，无需手动拷贝：
+当前 v1.38.0。构建产物直投游戏插件目录，无需手动拷贝：
 
 ```
 D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
@@ -21,7 +21,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    **绝不下载 Release 附件回来比对** —— 需要确认部署新鲜度时只看构建输出目录那份。
 3. **`gh release create` 绝不自动执行** —— 等用户显式发令。`git push` 可以直接做。
 
-**五十条最容易踩的坑 / 最该知道的机制**（都带行号，可直接 grep）
+**五十一条最容易踩的坑 / 最该知道的机制**（都带行号，可直接 grep）
 
 1. `Computer.portsOpen` 恒为 0 —— Pathfinder 用 Harmony Prefix 接管 `openPort`/`openPorts`
    并 `return false`，状态改存 `PortState.Cracked`。任何读 `portsOpen` 的判断都是错的，
@@ -80,7 +80,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    `ClearOwnLogs` `wipe my logs`，两者缺省都是关），口径从「清空对方 /log」收窄为
    「删自己的痕迹」—— 口径一变缺省跟着翻：旧实现默认关是对的（清空整目录属越权），
    新实现默认关是错的（留下 `FileCopied`/`FileDeleted` 条目会让带 `tracker="true"` 的机器
-   在断开时自动排一次追踪，见坑 28）。
+   在断开时自动排一次追踪，见坑 29）。
    这个口径恰好与游戏的追踪判据同构（`TrackerCompleteSequence.cs:41` 扫的就是
    「含玩家 IP 且含 `FileCopied`/`FileDeleted`/`FileMoved`」），故它**既不误伤对方历史，
    又刚好让追踪判据失配**。实测存档 167 台 / 656 条日志：新口径删 592 条（90.24%）、
@@ -157,12 +157,12 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     一行 `"External Computer Refused Connection"` 再把 `os.connectedComp` 置 null（`Programs.cs:313-322`）——
     **两者都不返回值**。故必须自己核对 `ReferenceEquals(os.connectedComp, target)`。
     同族的 `Programs.rm`/`probe` 也无返回值（`rm` 还带 `Thread.Sleep`，见坑 2）：调这一族就必须自己核对状态。
-    **但被拒 ≠ 拿不下**（见坑 30）：白名单只拦 `connect`，其余动作仍直接操作 `target` 对象。
+    **但被拒 ≠ 拿不下**（见坑 31）：白名单只拦 `connect`，其余动作仍直接操作 `target` 对象。
     mod 现在只跳过依赖连接的步骤（`Connect`/`CleanLogs`/`Disconnect`，见 `HackRun.DependsOnConnection`），
     并排一步 `BypassWhitelist` 把玩家 IP 追加进目标白名单后重连。
     **「当前节点」（`here`）遇白名单会池空**：池取自 `os.connectedComp`，而被拒时该字段被置 null
     （`Programs.cs:321`）—— 目标既没连上、也不进任何列表。故 `HackEngine.ConnectedPool` 在此情形下
-    回落到「刚被拒的那台」（见坑 31）。
+    回落到「刚被拒的那台」（见坑 32）。
 
 20. **`tracker="true"` 的机器断线即自动追踪，留痕 = 自杀** —— `OS.handleDisconnection`
     （`OS.cs:944-960`）在断开时检查目标 `/log`：只要有一行同时含玩家 IP 与
@@ -179,7 +179,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     它的定位算法（`OS.cs:1898-1903`，`ram.bounds.Y + contentStartOffset` 再逐个加
     `exes[i].bounds.Height`）**只在面板为空时正确**，而演出队列恰恰是「已挂着一个、再挂下一个」
     的场景，算出来的 Y 会叠在上一个 exe 身上。addExe 不碰位置，交给 `OS.Update`
-    的布局循环（`OS.cs:840-851`）统一排才是权威。详见坑 38。
+    的布局循环（`OS.cs:840-851`）统一排才是权威。详见坑 39。
 
 22. **`Computer.links` 是**有向图**，且原生 `scan` 的三处行为都不该抄** ——
     `<link target=X>`（`ComputerLoader.cs:344-356`）与 `<dlink target=X>`（`:357-373`）
@@ -206,6 +206,12 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     并集」。同一存档实测 —— 玩家机未连接、自身分量只有 1 台，多源给出 57 台，
     多出的 56 台横跨另外 100 多个互不相连的分量。表现为「扫描把没连到当前节点的
     服务器也标出来了」。**回显自称 "this component" 的功能，就必须用单源。**
+
+    - `RevealWholeMap(os)`：**地图全表**，逐个 `map.nodes` 调原生 `discoverNode`，
+    与连线无关、也不要求已连接。这是 `autohack run allnodes` 的「先揭图后入侵」与
+    `autohack scan allnodes` 共用的那一份实现（两处曾各写一遍，现各自调用它）。
+    与 `ConnectableComputers`（同为 allnodes 口径，但给的是**目标池**）刻意互不调用：
+    目标池要排除玩家机与 disabled，揭示要连玩家机一起点亮。
 
     附带警告：存档写到 **2000000 字节**即截断、XML 没收尾（`RemoteSaveStorage.cs:31`），
     拿存档做图分析前先确认没被截断。独立印证：`docs/EXTENSIONS.md` §4.2 的官方占位符表
@@ -267,13 +273,28 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     同名误诊：v1.31.0 曾归因于「动词区分大小写」——大小写是另一个真问题
     （`Canonical` 归一时 **`Handles` 与 `Dispatch` 必须用同一个值**），
     两者叠成了同一个症状「全都开面板」。
-27. **`CrashModule.BOOT_TIME` 是 static 字段，值在静态初始化器里固化**
+27. **命令回显与原生演出挂钩：回显归动画队列代理，不由调用方提前写**（用户定）。
+    此前 `ApplyOpenPort` 是**无条件**先 `Echo` 再 `NativeExes.Show` —— 于是被丢弃的动画
+    （无对应程序 / 目标已控 / 队列满被挤掉）其命令照样已经打出，终端与画面脱钩。
+    现在 Show 多收一个 `Action echo`，命令存在 `Pending` 里，
+    **在 `Tick` 真正 `os.addExe` 那一帧才调**；Show 返回 false 的每一条路都由调用方
+    `Echo` + 补开端口。故「终端出现某行 `sshcrack 22`」与「画面上开始跑那个动画」严格一一对应。
+    连带修：`Tick` 里 `Queue[0].RamCost > os.ramAvaliable` 时不动队首（留待预算释放再挂），
+    此时既不回显也不补开 —— 它没被丢弃，只是还没轮到，回显会在它真挂上时补上。
+    顺带补了一处**同族漏网**：队列满时「被挤出队尾的旧项」原实现只从队列拿掉、
+    不补开端口也不回显 —— 它同样从未 `addExe`，`Completed()` 永不执行，端口会永久丢失。
+    现抽 `ClearQueueEntry`（补开 + 回显同一处结清），`Flush` 的队列段与挤出分支共用它。
+    实测规模下队深从未触顶，故这是潜在缺陷而非现症。
+    教训：把「回显」当成调用方的职责时，要问一句**这件事真的发生了吗** ——
+    端口那条路早已改由动画自己开（v1.33.3），回显却慢了半拍仍是提前写。
+
+28. **`CrashModule.BOOT_TIME` 是 static 字段，值在静态初始化器里固化**
     （`CrashModule.cs:15`）—— 之后再改 `Settings.FastBootText` **无效**（且该设置根本不落
     `Settings.txt`），只能覆写字段本身。`bootTextDelay` 是实例字段、只在 `LoadContent()`
     （`:78`）算一次，那一刻读到的已是新值，**不要手动重算**：`reset()`（`:319-331`）
     不重算它，手动补的那份重启后失效。
 
-28. **收尾清追踪是恒定动作，且不擦追踪者 /log** —— 每轮 `autohack run` 的
+29. **收尾清追踪是恒定动作，且不擦追踪者 /log** —— 每轮 `autohack run` 的
     `HackRun.Finish` 无条件调 `TraceTools.Run`：止 `traceTracker` 倒计时、清
     `TrackersInProgress` 列表，**但不碰对方 /log**。整个删掉对方 /log 属于改写对方状态，
     反追踪不顺手替玩家做。
@@ -284,7 +305,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     （`ResetIP` 等），且脚本模式可能不排清痕步。
     顺序约定：`Finish` 里清追踪排在换 IP 之前 —— 先收拾追踪、再换身份。
 
-29. **换 IP 会清空全部肉鸡标记，必须同步迁移** —— 提权时游戏把玩家当时的 IP 写进目标机
+30. **换 IP 会清空全部肉鸡标记，必须同步迁移** —— 提权时游戏把玩家当时的 IP 写进目标机
     （`Computer.cs:740 adminIP = ipFrom`），判据是 `adminIP == os.thisComputer.ip`
     （`Computer.PlayerHasAdminPermissions`，`Computer.cs:1670`；mod 侧同一判据见
     `HackEngine.IsOwned`）。游戏原生的换 IP 入口是 ISP 服务器的 `Assign New IP`
@@ -306,7 +327,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     重建是安全的 —— 它 Clear 后从节点表全量重灌，而 Pathfinder 往表里加过的机器
     （`ContentLoader` 的 eos 设备，`:968`）同时也入了节点表（`:837`）。
 
-30. **白名单机器能绕过，别整段跳过** —— 白名单只拦 `connect`；破端口 / 提权 / 投放 / 改它的文件
+31. **白名单机器能绕过，别整段跳过** —— 白名单只拦 `connect`；破端口 / 提权 / 投放 / 改它的文件
     全部直接操作 `target` 对象，**都不经连接**（实证：`Pathfinder` 的 `openPort` 直接写
     `PortState.Cracked`，`ComputerExtensions.cs:169-180`；`giveAdmin` 直接写 `adminIP`，
     `Computer.cs:738-749`；`deleteFile` 门禁判 `ipFrom.Equals(adminIP)`，`Computer.cs:508-518`）。
@@ -325,7 +346,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     未连接时敲同一条命令得到的是另一个效果（`Programs.probe` 的目标是
     `os.connectedComp ?? os.thisComputer`，`Programs.cs:1387`）。
 
-31. **别用 `os.display.commandArgs` 反推「刚连过哪台」—— 白名单会把它抹掉** —— 想从
+32. **别用 `os.display.commandArgs` 反推「刚连过哪台」—— 白名单会把它抹掉** —— 想从
     「玩家点了哪个节点」反推被拒目标时，这是最直觉的候选（`Programs.connect` 无条件写
     `commandArgs = ["connect", ip]`，`Programs.cs:270`；而 `autohack` 是 Pathfinder 自定义命令，
     被 `CommandExecuteEvent` 拦在 `ProgramRunner.ExecuteProgram` 入口，那处覆盖不执行）。
@@ -340,7 +361,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     `Computer.connect`（:386）与 `navigatedTo`（:73）两条拒绝路径都走到。
     查询时用游戏自己的 `IPCanPassWhitelist` 现算失效，绕过成功后记录自动作废。
 
-32. **`Pathfinder.Options` 只有 UI 层，持久化得自己接 `ConfigFile`** —— 千万别把
+33. **`Pathfinder.Options` 只有 UI 层，持久化得自己接 `ConfigFile`** —— 千万别把
     框架的 `OptionCheckbox` 当成「选项页 + 落盘通道」：它的 `Value` 只是个内存
     `bool` 字段（`Pathfinder.Options/OptionCheckbox.cs:11`），框架里**没有任何**把
     Option 值写成文件的代码。落盘是**调用方**自己做的 —— 看框架自己的实现就很清楚
@@ -357,7 +378,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     mod 侧的落地见 `PanelSettings.cs`；落盘触发点用 `HackPanelState.Settings` 快照
     比对（`record struct`，新增字段自动进比较），不逐个控件埋保存调用。
 
-33. **`replace` 大小写敏感且失败静默，任务会因此永远不判完成** ——
+34. **`replace` 大小写敏感且失败静默，任务会因此永远不判完成** ——
     `Programs.replace2`（Programs.cs:795）用 `fileEntry.data.Replace(old, new)` 改文件，
     而 `string.Replace` 是 **Ordinal**（区分大小写）；找不到目标串时**静默空操作** ——
     不报错、不回显、文件一字未动。玩家看到的是「命令敲了、也有回显，但什么都没变」。
@@ -372,15 +393,15 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     没变就回显「大小写不匹配，原文里其实是 X」。**只加回显，不改替换语义** ——
     大小写敏感是原生行为，改成不敏感会波及其他任务。
 
-34. **换 IP 会打断要求「IP 不变」的任务链** —— `new IP after run` 缺省已在 v1.32.6
+35. **换 IP 会打断要求「IP 不变」的任务链** —— `new IP after run` 缺省已在 v1.32.6
     翻转为**关**，原因就是这条：lelzSec 的 `MessageBoardIntro.xml` 邮件明写
     「Your IP's been whitelisted (**so dont go changing it for now**)」，
     白名单（`/Whitelist/list.txt`）记的是**当时的玩家 IP**，换掉即失效，
     表现为「按提示去连却进不去」，而玩家几乎不可能把两件事联系起来。
-    换 IP 本身是好的保命机制（见坑 29），要每轮自动换就显式开 `newip` 或勾复选框；
+    换 IP 本身是好的保命机制（见坑 30），要每轮自动换就显式开 `newip` 或勾复选框；
     只换这一次用面板 `NEW IP` 按钮或 `autohack ip`（两者同一实现）。
 
-35. **任务判定面审计：17 种 goal 里，mod 会碰到其中 3 种** —— 逐个读
+36. **任务判定面审计：17 种 goal 里，mod 会碰到其中 3 种** —— 逐个读
     `Hacknet.Mission/*.cs` 的 `isComplete` 得到下表。**判据几乎都是「纯读某个状态」**，
     所以 mod 只要不去动那个状态，就不会破坏它；风险集中在「文件类」三种。
 
@@ -389,7 +410,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     | `FileDownload` | `root.folders[i].containsFileWithData(data)` | **pull 的落点够不着**（见下） |
     | `clearfolder` | `container.files.Count == 0` | purge 能完成它，但必须站对目录 |
     | `FileDeletion` / `FileChange` | 文件消失 / 内容含关键字 | 只有删到 / 改到任务目标才有影响 |
-    | `getAdmin` | `target.adminIP == os.thisComputer.ip` | 换 IP 会**打断**（见坑 34） |
+    | `getAdmin` | `target.adminIP == os.thisComputer.ip` | 换 IP 会**打断**（见坑 35） |
     | `getString` / `getAdminPasswordString` | 终端历史 `additionalDetails` 含关键字 | 不影响 |
     | `FileUpload` / `SendEmail` / `Delay` / `CheckFlagSet` / `AddDegree` / `WipeDegrees` / `DeathRow*` / `DatabaseEntryChange` | 各自的状态 | 不影响 |
 
@@ -413,16 +434,16 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     先 `cd` 对再敲。
 
     **③ `x-server.sys` 是双重身份。** 3 处任务要求删除它（ThemeHackNaixBranch、
-    DemoMission04、HA_PlayerMission），而它是**玩家自己机器的主题文件**（坑 27 / CrashModule.cs:285-288）。
+    DemoMission04、HA_PlayerMission），而它是**玩家自己机器的主题文件**（坑 28 / CrashModule.cs:285-288）。
     在 `sys` 目录敲 purge 会把 `x-server.sys` 连同 `os-config.sys`、`bootcfg.dll` 一起清掉。
 
-36. **端口「破解状态」不进存档；`unbreakable` 只换端口号、不把端口打开** —— Pathfinder 存端口
+37. **端口「破解状态」不进存档；`unbreakable` 只换端口号、不把端口打开** —— Pathfinder 存端口
     只写 `Original`/`Number`/`Display` 三个字段（SaveWriter.cs:184），读回时用
     `CreateState(..., cracked:false)`（SaveLoader.cs:384），所以**读档后端口必然是未破解**。
     运行时看到的 `: OPEN` 只活在内存里，读档即复原。`unbreakable` 因此只改 `PortState.PortNumber`
     （显示端口号，49152-65535 随机、互不重复），不碰 `Cracked` —— 加固不是「把 15 个端口全开」。
 
-37. **门槛剔除已删；已控剔除保留但只对全网扫描生效** —— `HackEngine.ResolveTargets`
+38. **门槛剔除已删；已控剔除保留但只对全网扫描生效** —— `HackEngine.ResolveTargets`
     现在两道过滤，实测存档 167 台：
 
     | 口径 | 目标池 | 说明 |
@@ -455,7 +476,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
       门禁不过时终端写一行
       `escalation gate not met (needs > N open port(s), have M) - forced admin anyway`。
 
-38. **演出动画的并发数由 RAM 决定，不是 1；且存活时长要算上淡出** —— 单 exe 占 190~400mb
+39. **演出动画的并发数由 RAM 决定，不是 1；且存活时长要算上淡出** —— 单 exe 占 190~400mb
     （PacificPortExe 190 / HTTPExploitExe 208 / FTPBounceExe 210 / SSHCrackExe 242 /
     SQLExploitExe 350 / SMTPoverflowExe 356 / TorrentPortExe 360 / RTSPPortExe 360 /
     MedicalPortExe 400），而 `totalRam = 800 - (21 + 2) - 16 = 761`（`OS.cs:74`，
@@ -494,7 +515,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     另：exe 必须在**入队时**构造，不能推迟到播放 —— 其 `targetIP` 在构造时定成当前连接目标
     （坑 21），队列跨目标存活，延迟构造会让 `Completed()` 给一台本不该开端口的机器开端口。
 
-39. **按 IP 过滤日志条目时，子串判据会误伤同前缀的 IP** —— 游戏自己的追踪判据是裸
+40. **按 IP 过滤日志条目时，子串判据会误伤同前缀的 IP** —— 游戏自己的追踪判据是裸
     `data.Contains(targetIP)`（`TrackerCompleteSequence.cs:41`），会把 `"156.151.1.12"`
     认成提到 `"156.151.1.1"`。游戏那样写只是**触发**一次追踪（误判代价是白紧张一场），
     而清痕是要**删**东西 —— 误判会删掉一条根本不属于我们的记录，正是坑 11 要避免的
@@ -504,7 +525,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     全存档回归：宽松判据 592 条、边界判据 592 条（本例不改变结果，但前缀对确实存在）。
     同类陷阱：任何「文本包含 IP」的判据都要先想前缀重叠。
 
-40. **端口由动画自己开；调用方有三条必须补开的逃生路径**（v1.33.3 起）——
+41. **端口由动画自己开；调用方有三条必须补开的逃生路径**（v1.33.3 起）——
     9 个可安全演出的 exe 各自在 `Completed()` 里调
     `openPort(<自己的原始终端口号>, os.thisComputer.ip)`（SSHCrackExe.cs:229、
     FTPBounceExe.cs:153、SMTPoverflowExe.cs:169、HTTPExploitExe.cs:161、
@@ -546,14 +567,14 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     在旧实现里那会把 `_lastCrackSeconds` 清空、使下一发退回 `PortDelay`（0.6s）——
     按「每发都等 crack 时长」估会得到 109 min，虚高一截。
 
-41. **演出泵不能在队列空时提前返回** —— `NativeExes.Tick` 曾写
+42. **演出泵不能在队列空时提前返回** —— `NativeExes.Tick` 曾写
     `if (Queue.Count == 0) return;`，但 9 个白名单 exe 里有 5 个在 **`LoadContent`**
     里调 `hostileActionTaken()`（`OS.addExe` 那一刻），队列空时返回就再也没人扑掉
     那条倒计时 —— 它一路跑到归零。判据必须是
     `Queue.Count > 0 || Live.Count > 0`（覆盖「已经挂上去的」）。
     也**不能**无条件调用：那样玩家自己敲命令点燃的追踪会被面板补丁一直掐掉。
 
-42. **面板每帧路径上的三处开销，以及为什么缓存不能乱加**（v1.33.4 起）——
+43. **面板每帧路径上的三处开销，以及为什么缓存不能乱加**（v1.33.4 起）——
     面板展开态每帧要走 `HackPanel.Draw`，实测三处热点：
     - `Loc.T` 每帧 **20 次**（`DrawOptions` 内 13 次、`DrawTools` 内 2 次、其余 5 次），
       而它每次都要进 `LocaleTerms.Loc` —— 游戏侧实现是
@@ -576,7 +597,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     另：`Loc.T` 的实参全是字面量（`HackPanel` 的 27 处 + 静态 `Tools` 表的 label + `TraceHud` 一处），
     含机器名的 `run.Phase` 走 `DrawText` **不过 `Loc.T`**，故键集有界、不会随机器数增长。
 
-43. **别对「每帧存在性查询」直接换 HashSet —— 会引入跨线程竞争**（v1.33.4）——
+44. **别对「每帧存在性查询」直接换 HashSet —— 会引入跨线程竞争**（v1.33.4）——
     `NativeExes` 每帧要对 `Live`（上限 `MaxQueued`）做剪枝，原判据
     `os.exes.Contains(run.Exe)` 是 O(Live × exes) 的线性扫描（最坏 32×5=160 次引用比较）。
     改成 static `HashSet` + `Clear()` 复用（不能每帧 new —— 那只是把省下的比较换成每帧一次堆分配）。
@@ -594,7 +615,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     但 `Fade` 里**刻意**保留 `os.exes.Contains`：它跑在 `Flush(force:true)` 之后，
     拿到的 `OnPanel` 是过期快照，用它会把「还在播的」判成「已离开」而不再淡出。
 
-44. **别把「扫其它插件注册的东西」放进插件 Load()，也别缓存扫描结果**（v1.33.5）——
+45. **别把「扫其它插件注册的东西」放进插件 Load()，也别缓存扫描结果**（v1.33.5）——
     `autohack mods` 要枚举 workshop mod 注册的自定义 exe 与自定义端口，两处都有坑：
     ① **时机**。BepInEx 只加载 6 个插件（AutoUpdater / PathfinderAPI / AutoHack /
     Hacknet Save Fix / KernelFix / HacknetHotReplace），而 `LunarOSPathfinder.dll` /
@@ -624,7 +645,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     强行自动化会开错端口、刷 `ERROR FOUND!Target Port is Closed or Missing!`、卡住动画。
     故只**提供文件**，是否使用由玩家自己决定。
 
-45. **net472 + LangVersion 13 的特性边界，以及三条性能实测** —— 本仓库目标框架是
+46. **net472 + LangVersion 13 的特性边界，以及三条性能实测** —— 本仓库目标框架是
     .NET Framework 4.7.2、语言版本 13、**零 NuGet 包引用**。哪些 C# 特性可用不能靠记忆判断，
     用探针工程（同一 `TargetFrameworkRootPath`，每个特性单独编译一次）实测的结论：
 
@@ -659,7 +680,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     否则会冲掉 SDK 自带的 TRACE/RELEASE）。
 
 
-46. **推进的时间间隔全部移除，且「关掉演出反而更慢」的倒挂有两层**（v1.34.0）——
+47. **推进的时间间隔全部移除，且「关掉演出反而更慢」的倒挂有两层**（v1.34.0）——
     实测存档 167 台 / 642 个可破端口，`noshow` 一轮 5.2 min，其中 **292 秒是纯等待**：
 
     ① **倒挂的第二层在非端口步**。v1.33.5 只修了端口步（`HackRun.DelayFor` 的
@@ -701,7 +722,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     删 `delay/config` 分支时吃掉了 `var resolved = ResolveKind(verb);`。
     **用「起点…终点」锚点删除时，终点必须选在下一段的标题行**，且删完立刻编译。
 
-47. **模组端口（其它插件注册的端口）进不了自动入侵，只能靠手动白名单**（v1.35.0）——
+48. **模组端口（其它插件注册的端口）进不了自动入侵，只能靠手动白名单**（v1.35.0）——
     `HackEngine.CrackablePorts` 的判据是 `PortExploits.cracks.ContainsKey(codePort)`，
     `cracks` 只含**原生 36 个**端口（`PortExploits.cs:51-214`）。实测三个模组注册的
     16 个端口（LunarOS 3 / SRPortToolkit 8 / ZeroDayToolKit 5）**一个都不在其中**，且
@@ -759,7 +780,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     故换存档/换扩展/模组装卸都不会让名单漂移。逐个点名仍走命令行 `modports=a,b`。
     差分验证：12 组白名单 × 10 个协议名 = 120 用例，**丢能力 0、越权新增 0**（不含 `*` 的集合逐位不变）。
 
-48. **端口破够就提权 —— porthack 只看端口总数，不看是哪些端口**（v1.35.1）——
+49. **端口破够就提权 —— porthack 只看端口总数，不看是哪些端口**（v1.35.1）——
     门禁是 `OS.cs:1916` 的 `num2 > connectedComp.portsNeededForCrack`；Pathfinder 的
     `FixPortHack` IL 注入（`ComputerExtensions.cs:486-513`）把游戏那段 `portsOpen` 求和
     换成了 `CountOpenPorts()`，故 `HackEngine.PortQuotaMet` 与游戏门禁**读同一份数据**。
@@ -782,7 +803,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     若将来要破满全部，那是一个**新选项**，不该靠脚本模式绕过 —— 否则同一条脚本
     在内置次序下是另一套行为，更难解释。
 
-49. **`partial` 拆分只做文件级搬移，不做类型拆分**（v1.36.0）——
+50. **`partial` 拆分只做文件级搬移，不做类型拆分**（v1.36.0）——
    三个上帝类（`HackEngine` 1543 行 / `HackRun` 1108 行 / `HackPanel` 1024 行）按职责簇拆成
    9 个 `partial` 分部文件，最大文件从 1543 行降到 425 行，**成员签名 264 → 264 零差异**、
    234 个方法体逐字节不变。
@@ -829,7 +850,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    调用，看着像死代码；实际它以**方法组**形式传给 `ToolFiles.Collect(..., IsDump, null)`
    （`MemTools.cs:127`）。判死代码时 `grep '名称('` 会漏掉方法组与委托赋值。
 
-50. **Pathfinder 框架的六个陷阱 —— 用之前先看这条**（v1.36.0）——
+51. **Pathfinder 框架的六个陷阱 —— 用之前先看这条**（v1.36.0）——
    本插件只用了框架的一个扩展点（`[Command]` 属性扫描），其余全走裸 Harmony。
    逐一评估过框架的事件层 / 选项层 / 缓存层后**刻意不接入**，以下是依据。
 
@@ -930,8 +951,8 @@ README 在 v1.32.6 之后被刻意精简过一轮（删了 94 行），只留使
 ### 工具：`allnodes` 的适用范围与三条收尾通道
 
 `allnodes` 只对 `dec` / `mem` 有意义（缺省只作用于当前连接节点，与 `run` 口径一致）；
-`exes` 与 `unbreakable` 天然只针对玩家自己；`scan` 不看这个开关（它本就只扫当前节点
-那片连通分量，`allnodes` 的语义是「跳过连线直接连全表」，属 `run` 的目标口径）；
+`exes` 与 `unbreakable` 天然只针对玩家自己；**`scan` 看这个开关**（v1.38.0 起，用户定）：
+缺省只扫当前节点那片连通分量，传 `allnodes` 改扫地图全表（见下节）；
 `skip` 同理不看（它与网络无关）。
 
 `skip` 是唯一**不属于入侵**的工具：它只推进任务流程，不碰任何机器。游戏原生本就有
@@ -1000,7 +1021,7 @@ passcode = 头部第 4 段首个密文数字 - 158485
 
 ## 仓库文档
 
-- [README.md](README.md): 面向使用者的说明 —— 顶层五节：安装 / 使用 / 构建 / 架构 / 相关开发资料（「使用」含面板、命令行、追踪、十二个独立工具、脚本模式；「架构」含文件职责图与第二个插件 HacknetSaveFix；「构建」含构建步骤）。**刻意保持精简**，设计决策与取证细节见源码注释、docs/API.md 与 git 历史
+- [README.md](README.md): 面向使用者的说明 —— 顶层五节：安装 / 使用 / 构建 / 架构 / 相关开发资料（「使用」含面板、命令行、追踪、十四个独立工具、脚本模式；「架构」含文件职责图与第二个插件 HacknetSaveFix；「构建」含构建步骤）。**刻意保持精简**，设计决策与取证细节见源码注释、docs/API.md 与 git 历史
 - [docs/API.md](docs/API.md): **Pathfinder 框架 + Hacknet 游戏本体的 public API 签名索引**，每条带 `文件:行号` 指向 `decompiled/`。由 `node tools/api-index.ts` 生成，**勿手改**；游戏与框架都不带 XML 注释，故只到签名级，语义按行号读 `decompiled/`
 - [docs/EXTENSIONS.md](docs/EXTENSIONS.md): 游戏自带 `Extensions/` 官方样本的格式参考 —— 节点 XML、占位符、行为系统、任务、阵营、主题
 - [docs/HACKERSCRIPTS.md](docs/HACKERSCRIPTS.md): 自替换占位符全表 + HackerScript 动词表（以游戏实现与官方样本为准，已标出 wiki 错漏处）
@@ -1009,21 +1030,21 @@ passcode = 头部第 4 段首个密文数字 - 158485
 
 ## 源码
 
-- [src/AutoHack/ToolDispatch.cs](src/AutoHack/ToolDispatch.cs): 十二个工具的唯一入口（命令与面板共用）；`RemoteTools.cs` 是其中三个远程动作的实现，`ScanTools.cs` 是 `scan`，`TraceTools.cs` 是 `trace`，`IpTools.cs` 是 `ip`，`PortTools.cs` 是 `ports`（见坑 50）
+- [src/AutoHack/ToolDispatch.cs](src/AutoHack/ToolDispatch.cs): 十四个工具的唯一入口（命令与面板共用）；`RemoteTools.cs` 是其中三个远程动作的实现，`ScanTools.cs` 是 `scan`，`TraceTools.cs` 是 `trace`，`IpTools.cs` 是 `ip`，`PortTools.cs` 是 `ports`（见坑 51）
 - [src/AutoHack/DecTools.cs](src/AutoHack/DecTools.cs): DEC 解密 —— 反推 passcode + 多层递归 + 批量落盘
 - [src/AutoHack/MemTools.cs](src/AutoHack/MemTools.cs): 内存转储 —— 查看 / 导出 / 扫描内嵌 DEC
 - [src/AutoHack/ExeTools.cs](src/AutoHack/ExeTools.cs): 程序补全 —— 幂等填充 `/bin`
 - [src/AutoHack/HardenTools.cs](src/AutoHack/HardenTools.cs): 自身加固（不可逆）
 - [src/AutoHack/ToolFiles.cs](src/AutoHack/ToolFiles.cs): 工具的落盘公共部分
 - [src/AutoHack/HackEngine.cs](src/AutoHack/HackEngine.cs): 决策层入口 —— 目标解析与选择（含 `ToolTargets`）；`partial` 分部：`HackEngine.Graph.cs`（图遍历）/ `HackEngine.Ports.cs`（端口与提权）/ `HackEngine.Wipe.cs`（清痕）/ `HackEngine.Whitelist.cs`（白名单）/ `HackEngine.Counter.cs`（反追踪与反扑）
-- [src/AutoHack/RefusedWhitelist.cs](src/AutoHack/RefusedWhitelist.cs): 记下「刚被白名单拒的那台」，供 `here` 在池空时回落（见坑 31）
-- [src/AutoHack/PanelSettings.cs](src/AutoHack/PanelSettings.cs): 面板设置的落盘层（ConfigFile 读写，无 UI；见坑 32）
-- [src/AutoHack/ReplaceFeedback.cs](src/AutoHack/ReplaceFeedback.cs): 给原生 `replace` 补「失败要说出来」（见坑 33）
+- [src/AutoHack/RefusedWhitelist.cs](src/AutoHack/RefusedWhitelist.cs): 记下「刚被白名单拒的那台」，供 `here` 在池空时回落（见坑 32）
+- [src/AutoHack/PanelSettings.cs](src/AutoHack/PanelSettings.cs): 面板设置的落盘层（ConfigFile 读写，无 UI；见坑 33）
+- [src/AutoHack/ReplaceFeedback.cs](src/AutoHack/ReplaceFeedback.cs): 给原生 `replace` 补「失败要说出来」（见坑 34）
 - [src/AutoHack/ScanTools.cs](src/AutoHack/ScanTools.cs): 地图扫描 —— 标出当前节点所在连通分量
 - [src/AutoHack/HackRun.cs](src/AutoHack/HackRun.cs): 执行层 —— 逐帧推进、动作分派、收尾；`partial` 分部：`HackRun.Plan.cs`（计划构建，纯函数）/ `HackRun.Steps.cs`（单步实现）
 - [src/AutoHack/HackScript.cs](src/AutoHack/HackScript.cs): 入侵脚本的解析与校验（`script=` 模式）；路径解析交给框架 `StringExtensions.ContentFilePath`，不自己拼内容目录前缀
-- [src/AutoHack/ModPortPolicy.cs](src/AutoHack/ModPortPolicy.cs): 模组端口白名单 —— `modports=` 的解析、命中判定、未注册协议提示（见坑 47）
-- [src/AutoHack/IpTools.cs](src/AutoHack/IpTools.cs): 收尾换 IP —— 原生三步 + 肉鸡归属迁移 + 重建 Pathfinder 查找表（见坑 29）
+- [src/AutoHack/ModPortPolicy.cs](src/AutoHack/ModPortPolicy.cs): 模组端口白名单 —— `modports=` 的解析、命中判定、未注册协议提示（见坑 48）
+- [src/AutoHack/IpTools.cs](src/AutoHack/IpTools.cs): 收尾换 IP —— 原生三步 + 肉鸡归属迁移 + 重建 Pathfinder 查找表（见坑 30）
 - [src/SaveFix/SaveFixPlugin.cs](src/SaveFix/SaveFixPlugin.cs): 独立插件 HacknetSaveFix，修游戏本体存档 NRE
 - [src/AutoHack/HackPanel.cs](src/AutoHack/HackPanel.cs): 自绘控制面板（布局与入口）；`partial` 分部 `HackPanel.Draw.cs` 是绘制原语与文本度量
 - [src/AutoHack/HackOverlay.cs](src/AutoHack/HackOverlay.cs): 叠加层 —— patch `OS.Draw` / `OS.Update`

@@ -79,16 +79,45 @@ internal static partial class HackEngine
             return;
         }
 
-        // 地图全表：逐个标记。discoverNode 内部是 visibleNodes.Contains(nodes.IndexOf(c))
-        // （NetworkMap.cs:417），两次线性扫描，故这里是 O(V²)。实测存档 167 台无感；
-        // 千级地图才需要改走哈希集，本次不做（YAGNI）。
+        RevealWholeMap(os);
+    }
+
+    /// <summary>
+    /// 把地图上<b>全部</b>节点标成「已发现」，返回标记覆盖的节点数。
+    ///
+    /// <para>地图全表口径的<b>揭示</b>动作 —— 与 <see cref="ConnectableComputers"/> 同属
+    /// allnodes 口径（那个给目标池，这个给观感）。两者刻意<b>不</b>互相调用：目标池要排除
+    /// 玩家机与 disabled，而揭示要连玩家机一起点亮（它本来就是地图上的一台）。</para>
+    ///
+    /// <para>两个调用点：<c>autohack run allnodes</c> 的「先揭图后入侵」（见
+    /// <see cref="RevealMap"/>）与 <c>autohack scan allnodes</c> 工具（见 ScanTools）。</para>
+    ///
+    /// <para>标记一律走原生 <c>NetworkMap.discoverNode</c>（NetworkMap.cs:415-423），
+    /// 与游戏自身的「已发现」同源。它内部是 <c>visibleNodes.Contains(nodes.IndexOf(c))</c>，
+    /// 两次线性扫描，故这里是 O(V²)。实测存档 167 台无感；千级地图才需要改走哈希集
+    /// （本次不做，YAGNI）。</para>
+    /// </summary>
+    internal static int RevealWholeMap(OS os)
+    {
+        var map = os?.netMap;
+        if (map?.nodes == null || map.nodes.Count == 0)
+        {
+            return 0;
+        }
+
+        var revealed = 0;
         foreach (var comp in map.nodes)
         {
-            if (comp != null && !comp.disabled)
+            if (comp == null || comp.disabled)
             {
-                map.discoverNode(comp);
+                continue;
             }
+
+            map.discoverNode(comp);
+            revealed++;
         }
+
+        return revealed;
     }
 
     /// <summary>

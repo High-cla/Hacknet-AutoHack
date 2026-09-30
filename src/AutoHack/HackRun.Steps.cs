@@ -126,18 +126,14 @@ internal sealed partial class HackRun
     }
 
     /// <summary>
-    /// 破解单个端口：回显破解程序（无条件），端口优先交给原生动画去开，
-    /// 演出不可用时立即直接补开，保证端口不会永远不开。
+    /// 破解单个端口：端口优先交给原生动画去开，<b>命令回显也跟着动画走</b> ——
+    /// 动画真正挂上 RAM 面板那一帧才回显该行（见 <see cref="NativeExes.Tick"/>）。
+    /// 排不上演出时立即回显并直接补开，保证命令与端口都不会丢。
     /// </summary>
     private void ApplyOpenPort(OS os, HackStep step)
     {
         var target = step.Target;
         Phase = "CRACKING PORT " + step.Port.DisplayPort;
-
-        // 无条件回显破解指令（v1.34.0）。端口无论走哪条路都会开 ——
-        // 连不上时由下面的 HackEngine.OpenPort 直接写目标机端口表 ——
-        // 故「敲了什么」与「端口开了」始终对应，该看得见。
-        Echo(os, step.Command);
 
         // 端口交给动画去开（v1.33.3）：那 9 个 exe 各自在 Completed() 里调
         // openPort(<自己的原始终端口号>, ip)，与这里调 HackEngine.OpenPort 落在
@@ -145,13 +141,20 @@ internal sealed partial class HackRun
         // 直接拿调用方传入的原始端口号匹配 Record.OriginalPortNumber）。
         // 故「动画跑完端口才开」不需要造机制 —— 只要不再提前写。
         //
-        // Show 返回 false 的每一种情形都必须立即补开，否则端口永远不开：
-        // 未连接 / 已控 / 该端口没有可安全演出的程序（实测 73/642）/
-        // 队列满被丢弃。判据见 NativeExes.Show 的文档注释。
-        if (!Options.ShowExes || !NativeExes.Show(os, target, step.Port))
+        // 回显同样交给动画代理（用户定）：本行命令由 NativeExes 在实例真正 addExe
+        // 那一刻写出，故「终端上出现 sshcrack 22」与「画面上开始跑那个动画」是同一件事。
+        // 此前是无条件提前回显，于是被丢弃的动画其命令照样已经打出（观感与画面脱钩）。
+        //
+        // Show 返回 false 的每一种情形（未连接 / 已控 / 该端口没有可安全演出的程序，
+        // 实测 73/642 / 队列满被丢弃）都走下面这一支：立即回显 + 补开端口 ——
+        // 端口不补则永远不开，命令不补则终端与战果对不上。
+        if (Options.ShowExes && NativeExes.Show(os, target, step.Port, () => Echo(os, step.Command)))
         {
-            HackEngine.OpenPort(target, step.Port, os.thisComputer.ip);
+            return;
         }
+
+        Echo(os, step.Command);
+        HackEngine.OpenPort(target, step.Port, os.thisComputer.ip);
     }
 
     /// <summary>解目标防火墙：回显 solve 后无条件解除。</summary>

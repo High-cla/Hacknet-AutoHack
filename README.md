@@ -2,7 +2,7 @@
 
 仓库：<https://github.com/High-cla/Hacknet-AutoHack> · 许可：[MIT](LICENSE)
 
-基于 Hacknet + Pathfinder 的自动入侵插件，带**交互式控制面板**。**优先使用游戏原生机制**：每个动作都先把对应指令回显进终端，再走原生 API（`Programs.connect` / `Computer.openPort` / `Computer.giveAdmin` / `makeFile`）执行，行为与真人敲 `connect` / `probe` / `sshcrack 22` / `porthack` 一致。四个游戏机制被显式处理：**管理员反扑**（断开时 `disconnectionDetected` 会关端口并把 `adminIP` 还原成机器自己，故离开前先解除反扑）、**跳板**（`proxyActive` 会拦下破解程序，先过载绕过）、**追踪**（`TraceTracker` 只在连着被追踪目标时推进，跑完即 `dc` 中止）、以及**强行提权**（porthack 门禁过不了时直接写 `adminIP`，见下）。
+基于 Hacknet + Pathfinder 的自动入侵插件，带**交互式控制面板**。**优先使用游戏原生机制**：每个动作都走原生 API（`Programs.connect` / `Computer.openPort` / `Computer.giveAdmin` / `makeFile`）执行，并把对应指令回显进终端，行为与真人敲 `connect` / `probe` / `sshcrack 22` / `porthack` 一致 —— **终端看到什么，游戏状态就变什么**。端口步是这条规则的强化版：命令与端口都跟着原生动画走，动画**挂上面板那一刻**才回显、**跑完那一刻**才开端口（见下 `native exes`）。四个游戏机制被显式处理：**管理员反扑**（断开时 `disconnectionDetected` 会关端口并把 `adminIP` 还原成机器自己，故离开前先解除反扑）、**跳板**（`proxyActive` 会拦下破解程序，先过载绕过）、**追踪**（`TraceTracker` 只在连着被追踪目标时推进，跑完即 `dc` 中止）、以及**强行提权**（porthack 门禁过不了时直接写 `adminIP`，见下）。
 
 ## 安装
 
@@ -26,7 +26,8 @@
 autohack                                        # 开关控制面板
 autohack run [here] [stay] [redo] [nologs] [nomark] [direct]   # 不开面板，直接执行
 autohack run script=stealth                     # 用脚本决定入侵次序（见下）
-autohack scan|dec|mem|exes|unbreakable [allnodes]  # 独立工具（见下表）
+autohack scan|dec|mem [allnodes]                # 独立工具（见下表）
+autohack exes|unbreakable|mods|ports           # 补程序 / 加固本机 / 扫模组（与网络范围无关）
 autohack pull|purge|drop|trace|ip               # 对当前连接节点动手 / 掐追踪 / 换本机 IP
 autohack wipe [here]                            # 清掉我的痕迹（缺省全网，here 收窄到当前分量）
 autohack skip                                   # 完成当前任务并接下一个（含 DLC 合同与 Kaguya Trials）
@@ -45,7 +46,7 @@ autohack -h                                     # 帮助
 | `connect first` | 每个目标先 `connect` 再动手（缺省开） |
 | `upload marker` | 是否上传 `~/autohack.txt` 标记（缺省**关**） |
 | `use known creds` | 用已知账密登入目标（缺省**关**，v1.15.0 起）—— 成功即提权，跳过全部破端口 |
-| `native exes` | 把原生破解程序挂进 RAM 面板当演出（缺省**开**）。**端口现在由动画自己开**（v1.33.3 起）：那 9 个原生破解程序各自在跑完时调 `openPort`，所以看到动画跑完 = 那个端口真的开了 —— 不再是「状态早写好、动画只是重演」。内存够时多个动画并发（实测峰值 3 个同屏），提权前会等本台动画跑完（上限 180 秒）。没有对应动画的端口（443/3659/3724/9418/211/32）立即开。想跳过演出用 `noshow`（端口立即开，无动画；每台的 `probe` 端口报告照打 —— 那是侦察结果，不是演出） |
+| `native exes` | 把原生破解程序挂进 RAM 面板当演出（缺省**开**）。**端口与回显都跟着动画走**：终端那行 `sshcrack 22` 在动画**真正挂上面板那一刻**才打出，排不上演出（无对应程序 / 队列满被丢弃）时立即打出并直接开端口 —— 故「终端出现某行命令」与「画面上开始跑那个动画」严格一一对应（v1.33.3 起端口由动画自己开）：那 9 个原生破解程序各自在跑完时调 `openPort`，所以看到动画跑完 = 那个端口真的开了 —— 不再是「状态早写好、动画只是重演」。内存够时多个动画并发（实测峰值 3 个同屏），提权前会等本台动画跑完（上限 180 秒）。没有对应动画的端口（443/3659/3724/9418/211/32）立即开。想跳过演出用 `noshow`（端口立即开，无动画；每台的 `probe` 端口报告照打 —— 那是侦察结果，不是演出） |
 | `new IP after run` | 跑完把本机换成新 IP（缺省**开**）—— 游戏原生的「换 IP 保命」，并把全图已控机器的归属迁到新 IP |
 | `disconnect when done` | 每个目标跑完是否 `dc`（缺省**关**）—— 断开会终止会话、清空 `navigationPath`，属行为选择。**只管断开**：清追踪已是每轮收尾的恒定动作，不再由开关控制 |
 | `skip owned` | 全网扫描时跳过已拿下的肉鸡（缺省**开**）。**只对全网扫描生效** —— 「当前节点」是刻意选择，连上再点 START 就是要打它 |
@@ -141,7 +142,7 @@ autohack run noshow modports=mqtt,ntp,Redis
 | `logs` | 抹掉我的痕迹（**已是缺省**，写出来只为显式）。旧别名 `ownlogs` / `my-logs` / `selflogs` / `wipe-logs` 仍可用 —— v1.33.2 起「清目标」与「清自己」合并为同一口径：只删 `/log` 里含你 IP 的条目 |
 | `nomark` | 不上传标记文件（**已是缺省**） |
 | `mark` | 上传标记文件 |
-| `allnodes` | 全网扫描改扫地图全表，不再只沿连线展开 |
+| `allnodes` | 全网扫描改扫地图全表，不再只沿连线展开；`autohack scan allnodes` 同样改扫全表 |
 | `creds` / `nocreds` | 用 / 不用已知账密登入（**缺省不用**，v1.15.0 起；`creds` 显式开启，`nocreds` 已是缺省） |
 | `direct` | 跳过 connect，直接就地破解（probe 照跑并报告端口，只是不再回显 `probe` 这条指令） |
 | `stay` | 跑完**不**断开连接（**已是缺省**，v1.16.0 起） |
@@ -166,7 +167,7 @@ autohack run noshow modports=mqtt,ntp,Redis
 
 | 命令 | 作用 |
 |---|---|
-| `autohack scan` | 把**当前节点所在的整张连通分量**标到地图上（无向闭包，含 EOS 设备）。**只揭示当前节点所在的那一张连通分量**（未连接时不扫，先 `connect`）。不睡、不设 admin 门禁，与面板 SCAN 按钮同一实现 |
+| `autohack scan [allnodes]` | 把网络标到地图上。缺省揭示**当前节点所在的整张连通分量**（无向闭包，含 EOS 设备；未连接时不扫，先 `connect`）；传 `allnodes` 改标**地图全表**（不看连线，未连接也照扫）。不睡、不设 admin 门禁，与面板 SCAN 按钮同一实现（口径随 `whole map` 复选框） |
 | `autohack dec [allnodes]` | 解开目标上的 `#DEC_ENC` 加密文件，逐层解到明文，写入玩家 `/home/MemDumps` |
 | `autohack mem [allnodes]` | 查看本机内存转储（紧凑格式，截断显示）、导出到 `/home/MemDumps`、扫描节点上的 `.mem` 并解其内嵌 DEC |
 | `autohack exes` | 把游戏能生成的破解程序全部补进玩家 `/bin`（幂等） |

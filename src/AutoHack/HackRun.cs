@@ -9,7 +9,8 @@ internal sealed record TargetOutcome(string Name, int Opened, int Total, bool Es
 /// <summary>
 /// 一次入侵运行的执行状态与推进逻辑。
 /// 由 OS.Update / OSUpdateEvent 每帧驱动；与绘制解耦，便于单独测试。
-/// 每个动作先把对应指令回显到终端（格式同 OS.runCommand），再执行。
+/// 每个动作都把对应指令回显到终端（格式同 OS.runCommand），并执行之 ——
+/// 唯端口步的命令由原生演出去回显（动画挂上面板那一刻，见 HackRun.Steps.ApplyOpenPort）。
 /// 端口一律按 Pathfinder 的协议名操作（<c>openPort(protocol, ipFrom)</c>），
 /// 而非原版按端口号 —— 原版那条路径已被框架 Prefix 拦下。
 ///

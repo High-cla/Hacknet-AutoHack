@@ -3,7 +3,7 @@
 > Hacknet 的 BepInEx / Pathfinder 插件：用游戏自身的原生机制一键入侵全网，带控制面板与脚本驱动。
 > 本文件面向要理解或修改本仓库的编码 agent。规范见 https://llmstxt.org
 
-当前 v1.35.1。构建产物直投游戏插件目录，无需手动拷贝：
+当前 v1.36.0。构建产物直投游戏插件目录，无需手动拷贝：
 
 ```
 D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
@@ -21,7 +21,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    **绝不下载 Release 附件回来比对** —— 需要确认部署新鲜度时只看构建输出目录那份。
 3. **`gh release create` 绝不自动执行** —— 等用户显式发令。`git push` 可以直接做。
 
-**四十八条最容易踩的坑 / 最该知道的机制**（都带行号，可直接 grep）
+**五十条最容易踩的坑 / 最该知道的机制**（都带行号，可直接 grep）
 
 1. `Computer.portsOpen` 恒为 0 —— Pathfinder 用 Harmony Prefix 接管 `openPort`/`openPorts`
    并 `return false`，状态改存 `PortState.Cracked`。任何读 `portsOpen` 的判断都是错的，
@@ -62,7 +62,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    一台机器时才不该惊动别处。
    `SilentClosure` 是 `Closure(os, origin, reveal: false)`：默认那条会调
    `NetworkMap.discoverNode`（`NetworkMap.cs:415`）把沿途节点点亮，**清痕不是侦察**。
-   玩家机由 `Closure` 显式剔除（`HackEngine.cs:625`），`WipeNetwork` 单独补回来 ——
+   玩家机由 `Closure` 显式剔除（`HackEngine.Graph.cs:193`，在 `ExpandFrontier` 的展开循环里），`WipeNetwork` 单独补回来 ——
    它的 `/log` 记着「谁连过我」，正是自己的痕迹。
    删除走 `Computer.deleteFile` + 显式 `folderPath`，而 `getFolderFromNavigationPath`
    （`Programs.cs:1749-1770`）只读 `path` 与 `startFolder`，不看 `os.connectedComp` ——
@@ -85,7 +85,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    「含玩家 IP 且含 `FileCopied`/`FileDeleted`/`FileMoved`」），故它**既不误伤对方历史，
    又刚好让追踪判据失配**。实测存档 167 台 / 656 条日志：新口径删 592 条（90.24%）、
    保留 64 条，受影响 55 台；保留的样例是 `"User Account Added: from <别人IP>"` 这类。
-   玩家机不在 `Targets` 也不在 `Skipped`（`HackEngine.cs:445` 显式跳过），必须单独追加。
+   玩家机不在 `Targets` 也不在 `Skipped`（`HackEngine.cs:141` 显式跳过），必须单独追加。
    同理 `use known creds` 缺省**关**（v1.15.0 起）—— `adminPass` 是公开字段，开着等于
    默认跳过破端口/防火墙/porthack 三套机制，架空玩法。
 12. **三个远程工具的动作全在「当前连接」，且「当前目录」以游戏自己的 `Programs.getCurrentFolder(os)` 为唯一权威** ——
@@ -136,7 +136,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     PURGE 失效。现取 `DragId => IdBase - 1`：本面板控件一律 `IdBase + N`（N ≥ 1），
     该位置**结构上**不可能是控件 id。教训是让冲突不可能，而不是「记得检查 ID」。
 
-    `Drag` 在 `Chrome` 之后、`DrawTools` **之前**跑（`HackPanel.cs:211` vs `:262`），
+    `Drag` 在 `Chrome` 之后、`DrawTools` **之前**跑（`HackPanel.cs:315` vs `:365`，都在 `DrawBody` 里），
     而 `Track` 只在 `GuiData.active == -1` 时抢占 —— 这是二者能互相顶掉的前提。
 
 18. **EOS 设备（`Computer.EOS` = 5）在端口上是死局，别拿它当普通机器** —— 它的
@@ -775,6 +775,125 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     若将来要破满全部，那是一个**新选项**，不该靠脚本模式绕过 —— 否则同一条脚本
     在内置次序下是另一套行为，更难解释。
 
+49. **`partial` 拆分只做文件级搬移，不做类型拆分**（v1.36.0）——
+   三个上帝类（`HackEngine` 1543 行 / `HackRun` 1108 行 / `HackPanel` 1024 行）按职责簇拆成
+   9 个 `partial` 分部文件，最大文件从 1543 行降到 425 行，**成员签名 264 → 264 零差异**、
+   234 个方法体逐字节不变。
+
+   **为什么不拆成独立类型。** 拆类型要改 78 处调用点（`HackEngine.Xxx` 全仓 78 处，
+   `HackRun` 占 43），而 `partial` 已解决可读性与导航成本；本项目没有「单独替换 HackEngine」
+   的消费方，收益不抵改动面。
+
+   **搬移的等价性证明。** 纯文本搬移可以拿到比编译更强的证据：从 `git worktree add --detach`
+   取 HEAD 版源码，与拆分后逐方法比较「签名 + 方法体（归一化空白）」——264 个成员名完全一致、
+   234 个方法体逐字节相同。比「编译通过」强得多，也比「文件数变了」有意义。
+
+   **别拿 DLL 逐字节比对当等价性证据。** 本轮试过：HEAD 版与重构版编出的 `AutoHack.dll` 同为
+   133120 字节，但**77% 的字节不同** —— 加一个类型会改变 `#GUID` / `#Strings` / `#Blob` 堆的
+   偏移，其后全部字节平移。而同一份源码连编两次是**逐字节相同**的（.NET SDK 默认确定性构建），
+   所以「有差异」只能说明「多了个类型」，说明不了语义。可用的等价性证据是**反编译后的 C# 语义**
+   （`ilspycmd -p` 两侧后规范化比对：`HackEngine` 50 个单元 / `HackRun` 41 个 / `HackOptions` 1 个
+   全部方法体一致）。
+   **两条必须遵守的搬移纪律。** ① 每个类体必须**无损铺满**：段集合是「成员段 ∪ 间隔段」，
+   成员段加上其间的空行/文档段必须恰好覆盖 `open+1 .. close-1`，任一断点不符即拒绝写盘；
+   ② 搬完立刻做一次**重组校验**——把各分部的段按原顺序拼回主文件，必须与原文件逐字节相同，
+   不等就不写。这两条在本轮各拦下一次真实事故（见下）。
+
+   **两个静默事故（值得记住）。** ① 方法提取器若只做花括号配对，会把**表达式体方法**里
+   `is { } x ? [a] : [b]` 的空属性模式 `{}` 当成方法体，于是 `ConnectedPool` 的跨度断在半路，
+   续行被分到别的分部 → 编译报 `CS1519 成员声明中的标记"?"无效`；② 若不做深度约束，
+   **嵌套类型的成员**（`HackPanel.MeasureKey` / `Palette` / `PanelAction` 的成员，与外层同名）
+   会被当成外层成员重复分块，`ResetMeasureCache` 被分两次（外层 + 内层各一份）。
+   两条的正确做法：方法起点必须**恰在类体第一层**（行首深度 == d0+1），
+   终点必须是「该深度上以 `;` 结尾的行」或「该深度上以 `}` 结尾且不是空属性模式 `{}` 的行」。
+
+   **`record` 也能 `partial`。** `HackOptions` 的位置参数列表在声明行、花括号体在同一行之后，
+   类型体检测要按「首个 `{`」而不是「声明行」定位。
+
+   **顺带消掉的两处双向依赖**：`PortInfo` 从 `HackEngine.cs` 迁到 `HackTypes.cs`（唯一的跨类
+   消费方 `HackStep` 在那里），`ModExe` 从 `ModTools.cs` 迁到 `ExeTools.cs`（唯一消费方是
+   `ExeTools.FillCustom`）。
+
+   **面板按钮表单表化。** `HackPanel` 里那张 `(Verb, Label, Danger)[] Tools` 搬进
+   `ToolDispatch.Panel`，与 `Verbs` / `Help` / `Dispatch` 并列 —— 加一个工具从「改 5 处」
+   降到「改 1 处」，面板按 `ToolDispatch.Panel.Length` 自算行数。
+
+   **`IsDump` 不是死代码。** `MemTools.IsDump`（`MemTools.cs:116`）全仓没有 `IsDump(...)` 形式的
+   调用，看着像死代码；实际它以**方法组**形式传给 `ToolFiles.Collect(..., IsDump, null)`
+   （`MemTools.cs:127`）。判死代码时 `grep '名称('` 会漏掉方法组与委托赋值。
+
+50. **Pathfinder 框架的六个陷阱 —— 用之前先看这条**（v1.36.0）——
+   本插件只用了框架的一个扩展点（`[Command]` 属性扫描），其余全走裸 Harmony。
+   逐一评估过框架的事件层 / 选项层 / 缓存层后**刻意不接入**，以下是依据。
+
+   **① 端口读取用 `GetPortStateDict()`，不要用 `GetAllPortStates()` / `CountOpenPorts()`。**
+   四个读函数里只有一个是零拷贝的（`Pathfinder.Port/ComputerExtensions.cs`）：
+
+   | API | 行 | 实现 | 拷贝 |
+   |---|---|---|---|
+   | `GetAllPortStates()` | :135-138 | `PortTable...Values.ToList()` | **是** |
+   | `CountOpenPorts()` | :164-167 | `GetAllPortStates().Count(x => x.Cracked)` | **是 + 委托** |
+   | `GetPortStateDict()` | :146-149 | 直接交出内部字典本体 | 否 |
+   | `GetPortState(proto)` | :123-127 | 单取 | 否 |
+
+   `HackEngine.Ports` 与 `OpenPortCount` 已改用后者 —— `OpenPortCount` 每个端口步调一次
+   （v1.35.1 实测一轮 487 次），`Ports()` 每台目标调一次（167 台存档 = 167 次）。
+   另注意 `PortTable` 是 `ConditionalWeakTable`，`GetOrCreateValue` 连**只读查询**都会给该机器建条目。
+
+   **② 事件层的 `Thrown` 会跨插件串扰 —— 不适合承载「必须执行」的逻辑。**
+   `EventManager<T>.InvokeOn`（`Pathfinder.Event/EventManager.cs:93-113`）的判据是
+   `if ((item.Options.ContinueOnThrow || !eventArgs.Thrown) && ...)`，而捕获到异常时置
+   `eventArgs.Thrown = true`（:108）。于是**别的插件的 handler 抛一次异常，其后所有 handler
+   默认被跳过**（除非各自声明 `ContinueOnThrow`）。自动入侵是秒级状态机，被静默跳过 =
+   静默失效。Harmony 补丁之间没有这种耦合 —— 所以 `OS.Update` / `OS.Draw` 保持裸补丁。
+
+   **③ `[Event]` 属性会丢弃优先级 —— 框架自己的 bug。**
+   `Pathfinder.Meta.Load/EventAttribute.cs:61-67` 的 `CallOn(plugin, MethodInfo)` 调
+   `EventManager.AddHandler(type, info)` 时**只传两个参数**，构造器里存下的
+   `eventHandlerOptions`（Priority / ContinueOnCancel / ContinueOnThrow）整份丢掉，
+   等于用默认值注册。也就是说 `[Event(priority: 10, continueOnThrow: true)]` 与不带参数
+   完全等效 —— 数字写了没用。要用优先级只能自己调
+   `EventManager<T>.AddHandler(handler, options)`。
+
+   **④ `[Initialize]` 是 `internal` —— 外部插件用不了。**
+   `Pathfinder.Util.InitializeAttribute.cs:6` 声明为 `internal class InitializeAttribute`。
+   框架自己用它做启动注入（`HHBS` / `MiscPatches` / `PathfinderOptions` 等），
+   mod 侧拿不到。别照抄框架源码里的写法。
+
+   **⑤ `Computer.silent` 不抑制 `/log` —— 名字极易误读成「无痕开关」。**
+   它只守两个地方：`sendNetworkMessage`（`Computer.cs:276`）与 `addNewUser`（:407）；
+   而 `log(string)`（:319-354）只守 `disabled`，`silent = true` 期间照样往 `/log` 写条目。
+   本插件的清痕不依赖它（走 `HackEngine.WipeNetwork` 按 IP 过滤删条目）。
+
+   **⑥ `Programs.execute` 已被框架整个替换 —— 不要再去 patch 它。**
+   `ExecutableListEvent.cs:26-48` 用 Prefix 拦下 `Programs.execute` 并 `return false`，
+   改由事件重列可用程序。想往列表里加东西应该挂 `ExecutableListEvent`，不是 patch 原方法。
+
+   **明确不接入的三项（附硬阻断证据）：**
+
+   - **`Pathfinder.GUI.PFButton` 在模态面板里点不动。** 它的 `DoAt`
+     （`PFButton.cs:91-102`）转发给 `Button.doButton`，而后者两处（`Hacknet.Gui/Button.cs:35`、:45）
+     都有 `!GuiData.blockingInput` 守卫。本面板的 Prefix 正是靠置 `GuiData.blockingInput = true`
+     来吃掉游戏自身控件的输入（`HackOverlay.cs:85`）—— 换成 PFButton 后**面板上的按钮会永远
+     点不动**。自绘版本自管 hot/active，不受这个全局开关影响。
+   - **`Pathfinder.Util.FixedSizeCacheDict&lt;K,V&gt;` 换不了面板度量缓存。** 它声明
+     `where K : class where V : class`（`FixedSizeCacheDict.cs:6`），而我们的键是
+     `readonly struct MeasureKey`、值是 `Vector2` —— 两个约束都不满足，编译器直接拒绝。
+     且它的 `Register` 会对被淘汰项调 `IDisposable.Dispose()`（:60-63），
+     对度量缓存是多余语义。现值类型键是刻意的：`Dictionary` 走 `IEquatable` 而非反射装箱
+     （见 `MeasureKey` 的文档注释）。
+   - **`PortManager` 没有「枚举全部注册端口」的公开面。** 公开方法只有按名字/按号查
+     （`PortManager.cs:47-68`），注册表本体是私有静态 `AssemblyAssociatedList&lt;PortRecord&gt; CustomPorts`。
+     `ModTools.ScanPorts` 只能反射；**但机器自身的端口表现在不再需要它** ——
+     `comp.GetPortStateDict()` 直接给出该机全部 `PortState`（含 `Protocol`），
+     这正是新工具 `autohack ports` 的实现基础。
+
+   **唯一接入的扩展点**：`AutoHackPlugin.cs:58` 的 `[Command("autohack")]`。
+   属性扫描是 IL hook（`AttributeManager.cs:13-28` 挂在 `HacknetChainloader.LoadPlugin`），
+   故 `AutoHackPlugin` 必须声明 `[BepInDependency("com.Pathfinder.API")]` ——
+   缺它本插件会先加载、扫描覆盖不到、命令静默失效（`AutoHackPlugin.cs:13-15`）。
+
+
 ## README 已精简掉的内容（原样保留于此）
 
 README 在 v1.32.6 之后被刻意精简过一轮（删了 94 行），只留使用者需要的东西。
@@ -874,7 +993,7 @@ passcode = 头部第 4 段首个密文数字 - 158485
 
 ## 仓库文档
 
-- [README.md](README.md): 面向使用者的说明 —— 顶层五节：安装 / 使用 / 构建 / 架构 / 相关开发资料（「使用」含面板、命令行、追踪、十一个独立工具、脚本模式；「架构」含文件职责图与第二个插件 HacknetSaveFix；「构建」含构建步骤）。**刻意保持精简**，设计决策与取证细节见源码注释、docs/API.md 与 git 历史
+- [README.md](README.md): 面向使用者的说明 —— 顶层五节：安装 / 使用 / 构建 / 架构 / 相关开发资料（「使用」含面板、命令行、追踪、十二个独立工具、脚本模式；「架构」含文件职责图与第二个插件 HacknetSaveFix；「构建」含构建步骤）。**刻意保持精简**，设计决策与取证细节见源码注释、docs/API.md 与 git 历史
 - [docs/API.md](docs/API.md): **Pathfinder 框架 + Hacknet 游戏本体的 public API 签名索引**，每条带 `文件:行号` 指向 `decompiled/`。由 `node tools/api-index.ts` 生成，**勿手改**；游戏与框架都不带 XML 注释，故只到签名级，语义按行号读 `decompiled/`
 - [docs/EXTENSIONS.md](docs/EXTENSIONS.md): 游戏自带 `Extensions/` 官方样本的格式参考 —— 节点 XML、占位符、行为系统、任务、阵营、主题
 - [docs/HACKERSCRIPTS.md](docs/HACKERSCRIPTS.md): 自替换占位符全表 + HackerScript 动词表（以游戏实现与官方样本为准，已标出 wiki 错漏处）
@@ -883,25 +1002,25 @@ passcode = 头部第 4 段首个密文数字 - 158485
 
 ## 源码
 
-- [src/AutoHack/ToolDispatch.cs](src/AutoHack/ToolDispatch.cs): 十一个工具的唯一入口（命令与面板共用）；`RemoteTools.cs` 是其中三个远程动作的实现，`ScanTools.cs` 是 `scan`，`TraceTools.cs` 是 `trace`，`IpTools.cs` 是 `ip`
+- [src/AutoHack/ToolDispatch.cs](src/AutoHack/ToolDispatch.cs): 十二个工具的唯一入口（命令与面板共用）；`RemoteTools.cs` 是其中三个远程动作的实现，`ScanTools.cs` 是 `scan`，`TraceTools.cs` 是 `trace`，`IpTools.cs` 是 `ip`，`PortTools.cs` 是 `ports`（见坑 50）
 - [src/AutoHack/DecTools.cs](src/AutoHack/DecTools.cs): DEC 解密 —— 反推 passcode + 多层递归 + 批量落盘
 - [src/AutoHack/MemTools.cs](src/AutoHack/MemTools.cs): 内存转储 —— 查看 / 导出 / 扫描内嵌 DEC
 - [src/AutoHack/ExeTools.cs](src/AutoHack/ExeTools.cs): 程序补全 —— 幂等填充 `/bin`
 - [src/AutoHack/HardenTools.cs](src/AutoHack/HardenTools.cs): 自身加固（不可逆）
 - [src/AutoHack/ToolFiles.cs](src/AutoHack/ToolFiles.cs): 工具的落盘公共部分
-- [src/AutoHack/HackEngine.cs](src/AutoHack/HackEngine.cs): 决策层 —— 目标解析、端口表、提权门槛、清痕、白名单绕过
+- [src/AutoHack/HackEngine.cs](src/AutoHack/HackEngine.cs): 决策层入口 —— 目标解析与选择（含 `ToolTargets`）；`partial` 分部：`HackEngine.Graph.cs`（图遍历）/ `HackEngine.Ports.cs`（端口与提权）/ `HackEngine.Wipe.cs`（清痕）/ `HackEngine.Whitelist.cs`（白名单）/ `HackEngine.Counter.cs`（反追踪与反扑）
 - [src/AutoHack/RefusedWhitelist.cs](src/AutoHack/RefusedWhitelist.cs): 记下「刚被白名单拒的那台」，供 `here` 在池空时回落（见坑 31）
 - [src/AutoHack/PanelSettings.cs](src/AutoHack/PanelSettings.cs): 面板设置的落盘层（ConfigFile 读写，无 UI；见坑 32）
 - [src/AutoHack/ReplaceFeedback.cs](src/AutoHack/ReplaceFeedback.cs): 给原生 `replace` 补「失败要说出来」（见坑 33）
 - [src/AutoHack/ScanTools.cs](src/AutoHack/ScanTools.cs): 地图扫描 —— 标出当前节点所在连通分量
-- [src/AutoHack/HackRun.cs](src/AutoHack/HackRun.cs): 执行层 —— 动作序列、逐帧推进、指令回显
+- [src/AutoHack/HackRun.cs](src/AutoHack/HackRun.cs): 执行层 —— 逐帧推进、动作分派、收尾；`partial` 分部：`HackRun.Plan.cs`（计划构建，纯函数）/ `HackRun.Steps.cs`（单步实现）
 - [src/AutoHack/HackScript.cs](src/AutoHack/HackScript.cs): 入侵脚本的解析与校验（`script=` 模式）；路径解析交给框架 `StringExtensions.ContentFilePath`，不自己拼内容目录前缀
 - [src/AutoHack/ModPortPolicy.cs](src/AutoHack/ModPortPolicy.cs): 模组端口白名单 —— `modports=` 的解析、命中判定、未注册协议提示（见坑 47）
 - [src/AutoHack/IpTools.cs](src/AutoHack/IpTools.cs): 收尾换 IP —— 原生三步 + 肉鸡归属迁移 + 重建 Pathfinder 查找表（见坑 29）
 - [src/SaveFix/SaveFixPlugin.cs](src/SaveFix/SaveFixPlugin.cs): 独立插件 HacknetSaveFix，修游戏本体存档 NRE
-- [src/AutoHack/HackPanel.cs](src/AutoHack/HackPanel.cs): 自绘控制面板
+- [src/AutoHack/HackPanel.cs](src/AutoHack/HackPanel.cs): 自绘控制面板（布局与入口）；`partial` 分部 `HackPanel.Draw.cs` 是绘制原语与文本度量
 - [src/AutoHack/HackOverlay.cs](src/AutoHack/HackOverlay.cs): 叠加层 —— patch `OS.Draw` / `OS.Update`
-- [src/AutoHack/HackTypes.cs](src/AutoHack/HackTypes.cs): 不可变数据 —— `HackOptions` / `HackStep`
+- [src/AutoHack/HackTypes.cs](src/AutoHack/HackTypes.cs): 不可变数据 —— `HackOptions` / `HackStep` / `PortInfo`；`partial` 分部 `HackTypes.Parse.cs` 是命令行解析
 - [src/AutoHack/PendingRuns.cs](src/AutoHack/PendingRuns.cs): headless 运行的跨线程调度
 - [src/AutoHack/AutoHackPlugin.cs](src/AutoHack/AutoHackPlugin.cs): 插件入口与命令注册
 - [src/AutoHack/AutoHack.csproj](src/AutoHack/AutoHack.csproj): 构建配置（产物落点在此）

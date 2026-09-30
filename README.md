@@ -51,7 +51,7 @@ autohack -h                                     # 帮助
 | `skip owned` | 全网扫描时跳过已拿下的肉鸡（缺省**开**）。**只对全网扫描生效** —— 「当前节点」是刻意选择，连上再点 START 就是要打它 |
 | — | **强行提权已常驻**（v1.33.2 起，不再是开关）：porthack 门禁过不了时直接给目标写 `adminIP`。防护机（`portsToCrack=9999998`）与端口表凑不够门槛的机器只有这条路拿得下 |
 | `RUN` | 按当前设置执行 |
-| TOOLS 区 `SCAN NETWORK` / `DEC DECRYPT` / `MEMORY DUMP` / `ALL PROGRAMS` / `MOD PROGRAMS` | 单击**立即执行**，无二次确认（见下表） |
+| TOOLS 区 `SCAN NETWORK` / `DEC DECRYPT` / `MEMORY DUMP` / `ALL PROGRAMS` / `MOD PROGRAMS` / `PORT LIST` | 单击**立即执行**，无二次确认（见下表） |
 | TOOLS 区 `PULL FILES` / `PURGE FILES` / `DROP NODE` | 对**当前连接的节点**动手：下载 / 删除当前目录下全部文件、把节点从网络图摘掉（后两个用告警色） |
 | TOOLS 区 `UNBREAKABLE` | 加固本机，**不可逆**，用告警色标注 |
 | TOOLS 区 `WIPE TRACES` | 清掉我的痕迹，用告警色标注。范围**随 SCOPE 段走**：「当前节点」只清当前节点所在的连通分量，其余清地图全表 |
@@ -165,6 +165,7 @@ autohack run noshow modports=mqtt,ntp,Redis
 | `autohack mem [allnodes]` | 查看本机内存转储（紧凑格式，截断显示）、导出到 `/home/MemDumps`、扫描节点上的 `.mem` 并解其内嵌 DEC |
 | `autohack exes` | 把游戏能生成的破解程序全部补进玩家 `/bin`（幂等） |
 | `autohack mods` | 扫描其它插件（workshop mod）注册的自定义 exe 与自定义端口，并把它们的 exe 补进玩家 `/bin`（幂等）。**只提供文件，不参与自动入侵** —— 这些 exe 的参数语义各异（实测 21 个里 11 个有「参数不足即退出」的硬门禁，多个开的是别人的端口），强行自动化会开错端口、刷错误、卡住动画。它列出的端口可以喂给 `autohack run modports=...`（见「模组端口」） |
+| `autohack ports` | 打出**当前节点**（未连接时本机）的端口清单：显示端口、协议名、显示名、**原始端口号**、是否有原生破解程序、是否已破。补的是 `probe` 的缺口 —— 它只打 `端口号 - 显示名`，而 `modports=` 要的是**协议名**（此前只能靠反编译模组才知道）。显示端口与原始端口并排打，是因为 `unbreakable` 随机化过端口号后两者不再相等，而 `openPort` 走的是原始端口。**只读**，不改任何端口状态 |
 | `autohack unbreakable` | 加固玩家自己这台机器（**不可逆**） |
 | `autohack pull` | 把**当前目录**下全部文件下载到本机 `/home/stash`（**一个夹**，不分流）。**注意**：`FileDownload` 类任务的判定不递归子目录（`Folder.containsFileWithData` 只查一级），故 `pull` 拉回的文件**不能**用于过这类任务 —— 要过请手敲 `scp <file>`（落 `/home`） |
 | `autohack purge` | 删除**当前目录**下全部文件（同游戏 `rm`；与清痕**同一实现**；**只删文件，不删文件夹**）。`clearfolder` 类任务要求目标目录一个文件不剩，**先 `cd` 对再敲** —— 站错目录会删掉任务不需要的东西而目标目录仍非空 |
@@ -258,13 +259,23 @@ dotnet build src/SaveFix/SaveFix.csproj -c Release
 ```
 src/AutoHack/
 ├── AutoHackPlugin.cs   插件入口：命令注册（属性扫描）+ PostLoad 自检 + 装配 Harmony
-├── HackOverlay.cs      叠加层：patch OS.Draw 画面板（Prefix 抢输入）/ patch OS.Update 推进执行
-├── HackPanel.cs        面板绘制：自绘控件 + 进度/战果视图（含主题配色 Palette）
-├── HackRun.cs          执行模型：动作序列、逐帧推进、指令回显（与绘制解耦）
-├── HackEngine.cs       决策逻辑：可连接目标遍历、端口表读取、提权门槛（含端口容量）、防火墙破解、反扑解除、跳板绕过、日志清理
-├── HackTypes.cs        不可变数据：HackOptions（参数解析）/ HackStep（含回显指令）
+├── HackOverlay.cs      叠加层：唯一的 OS.Draw / OS.Update 补丁出口 —— 画面板 + 追踪 HUD、推进入侵 + headless 队列
+├── HackPanel.cs        面板绘制：布局、绘制入口、状态与常量
+├── HackPanel.Draw.cs   　└ 自绘控件与绘制原语（Segment/Track/Measure 等）
+├── HackRun.cs          执行模型：逐帧推进、动作分派、收尾（与绘制解耦）
+├── HackRun.Plan.cs     　└ 计划构建：目标与选项 → HackStep 序列（纯函数）
+├── HackRun.Steps.cs    　└ 单步实现：把 HackStep 落到游戏 API 上
+├── HackEngine.cs       决策逻辑入口：目标解析与选择（含 ToolTargets）
+├── HackEngine.Graph.cs 　└ 网络图遍历：可达闭包、广度优先展开、揭图
+├── HackEngine.Ports.cs 　└ 端口表读取、破解命令、提权门槛（含端口容量）、防火墙
+├── HackEngine.Wipe.cs  　└ 日志清痕：识别、删除与全网扫描
+├── HackEngine.Whitelist.cs └ 白名单绕过
+├── HackEngine.Counter.cs　└ 反追踪、抑制管理员反扑、跳板拆除、静默断开
+├── HackTypes.cs        不可变数据：HackOptions / HackStep / PortInfo
+├── HackTypes.Parse.cs  　└ 命令行解析：别名表与 token 归约
 ├── HackScript.cs       入侵脚本：行式动作表的解析与校验（script= 模式）
 ├── ModPortPolicy.cs    模组端口白名单：modports= 的解析、命中判定、未注册提示
+├── PortTools.cs        端口清单：显示端口 / 协议名 / 原始端口号 / 破解状态（只读）
 ├── PendingRuns.cs      无面板运行的调度：命令线程只传参数，游戏线程构造并推进（按 OS 键控的 ConcurrentDictionary）
 ├── IsExternalInit.cs   net472 兼容垫片（record/init 需要）
 └── GlobalUsings.cs     全局 using

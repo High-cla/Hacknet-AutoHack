@@ -46,13 +46,6 @@ using Pathfinder.Port;
 internal static class ModTools
 {
     /// <summary>
-    /// 一个自定义 exe。<paramref name="FileName"/> 是补进 /bin 时用的名字（见
-    /// <see cref="FileNameFor"/>）；<paramref name="ExeData"/> 是执行时用于比对的键，
-    /// 必须原样写入 <c>FileEntry.data</c>。
-    /// </summary>
-    internal readonly record struct ModExe(string FileName, string ClassName, string XmlId, string ExeData, string Owner);
-
-    /// <summary>
     /// 一个自定义端口。<paramref name="CodePort"/> 是 <c>PortRecord.OriginalPortNumber</c>
     /// ——游戏内部的协议身份，与玩家看到的显示端口号不同（显示号可被 unbreakable 随机化）。
     /// </summary>

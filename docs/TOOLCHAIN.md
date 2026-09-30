@@ -197,7 +197,7 @@ sg run -p 'class $N' -l boguslang src/AutoHack/BootBoost.cs
 **① 表达式 / 调用级 → `run --pattern` 可用**
 
 ```bash
-ast-grep run --pattern 'NativeExes.Tick($$$)' --lang csharp src    # ✅ 命中 HackOverlay.cs:203
+ast-grep run --pattern 'NativeExes.Tick($$)' --lang csharp src    # ✅ 命中 HackOverlay.cs:245
 ```
 
 **② 方法 / 类声明级片段 → `run --pattern` 恒 0 命中**
@@ -349,8 +349,8 @@ jq -c '{nodes,edges,commit}' .codebase-memory/artifact.json
 行号是最可靠的交叉验证：
 
 ```bash
-rg -n -F 'ConnectedPool(OS os)' src/AutoHack/     # HackEngine.cs:527
-# 图内对应 qn 的 lines 字段也应是 527
+rg -n -F 'ConnectedPool(OS os)' src/AutoHack/     # HackEngine.cs:186
+# 图内对应 qn 的 lines 字段也应是 186
 ```
 
 ### 常用查询

@@ -2,17 +2,15 @@ namespace AutoHack;
 
 using System.Collections.Concurrent;
 using Hacknet;
-using HarmonyLib;
 using Microsoft.Xna.Framework;
 
 /// <summary>
 /// 无面板（headless）运行队列。命令处理发生在命令线程，不宜直接改游戏状态，
 /// 故入队后由 OS.Update 在游戏线程上逐帧推进。
 /// </summary>
-[HarmonyPatch]
 internal static class PendingRuns
 {
-    /// <summary>一条待跑的 headless 运行。构造推迟到游戏线程（见 <see cref="OnOSUpdate"/>）。</summary>
+    /// <summary>一条待跑的 headless 运行。构造推迟到游戏线程（见 <see cref="Tick"/>）。</summary>
     private sealed class Entry(HackOptions options)
     {
         internal readonly HackOptions Options = options;
@@ -39,12 +37,26 @@ internal static class PendingRuns
     /// <summary>该 OS 上是否已有 headless 运行在排队或推进。供面板入口做互斥。</summary>
     internal static bool BusyFor(OS os) => Pending.ContainsKey(os);
 
-    [HarmonyPostfix]
-    [HarmonyPatch(typeof(OS), nameof(OS.Update))]
-    private static void OnOSUpdate(OS __instance, GameTime gameTime)
+    /// <summary>
+    /// 清掉某个 OS 的全部排队。由 <see cref="HackOverlay.Open"/> 在换局（换过 OS 实例）时调用。
+    /// </summary>
+    internal static void Forget(OS os)
     {
-        // 演出队列的泵由 HackOverlay 的补丁独家负责 —— 两个补丁同挂 OS.Update，
-        // 都调 NativeExes.Tick 就是同一帧挂两个动画（见 NativeExes.Tick 的一帧一个约束）。
+        if (os != null)
+        {
+            Pending.TryRemove(os, out _);
+        }
+    }
+
+    /// <summary>
+    /// 推进队列。<b>由 <see cref="HackOverlay"/> 在它唯一的 <c>OS.Update</c> Postfix 里调用</b>，
+    /// 本类不再自己挂补丁 —— 合并的理由与方法体里的注释同源。
+    /// </summary>
+    internal static void Tick(OS __instance, GameTime gameTime)
+    {
+        // 演出队列的泵由 HackOverlay 独家负责（它先调 NativeExes.Tick 再调本方法）——
+        // 两个补丁同挂 OS.Update 时，两边都调 NativeExes.Tick 就是同一帧挂两个动画
+        // （见 NativeExes.Tick 的一帧一个约束）。合并补丁后这个约束由调用次序保证。
 
         if (!Pending.TryGetValue(__instance, out var entry))
         {

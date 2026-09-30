@@ -4,7 +4,6 @@ using System;
 using System.Globalization;
 using Hacknet;
 using Hacknet.Gui;
-using HarmonyLib;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 
@@ -18,13 +17,17 @@ using Microsoft.Xna.Framework.Graphics;
 /// 同样贴屏幕左下角、同样用告警红（<c>new Color(170, 0, 0)</c>，TraceTracker.cs:37）。
 /// 只是排在它<b>上方</b> —— 两套追踪可能同时存在，叠在一起会互相盖住。
 ///
-/// 为什么必须挂在 <c>OS.Draw</c> 而不是面板里：本 HUD 回答的是「现在危不危险」，
+/// 为什么必须每帧都画、而不是只画在面板里：本 HUD 回答的是「现在危不危险」，
 /// 而危险恰恰发生在玩家没开面板、正在终端里操作的时候。挂在面板上等于没有。
+///
+/// <b>补丁入口不在这里</b>：<c>OS.Draw</c> 上的 Postfix 由 <see cref="HackOverlay"/> 独家持有，
+/// 它在本类之后调用 <see cref="Draw"/>（HUD 必须画在面板之后，否则会被面板盖住）。
+/// 同一个方法上挂两个补丁没有额外能力，只多一次 Harmony 分派与一次
+/// <c>GuiData.spriteBatch</c> 空判 —— 三个 <c>OS.Draw</c> 补丁已合并为一个。
 ///
 /// 与 <see cref="TraceTools"/> 的分工：工具是「动手掐掉」，HUD 是「让玩家先看见」。
 /// 只有 HUD 没有工具就看得见却掐不掉，只有工具没有 HUD 就想不起去掐。
 /// </summary>
-[HarmonyPatch]
 internal static class TraceHud
 {
     /// <summary>与 <c>TraceTracker.timerColor</c> 同色（TraceTracker.cs:37）。</summary>
@@ -39,16 +42,14 @@ internal static class TraceHud
 
     private const int LeftMargin = 10;
 
-    [HarmonyPostfix]
-    [HarmonyPatch(typeof(OS), nameof(OS.Draw))]
-    private static void OnOSDraw(OS __instance)
+    internal static void Draw(OS os)
     {
-        if (__instance == null || !__instance.IsActive)
+        if (os == null || !os.IsActive)
         {
             return;
         }
 
-        if (!TryRead(__instance, out var count, out var nearest))
+        if (!TryRead(os, out var count, out var nearest))
         {
             return;
         }

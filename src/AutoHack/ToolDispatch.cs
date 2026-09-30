@@ -26,9 +26,10 @@ internal static class ToolDispatch
     internal const string Ip = "ip";
     internal const string Wipe = "wipe";
     internal const string Mods = "mods";
+    internal const string Ports = "ports";
 
     private static readonly string[] Verbs =
-        { Scan, Dec, Mem, Exes, Mods, Unbreakable, Pull, Purge, Drop, Trace, Skip, Ip, Wipe };
+        { Scan, Dec, Mem, Exes, Mods, Ports, Unbreakable, Pull, Purge, Drop, Trace, Skip, Ip, Wipe };
 
     /// <summary>help 文本来源：子命令与其说明只写一次，命令入口与文档都读这里。</summary>
     internal static readonly (string Verb, string Help)[] Help =
@@ -46,6 +47,46 @@ internal static class ToolDispatch
         (Ip, "assign this machine a new IP (keeps owned-node tags in sync)"),
         (Wipe, "wipe MY traces  [here]  (/log entries naming your IP; default: whole map)"),
         (Mods, "list + add the crack exes other plugins registered into /bin"),
+        (Ports, "list the connected node's ports (protocol, display port, original port, state)"),
+    };
+
+    /// <summary>
+    /// 面板 TOOLS 区的按钮表：动词 + 按钮文案 + 是否危险（危险按钮用告警色）。
+    ///
+    /// 与 <see cref="Help"/> 并列放在这里，而不是留在 <see cref="HackPanel"/> ——
+    /// 加一个工具原本要改 const / <see cref="Verbs"/> / <see cref="Help"/> / <see cref="Dispatch"/>
+    /// 四处再加面板一处；按钮表搬过来后只剩本文件一处，面板按长度自算行数。
+    /// 顺序即面板上的排布顺序，与 <see cref="Help"/> 的顺序无关。
+    /// </summary>
+    internal static readonly (string Verb, string Label, bool Danger)[] Panel =
+    {
+        // 扫描不是「拿下一台机器」，但它是面板上最高频的动作，与工具按钮同构：
+        // 单击立即执行、无二次确认。故并入同一张表并放首位。
+        (Scan, "SCAN NETWORK", false),
+        (Dec, "DEC DECRYPT", false),
+        (Mem, "MEMORY DUMP", false),
+        (Exes, "ALL PROGRAMS", false),
+        (Mods, "MOD PROGRAMS", false),
+        (Ports, "PORT LIST", false),
+        (Unbreakable, "UNBREAKABLE", true),
+
+        // 三个远程动作，作用于**当前连接的节点**；未连接时 pull/drop 报错，
+        // purge 退到玩家自己的机器（与终端 rm 的作用域规则一致，回显里会写明）。
+        // 前两个看的是「当前目录」，取自 Programs.getCurrentFolder(os)。
+        // 换 IP 与它们不同：作用于**本机**，与「当前节点」无关，故排在远程动作之前。
+        (Ip, "NEW IP", false),
+
+        (Pull, "PULL FILES", false),
+        (Purge, "PURGE FILES", true),
+        (Drop, "DROP NODE", true),
+
+        // 清痕作用于**我的痕迹**（/log 里含玩家 IP 的条目），范围随 SCOPE 段走。
+        // 用告警色是因为它删的是数据。
+        (Wipe, "WIPE TRACES", true),
+
+        // 这里**没有**独立的反追踪按钮：止追踪已并进选项区的「disconnect & clear
+        // traces」复选框（见 HackPanelState.Disconnect）—— 面板上只该有一个与追踪
+        // 有关的控件。
     };
 
     /// <summary>help 里动词列的宽度，供调用方排版。</summary>
@@ -112,6 +153,10 @@ internal static class ToolDispatch
 
             case Mods:
                 ModTools.Run(os);
+                break;
+
+            case Ports:
+                PortTools.Run(os);
                 break;
 
             case Unbreakable:

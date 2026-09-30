@@ -3,6 +3,16 @@ namespace AutoHack;
 using Hacknet;
 
 /// <summary>
+/// 其它插件（workshop mod）注册的一个自定义 exe。<paramref name="FileName"/> 是补进 /bin 时
+/// 用的名字（见 <see cref="ModTools.FileNameFor"/>）；<paramref name="ExeData"/> 是执行时
+/// 用于比对的键，必须原样写入 <c>FileEntry.data</c>。
+///
+/// 声明在这里而不是 <see cref="ModTools"/> 内：唯一的消费方是 <see cref="FillCustom"/>，
+/// 放一起可让两边都不必跨类型引用。
+/// </summary>
+internal readonly record struct ModExe(string FileName, string ClassName, string XmlId, string ExeData, string Owner);
+
+/// <summary>
 /// 程序补全：把游戏已经生成好的破解程序补进玩家 /bin。
 ///
 /// exe 二进制不是我们造的 —— PortExploits.populate()（PortExploits.cs:38）在启动时
@@ -82,7 +92,7 @@ internal static class ExeTools
     /// （ExecutableManager.cs:47-71），<b>必须原样写入</b>：改写或截断都会让
     /// <c>OnExeExecute</c> 匹配不上，表现成「敲了名字没反应」而不报错。
     /// </summary>
-    internal static (int Added, int Skipped) FillCustom(OS os, IReadOnlyList<ModTools.ModExe> exes)
+    internal static (int Added, int Skipped) FillCustom(OS os, IReadOnlyList<ModExe> exes)
     {
         var bin = os.thisComputer.getFolderFromPath("bin", createFoldersThatDontExist: true);
         var added = 0;

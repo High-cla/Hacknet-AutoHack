@@ -49,9 +49,16 @@ internal static class HackOverlay
             PanelSettings.Load(fresh);
             _state = fresh;
 
-            // 同一局内重复开关面板不清队列；换 OS 才清 —— 否则上一局排的动画
-            // 会漏进新一局，且旧 OS 的 exe 引用会卡住等待判据（见 NativeExes.Tick）。
+            // 换局即清全部跨局队列（都只有这里清；此刻 _os 还是**旧**实例，正是要忘掉的那个）：
+            // · 演出队列 —— 否则上一局排的动画会漏进新一局，且旧 OS 的 exe 引用
+            //   会卡住等待判据（见 NativeExes.Tick）；
+            // · headless 队列 —— 上一局排的运行不该在新一局执行。
             NativeExes.Reset();
+            PendingRuns.Forget(_os);
+
+            // 追踪 HUD 不在此列：它每帧现读 OS.TrackersInProgress，没有需要清的缓存。
+            // 白名单拒绝记录也不在此列：它是 ConditionalWeakTable，键就是 OS，
+            // 旧实例被回收时条目自动消失（见 RefusedWhitelist 的字段注释）。
         }
 
         _os = os;
@@ -86,15 +93,34 @@ internal static class HackOverlay
         }
     }
 
+    /// <summary>
+    /// <c>OS.Draw</c> 的唯一 Postfix —— 面板与追踪 HUD 都从这里分派。
+    ///
+    /// <b>为什么合并</b>：合并前有三个 Postfix 挂同一方法（面板、HUD、以及一个只用来
+    /// 抢输入的 Prefix），各自重取 <c>GuiData.spriteBatch</c> 做同样的空判。合并后
+    /// 只剩 Prefix（抢输入）+ Postfix（绘制）各一个，且绘制次序在一个地方就看得全。
+    ///
+    /// <b>次序是硬约束</b>：HUD 必须画在面板<b>之后</b>，否则会被面板盖住；
+    /// 而 HUD 又必须在面板<b>关着时照画</b>（它答的是「现在危不危险」，而危险恰恰发生
+    /// 在玩家没开面板的时候）。两条一起决定了下面这个结构：面板走自己的早返回分支，
+    /// HUD 在方法末尾无条件执行 —— 而不是共用一个 <c>if (!Visible) return;</c>。
+    /// </summary>
     [HarmonyPostfix]
     [HarmonyPatch(typeof(OS), nameof(OS.Draw))]
     private static void OnOSDraw(OS __instance)
     {
-        if (!Visible(__instance))
+        if (Visible(__instance))
         {
-            return;
+            DrawPanel(__instance);
         }
 
+        // 与面板无关：自己读 OS.TrackersInProgress，不共享上面任何状态。
+        TraceHud.Draw(__instance);
+    }
+
+    /// <summary>面板的绘制与按钮动作。仅在面板可见时调用。</summary>
+    private static void DrawPanel(OS __instance)
+    {
         var spriteBatch = GuiData.spriteBatch;
         if (spriteBatch?.GraphicsDevice == null)
         {
@@ -202,12 +228,24 @@ internal static class HackOverlay
         // 命令行输出，不要战果报告）。面板运行视图本来就有进度条与计数。
     }
 
+    /// <summary>
+    /// <c>OS.Update</c> 的唯一 Postfix —— 演出泵、headless 队列、面板运行都从这里分派。
+    ///
+    /// <b>为什么合并</b>：合并前它与 <see cref="PendingRuns"/> 各挂一个 Postfix，两条
+    /// 补丁的先后顺序由 Harmony 的装配顺序决定（不保证），而 <c>NativeExes.Tick</c>
+    /// 有「一帧只挂一个动画」的约束（见该方法的注释）—— 两个补丁都调它就会同帧挂两个。
+    /// 此前靠注释互相约定（「本队列的泵由 HackOverlay 独家负责」），现在靠代码：
+    /// 一个补丁，次序写死在下三行里。
+    /// </summary>
     [HarmonyPostfix]
     [HarmonyPatch(typeof(OS), nameof(OS.Update))]
     private static void OnOSUpdate(OS __instance, GameTime gameTime)
     {
-        // 演出队列独立于运行推进：跑完收尾后仍要把排着的动画播完。
+        // 演出队列独立于运行推进：跑完收尾后仍要把排着的动画播完。唯一调用点。
         NativeExes.Tick(__instance);
+
+        // headless 队列（无面板的运行）。它自己按 OS 实例过滤，不读 _os / _run。
+        PendingRuns.Tick(__instance, gameTime);
 
         if (_run is not { Finished: false } || __instance != _os)
         {

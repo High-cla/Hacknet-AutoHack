@@ -298,8 +298,19 @@ internal sealed partial class HackRun
     /// 那个目的毫无贡献。若将来要「无论门槛、破满全部」，那是一个<b>新的选项</b>，
     /// 不该靠脚本模式绕过 —— 否则同一条脚本在内置次序下是另一套行为，更难解释。
     /// </summary>
-    private static bool IsPortQuotaMet(HackStep step)
-        => step.Kind == HackStepKind.OpenPort && HackEngine.PortQuotaMet(step.Target);
+    private bool IsPortQuotaMet(HackStep step)
+    {
+        if (step.Kind != HackStepKind.OpenPort)
+        {
+            return false;
+        }
+
+        // 演出开着时把在途动画算进来（v1.40.0）：端口现在由动画的 Completed() 去开，
+        // 而端口步一帧一个入队、不等动画，故走进第 N 步时前 N-1 个都还没落地 ——
+        // 只看 OpenPortCount 会让判据恒假，整台可破端口全排上动画（实测全表多破 163 个）。
+        // noshow 传 0：那时端口在 ApplyOpenPort 里立即开，无在途，判据与原先逐字相同。
+        return HackEngine.PortQuotaMet(step.Target, Options.ShowExes ? NativeExes.InFlight(step.Target) : 0);
+    }
 
     private void Apply(OS os, HackStep step)
     {

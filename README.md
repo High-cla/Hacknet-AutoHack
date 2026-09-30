@@ -2,11 +2,9 @@
 
 仓库：<https://github.com/High-cla/Hacknet-AutoHack> · 许可：[MIT](LICENSE)
 
-基于 Hacknet + Pathfinder 的自动入侵插件，带**交互式控制面板**。**优先使用游戏原生机制**：每个动作都走原生 API（`Programs.connect` / `Computer.openPort` / `Computer.giveAdmin` / `makeFile`）执行，并把对应指令回显进终端，行为与真人敲 `connect` / `probe` / `sshcrack 22` / `porthack` 一致 —— **终端看到什么，游戏状态就变什么**。端口步是这条规则的强化版：命令与端口都跟着原生动画走，动画**挂上面板那一刻**才回显、**跑完那一刻**才开端口（见下 `native exes`）。四个游戏机制被显式处理：**管理员反扑**（断开时 `disconnectionDetected` 会关端口并把 `adminIP` 还原成机器自己，故离开前先解除反扑）、**跳板**（`proxyActive` 会拦下破解程序，先过载绕过）、**追踪**（`TraceTracker` 只在连着被追踪目标时推进，跑完即 `dc` 中止）、以及**强行提权**（porthack 门禁过不了时直接写 `adminIP`，见下）。
+基于 Hacknet + Pathfinder 的自动入侵插件，带**交互式控制面板**。**优先使用游戏原生机制**：每个动作都走原生 API（`Programs.connect` / `Computer.openPort` / `Computer.giveAdmin` / `makeFile`）执行，并把对应指令回显进终端，行为与真人敲 `connect` / `probe` / `sshcrack 22` / `porthack` 一致 —— **终端看到什么，游戏状态就变什么**。端口步是这条规则的强化版：命令与端口都跟着原生动画走，动画**挂上面板那一刻**才回显、**跑完那一刻**才开端口（见下「面板」的 `native exes` 行）。四个游戏机制被显式处理：**管理员反扑**（断开时 `disconnectionDetected` 会关端口并把 `adminIP` 还原成机器自己，故离开前先解除反扑）、**跳板**（`proxyActive` 会拦下破解程序，先过载绕过）、**追踪**（`TraceTracker` 只在连着被追踪目标时推进，跑完即 `dc` 中止）、以及**强行提权**（porthack 门禁过不了时直接写 `adminIP`，见下）。
 
 ## 安装
-
-### 下载现成产物
 
 从 [Releases](https://github.com/High-cla/Hacknet-AutoHack/releases/latest) 取 `AutoHack.dll`，放进游戏的 `BepInEx/plugins/` 目录：
 
@@ -14,9 +12,7 @@
 <Hacknet>/BepInEx/plugins/AutoHack.dll
 ```
 
-> 另有独立插件 **HacknetSaveFix**（修游戏本体存档 NRE，见「架构」），随同一个 Release 发布，放进同一个 `plugins/` 目录即可。
-
-要从源码构建，见「构建」。
+> 另有独立插件 **HacknetSaveFix**（修游戏本体存档 NRE，见「架构」）—— 它**单独发版**（[HacknetSaveFix 1.0.0](https://github.com/High-cla/Hacknet-AutoHack/releases/tag/v1.0.0)），取 `HacknetSaveFix.dll` 放进同一个 `plugins/` 目录即可。两者互不依赖，可各自单独安装或卸载。
 
 ## 使用
 
@@ -27,7 +23,7 @@ autohack                                        # 开关控制面板
 autohack run [here] [stay] [redo] [nologs] [nomark] [direct]   # 不开面板，直接执行
 autohack run script=stealth                     # 用脚本决定入侵次序（见下）
 autohack scan|dec|mem [allnodes]                # 独立工具（见下表）
-autohack exes|unbreakable|mods|ports           # 补程序 / 加固本机 / 扫模组（与网络范围无关）
+autohack exes|unbreakable|mods|ports            # 补程序 / 加固本机 / 扫模组（与网络范围无关）
 autohack pull|purge|drop|trace|ip               # 对当前连接节点动手 / 掐追踪 / 换本机 IP
 autohack wipe [here]                            # 清掉我的痕迹（缺省全网，here 收窄到当前分量）
 autohack skip                                   # 完成当前任务并接下一个（含 DLC 合同与 Kaguya Trials）
@@ -47,11 +43,11 @@ autohack -h                                     # 帮助
 | `upload marker` | 是否上传 `~/autohack.txt` 标记（缺省**关**） |
 | `use known creds` | 用已知账密登入目标（缺省**关**，v1.15.0 起）—— 成功即提权，跳过全部破端口 |
 | `native exes` | 把原生破解程序挂进 RAM 面板当演出（缺省**开**）。**端口与回显都跟着动画走**：终端那行 `sshcrack 22` 在动画**真正挂上面板那一刻**才打出，排不上演出（无对应程序 / 队列满被丢弃）时立即打出并直接开端口 —— 故「终端出现某行命令」与「画面上开始跑那个动画」严格一一对应（v1.33.3 起端口由动画自己开）：那 9 个原生破解程序各自在跑完时调 `openPort`，所以看到动画跑完 = 那个端口真的开了 —— 不再是「状态早写好、动画只是重演」。内存够时多个动画并发（实测峰值 3 个同屏），提权前会等本台动画跑完（上限 180 秒）。没有对应动画的端口（443/3659/3724/9418/211/32）立即开。想跳过演出用 `noshow`（端口立即开，无动画；每台的 `probe` 端口报告照打 —— 那是侦察结果，不是演出） |
-| `new IP after run` | 跑完把本机换成新 IP（缺省**开**）—— 游戏原生的「换 IP 保命」，并把全图已控机器的归属迁到新 IP |
+| `new IP after run` | 跑完把本机换成新 IP（缺省**关**）—— 游戏原生的「换 IP 保命」，并把全图已控机器的归属迁到新 IP |
 | `disconnect when done` | 每个目标跑完是否 `dc`（缺省**关**）—— 断开会终止会话、清空 `navigationPath`，属行为选择。**只管断开**：清追踪已是每轮收尾的恒定动作，不再由开关控制 |
 | `skip owned` | 全网扫描时跳过已拿下的肉鸡（缺省**开**）。**只对全网扫描生效** —— 「当前节点」是刻意选择，连上再点 START 就是要打它 |
 | `auto mod ports` | 允许自动入侵去开**全部已注册的模组端口**（缺省**关**），等价于命令行 `modports=*`。勾上后不必再逐个点名协议 —— 见「模组端口」 |
-| — | **强行提权已常驻**（v1.33.2 起，不再是开关）：porthack 门禁过不了时直接给目标写 `adminIP`。防护机（`portsToCrack=9999998`）与端口表凑不够门槛的机器只有这条路拿得下 |
+| — | **强行提权已常驻**（v1.33.2 起，不再是开关）：porthack 门禁过不了时直接给目标写 `adminIP`。防护机（`portsToCrack=9999998`）与端口表凑不够门槛的机器只有这条路拿得下。提权落定后补一行原生收尾文案 `--Porthack Complete--`（v1.40.0，与 `PortHackExe.Completed()` 同串） |
 | `RUN` | 按当前设置执行 |
 | TOOLS 区 `SCAN NETWORK` / `DEC DECRYPT` / `MEMORY DUMP` / `ALL PROGRAMS` / `MOD PROGRAMS` / `PORT LIST` | 单击**立即执行**，无二次确认（见下表） |
 | TOOLS 区 `PULL FILES` / `PURGE FILES` / `DROP NODE` | 对**当前连接的节点**动手：下载 / 删除当前目录下全部文件、把节点从网络图摘掉（后两个用告警色） |
@@ -61,79 +57,11 @@ autohack -h                                     # 帮助
 
 执行期间面板切换为进度视图：阶段 + 百分比、分段进度条、当前目标与动作计数，下方滚动显示逐目标战果。完成后显示 `LAST RUN` 与 `RUN AGAIN`。
 
-**推进没有任何时间间隔**（v1.34.0 起）。此前非端口步吃 `0.35s`、端口步吃 `PortDelay`（缺省 `0.6s`），
-实测存档 167 台 / 642 个可破端口一轮要 5 分钟以上，其中 **292 秒纯粹是「等」**。关掉演出后端口在
-`ApplyOpenPort` 里立即开，压根没有可等的东西。现在整轮只受三道闸门约束：
+**推进没有任何等待间隔**，整轮只受三道闸门约束：单帧步数预算 512、提权前等本台动画跑完（**仅勾着 `native exes`**，上限 180 秒，超时直接补开端口）、以及**端口步每帧只推进一步**。最后这道两种模式都启用 —— 它同时管「动画入队速率」与「终端回显速率」，去掉它，一帧 512 步会把整轮几百个端口挤进同一帧，终端一次涌出几百行，看不清破了什么。代价是端口步恒为 **1 帧/个 = 60 个/秒**：642 个端口约 **10.7 秒**。这是刻意取舍 —— 战果要看得见，而 60/秒已远快于任何人工节奏。
 
-1. 单帧步数预算（512 步）—— 防极端规模一帧卡死；
-2. **端口步每帧只推进一步（两种模式都一样）** —— 它同时管两件事：
-   动画入队速率（一帧至多一个动画请求）与**终端回显速率**（一帧至多一行 `sshcrack`）。
-   去掉它，一帧 512 步会把整轮 642 个端口挤进同一帧，终端一次刷出几百行，看不清破了什么；
-3. 提权前等本台动画跑完 —— **仅当勾着 `native exes`**（上限 180 秒，超时直接补开端口）。
+### 命令行
 
-代价是端口步恒为 **1 帧/个 = 60 个/秒**：642 个端口约 **10.7 秒**，整轮实测由
-**5.2 min 降到约 11 秒**。这是刻意的取舍 —— 战果要看得见，而 60/秒已远快于任何人工节奏。
-按 80/20：这道改动吃掉了几乎全部收益，故不再保留任何节奏档位（`slow` / `fast` / `instant` 与
-`PORT INTERVAL` 滑条、`delay=` 参数、脚本的 `delay` 行已一并删除 —— 留一个「更慢」的开关
-只是把玩家往坑里引）。
-
-### 端口破够就提权
-
-提权门禁只看端口**总数**（`OS.cs:1916` 的 `num2 > portsNeededForCrack`），**不看具体是哪些端口**。
-故端口步破到够数就停，剩下的直接跳过 —— 实测存档 169 台：可破端口步 **650 → 487（省 25.1%）**，
-79 台有节省。
-
-- 判据与游戏门禁**同源**（`HackEngine.PortQuotaMet`）。Pathfinder 的 `FixPortHack` IL 注入
-  （`ComputerExtensions.cs:486-513`）把游戏那段 `portsOpen` 求和换成了 `CountOpenPorts()`，
-  故两边读的是同一份数据，不会出现「插件认为够了、游戏认为不够」。
-- 破端口是顺序的，故「破到够为止」与「按门槛挑着破」等价，且自动覆盖某步没破成的情形。
-- 跳过时**静默**（不回显）—— 没敲过的命令不该出现在终端里。跳过也不触发「端口步每帧一步」
-  那道闸门，故一帧内就能跳完该台剩余端口步，零额外耗时。
-- **提权门禁零回归**：169 台逐台模拟新旧终态，旧路径能提权的，新路径同样能提权（0 处回归）。
-- 边界：EOS 设备（门槛 = 端口容量，`2 > 2` 恒假）、防护机（门槛 `9999998`）、
-  门槛凑不够的机器 —— 三类都照常破满，因为已开端口数永远越不过门槛。
-- **`security=0` 的机器门槛是 `-1`**（`Computer.cs:202` 的 `security - 1`），`0 > -1` 成立
-  ⇒ **一个端口都不破**。存档里 8 台。这是严格按门禁语义的结果，不是缺陷。
-
-### 模组端口
-
-其它插件（workshop mod）注册的自定义端口，游戏原生**进不了自动入侵**：判据是
-`PortExploits.cracks` 里有该端口的破解程序，而它只含原生 36 个端口 —— 实测三个模组注册的
-16 个端口（LunarOS 3 / SRPortToolkit 8 / ZeroDayToolKit 5）一个都不在其中，且没有任何模组
-往 `cracks` 里写过。故本插件加一张**手动白名单**，缺省空：
-
-```
-autohack run noshow modports=mqtt,ntp,Redis
-```
-
-- **端口由插件直接开**，不跑模组自己的破解程序。回显的是占位命令 `portcrack <端口>`，
-  一眼可辨不是真程序 —— 那些 exe 的参数语义各异（`RedisBreaker` 要显示端口号、
-  `SSHPacket` 要 `-s` 子命令、`LunarEclipse` 开的是别人家的端口），编一条「看起来像真的」
-  的命令只会让玩家敲了报错。
-- **收益是真实的**：提权门槛判据是「已开端口数 **>** `portsNeededForCrack`」。实测存档有
-  13 台机器门槛 2~8 而端口表只有 1~4 个，破满也差 1~6 个，只能走强行提权兜底。
-  **每多开一个模组端口，就少一台机器需要兜底。**
-- **缺省一个都不开**：这些端口是各模组的剧情拼图（`moonshine` 是 LunarEclipse 跑完才开的、
-  `lunardefender` 存在时 `PortBackdoor` 会被 LunarOS 的 Prefix 拦下并报
-  「Execution failed」）。提前开等于替玩家跳过解谜，故必须显式点名。
-- **两种开法**：逐个点名 `modports=mqtt,ntp`（精确控制），或 `modports=*` 全开。
-  面板上对应 `auto mod ports` 复选框（就是 `*`）—— 不想记协议名时勾它。
-- **先看有哪些**：`autohack ports` 打出当前节点的端口表（协议名 / 显示端口 / **原始端口号** /
-  破解状态），并在末尾提示那台机器上的模组端口。注意它是**按机器**读的 —— 换一台机器
-  可能还有别的模组端口，所以「全开」用 `*` 比抄一份名单更稳。
-- **名字写错会提示**：模组未加载或拼错时端口表里根本没有那个协议，整轮会安静地少开几个端口。
-  故开跑前报一行 `no plugin has registered a port named '...'`。只提示不拦截。
-- 协议名匹配**大小写不敏感**（`Redis` / `IMP` / `mqtt` 混用），但「是否注册」的检查用框架的
-  Ordinal 比较 —— 写了 `redis` 而注册名是 `Redis` 时功能正常，但会多报一行未注册提示。
-
-### 设置持久化
-
-面板里的每一项设置（含面板位置与收起状态）都写进 `BepInEx/config/com.highcla.autohack.cfg`，重开游戏后原样恢复。
-
-- 面板是**唯一**的设置界面 —— 没有第二套 UI，也就不存在两处设置互相漂移。cfg 只作落盘载体，手改它同样生效；非法值由 BepInEx 忽略并退回该项缺省，不会让游戏出错。
-- 落盘时机是**指针抬起**而非每次改动：拖动面板或拉滑条期间每帧都在改值，逐帧写盘等于把磁盘打满。点击类控件在点击那一帧即落盘。
-
-### 命令行参数（`autohack run` 时）
+#### `autohack run` 的参数
 
 | 参数 | 说明 |
 |---|---|
@@ -155,15 +83,7 @@ autohack run noshow modports=mqtt,ntp,Redis
 > 差额是「可以直接敲 IP 连上、但不在连线上」的机器 —— `Programs.connect` 遍历的是
 > `netMap.nodes` 全表，本来就不检查 `links`。
 
-### 自动换 IP
-
-每轮入侵收尾时，玩家机自动换一个新 IP，并把**全图所有已控机器**的归属迁移过去。这是游戏原生的「换 IP 保命」动作（ISP 服务器上的 `Assign New IP`，`ISPDaemon.cs:122-142`），本插件把它自动化。
-
-- **为什么**：追踪者判定依据是日志里出现过的玩家 IP —— 换掉 IP 等于让已有记录失去指向。这是游戏设计给玩家的最后手段（CSEC 任务链的追踪危机里，就要求玩家去 ISP 服务器手动改）。
-- **归属迁移**：提权时游戏把玩家当时的 IP 写进目标机（`adminIP`），判据是 `adminIP == 玩家IP`。换 IP 会让该判据全部落空，故收尾时把全图里仍标记着旧 IP 的机器一并改成新 IP，已有战绩不丢。
-- **回显**：终端写明 `new local IP: <旧> -> <新> (N owned node(s) re-tagged)`；`N` 为 0 表示当前没有被控机器。
-- **两种用法**：面板 TOOLS 区的 `NEW IP` 按钮（单击立即换一次，与命令行 `autohack ip` 同一实现）；或 `new IP after run` 复选框（每轮收尾自动换）。
-- **缺省关**（v1.32.6 起，此前为开）：换 IP 会**打断要求 IP 不变的任务链** —— lelzSec 那条明写「Your IP's been whitelisted (so dont go changing it for now)」，白名单记的是当时的 IP。要每轮自动换就勾上复选框或命令行传 `newip`；只换这一次用按钮/`autohack ip`。
+#### 独立工具
 
 | 命令 | 作用 |
 |---|---|
@@ -184,21 +104,9 @@ autohack run noshow modports=mqtt,ntp,Redis
 
 注意 `pull` 拉回来的 `.exe` **不能直接跑**：游戏只在 `/bin` 里解析可执行程序（`ProgramRunner.cs:689` 写死 `searchForFolder("bin")`），要用得先 `mv` 到 `/bin`。
 
-#### 自身加固（不可逆）
-
-对玩家自己的机器置：`portsNeededForCrack = 9999998`、`traceTime = 1`、
-`hasProxy/proxyActive/proxyOverloadTicks/startingOverloadTicks` **四字段同步**置
-`9999998`（`addProxy` 的语义就是一次设定四者，`Computer.cs:243-252` —— 只改
-`hasProxy` 会让 `DisplayModule` 按 `0/0` 算进度条）、`firewall.solution` 换 12 位随机串。
-执行前后各打印一次全部字段，便于核对与手工还原。
-
-端口走 Pathfinder 的 `PortState.SetCracked`（15 个原版协议），**不写原版 `portsOpen`** ——
-Pathfinder 已用 Harmony Prefix 接管 `openPort`/`openPorts`（`ComputerExtensions.cs:184-204`），原版列表永不更新。
-
 ### 脚本模式
 
-脚本文件放在 `Content/HackerScripts/`，扩展名可写可不写，
-`#` 开头是注释（游戏本身没有注释语法，这里补一个，是唯一比游戏宽松的地方）：
+脚本文件放在 `Content/HackerScripts/`，扩展名可写可不写，`#` 开头是注释（游戏本身没有注释语法，这里补一个，是唯一比游戏宽松的地方）：
 
 ```
 # samples/stealth.txt —— 不碰端口，只靠已知账密登入
@@ -220,24 +128,52 @@ dc    $#%#$
 | `rm` | 清除 `/log` |
 | `dc` | 断开连接 |
 
-脚本里**没有** `delay` / `config` 行：v1.34.0 起本插件不再有步进间隔（见上「推进没有任何时间间隔」），
-写了会被当成未知动作拒绝。
+脚本里**没有** `delay` / `config` 行：v1.34.0 起本插件不再有步进间隔（见上「面板」一节的推进说明），写了会被当成未知动作拒绝。
 
-**三个动作不用写**，AutoHack 恒定补上 —— 它们是正确性要求而非风格偏好：
-`connect`（未连接时）、`neutralize`（解除管理员反扑，否则断开后 0~20 秒肉鸡标记丢失）、
-`killtrace`（收尾反追踪）。
+**三个动作不用写**，AutoHack 恒定补上 —— 它们是正确性要求而非风格偏好：`connect`（未连接时）、`neutralize`（解除管理员反扑，否则断开后 0~20 秒肉鸡标记丢失）、`killtrace`（收尾反追踪）。
 
-**`rm` 必须排在 `dc` 之前**，否则整份脚本被拒绝并说明原因。`rm` 的作用域是「当前连接」
-（`Programs.rm` 读 `os.connectedComp`），断开之后再执行，删的是**玩家自己**的文件系统 ——
-这正是玩家手敲时「命令敲对了却没有效果」的根因。
+**`rm` 必须排在 `dc` 之前**，否则整份脚本被拒绝并说明原因。`rm` 的作用域是「当前连接」（`Programs.rm` 读 `os.connectedComp`），断开之后再执行，删的是**玩家自己**的文件系统 —— 这正是玩家手敲时「命令敲对了却没有效果」的根因。
 
-> **不能直接跑游戏自带的脚本。** 游戏那 28 个动作里**没有提权**，唯一像「接管」的
-> `systakeover` 会往真实磁盘写 `VMBootloaderTrap.dll` 与 `OpenCMD.bat`
-> （`HostileHackerBreakinSequence.cs:15-21`），是剧情级破坏序列。它的 `connect` 也只是
-> `parseInputMessage("cConnection …")` —— 目标机视角记「有人连进来」，
-> **根本不设 `os.connectedComp`**（`HackerScriptExecuter.cs:121`），驱动不了玩家终端。
-> 喂错动作时插件会明确区分「这是游戏 NPC 动作，此处没有对应物」与「拼错了」，
-> 而不是笼统报「未知动作」。
+> **不能直接跑游戏自带的脚本。** 游戏那 28 个动作里**没有提权**，唯一像「接管」的 `systakeover` 会往真实磁盘写 `VMBootloaderTrap.dll` 与 `OpenCMD.bat`（`HostileHackerBreakinSequence.cs:15-21`），是剧情级破坏序列。它的 `connect` 也只是 `parseInputMessage("cConnection …")` —— 目标机视角记「有人连进来」，**根本不设 `os.connectedComp`**（`HackerScriptExecuter.cs:121`），驱动不了玩家终端。喂错动作时插件会明确区分「这是游戏 NPC 动作，此处没有对应物」与「拼错了」，而不是笼统报「未知动作」。
+
+### 设置持久化
+
+面板里的每一项设置（含面板位置与收起状态）都写进 `BepInEx/config/com.highcla.autohack.cfg`，重开游戏后原样恢复。
+
+- 面板是**唯一**的设置界面 —— 没有第二套 UI，也就不存在两处设置互相漂移。cfg 只作落盘载体，手改它同样生效；非法值由 BepInEx 忽略并退回该项缺省，不会让游戏出错。
+- 落盘时机是**指针抬起**而非每次改动：拖动面板或拉滑条期间每帧都在改值，逐帧写盘等于把磁盘打满。点击类控件在点击那一帧即落盘。
+
+### 自动换 IP
+
+每轮入侵收尾时，玩家机自动换一个新 IP，并把**全图所有已控机器**的归属迁移过去。这是游戏原生的「换 IP 保命」动作（ISP 服务器上的 `Assign New IP`，`ISPDaemon.cs:122-142`），本插件把它自动化。
+
+- **为什么**：追踪者判定依据是日志里出现过的玩家 IP —— 换掉 IP 等于让已有记录失去指向。这是游戏设计给玩家的最后手段（CSEC 任务链的追踪危机里，就要求玩家去 ISP 服务器手动改）。
+- **归属迁移**：提权时游戏把玩家当时的 IP 写进目标机（`adminIP`），判据是 `adminIP == 玩家IP`。换 IP 会让该判据全部落空，故收尾时把全图里仍标记着旧 IP 的机器一并改成新 IP，已有战绩不丢。
+- **回显**：终端写明 `new local IP: <旧> -> <新> (N owned node(s) re-tagged)`；`N` 为 0 表示当前没有被控机器。
+- **两种用法**：面板 TOOLS 区的 `NEW IP` 按钮（单击立即换一次，与命令行 `autohack ip` 同一实现）；或 `new IP after run` 复选框（每轮收尾自动换）。
+- **缺省关**（v1.32.6 起，此前为开）：换 IP 会**打断要求 IP 不变的任务链** —— lelzSec 那条明写「Your IP's been whitelisted (so dont go changing it for now)」，白名单记的是当时的 IP。要每轮自动换就勾上复选框或命令行传 `newip`；只换这一次用按钮/`autohack ip`。
+
+### 自身加固（不可逆）
+
+对玩家自己的机器置：`portsNeededForCrack = 9999998`、`traceTime = 1`、`hasProxy/proxyActive/proxyOverloadTicks/startingOverloadTicks` **四字段同步**置 `9999998`（`addProxy` 的语义就是一次设定四者，`Computer.cs:243-252` —— 只改 `hasProxy` 会让 `DisplayModule` 按 `0/0` 算进度条）、`firewall.solution` 换 12 位随机串。执行前后各打印一次全部字段，便于核对与手工还原。
+
+端口走 Pathfinder 的 `PortState.SetCracked`（15 个原版协议），**不写原版 `portsOpen`** —— Pathfinder 已用 Harmony Prefix 接管 `openPort`/`openPorts`（`ComputerExtensions.cs:184-204`），原版列表永不更新。
+
+### 模组端口
+
+其它插件（workshop mod）注册的自定义端口，游戏原生**进不了自动入侵**：判据是 `PortExploits.cracks` 里有该端口的破解程序，而它只含原生 36 个端口 —— 实测三个模组注册的 16 个端口（LunarOS 3 / SRPortToolkit 8 / ZeroDayToolKit 5）一个都不在其中，且没有任何模组往 `cracks` 里写过。故本插件加一张**手动白名单**，缺省空：
+
+```
+autohack run noshow modports=mqtt,ntp,Redis
+```
+
+- **端口由插件直接开**，不跑模组自己的破解程序。回显的是占位命令 `portcrack <端口>`，一眼可辨不是真程序 —— 那些 exe 的参数语义各异（`RedisBreaker` 要显示端口号、`SSHPacket` 要 `-s` 子命令、`LunarEclipse` 开的是别人家的端口），编一条「看起来像真的」的命令只会让玩家敲了报错。
+- **收益是真实的**：提权门槛判据是「已开端口数 **>** `portsNeededForCrack`」。实测存档有 13 台机器门槛 2~8 而端口表只有 1~4 个，破满也差 1~6 个，只能走强行提权兜底。**每多开一个模组端口，就少一台机器需要兜底。**
+- **缺省一个都不开**：这些端口是各模组的剧情拼图（`moonshine` 是 LunarEclipse 跑完才开的、`lunardefender` 存在时 `PortBackdoor` 会被 LunarOS 的 Prefix 拦下并报「Execution failed」）。提前开等于替玩家跳过解谜，故必须显式点名。
+- **两种开法**：逐个点名 `modports=mqtt,ntp`（精确控制），或 `modports=*` 全开。面板上对应 `auto mod ports` 复选框（就是 `*`）—— 不想记协议名时勾它。
+- **先看有哪些**：`autohack ports` 打出当前节点的端口表（协议名 / 显示端口 / **原始端口号** / 破解状态），并在末尾提示那台机器上的模组端口。注意它是**按机器**读的 —— 换一台机器可能还有别的模组端口，所以「全开」用 `*` 比抄一份名单更稳。
+- **名字写错会提示**：模组未加载或拼错时端口表里根本没有那个协议，整轮会安静地少开几个端口。故开跑前报一行 `no plugin has registered a port named '...'`。只提示不拦截。
+- 协议名匹配**大小写不敏感**（`Redis` / `IMP` / `mqtt` 混用），但「是否注册」的检查用框架的 Ordinal 比较 —— 写了 `redis` 而注册名是 `Redis` 时功能正常，但会多报一行未注册提示。
 
 ## 构建
 
@@ -251,6 +187,8 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
 rm -rf src/AutoHack/obj src/AutoHack/bin
 dotnet build src/AutoHack/AutoHack.csproj -c Release
 ```
+
+> 构建前**必须清掉 `obj`/`bin`** —— 否则会命中增量缓存，产出与源码不符的旧产物。
 
 第二个插件 `src/SaveFix/` 同法（`SaveFix.csproj`）：
 
@@ -267,11 +205,13 @@ dotnet build src/SaveFix/SaveFix.csproj -c Release
 src/AutoHack/
 ├── AutoHackPlugin.cs   插件入口：命令注册（属性扫描）+ PostLoad 自检 + 装配 Harmony
 ├── HackOverlay.cs      叠加层：唯一的 OS.Draw / OS.Update 补丁出口 —— 画面板 + 追踪 HUD、推进入侵 + headless 队列
+├── ToolDispatch.cs     工具分派：全部 autohack 子命令的唯一入口（命令行与面板共用）
 ├── HackPanel.cs        面板绘制：布局、绘制入口、状态与常量
 ├── HackPanel.Draw.cs   　└ 自绘控件与绘制原语（Segment/Track/Measure 等）
 ├── HackRun.cs          执行模型：逐帧推进、动作分派、收尾（与绘制解耦）
 ├── HackRun.Plan.cs     　└ 计划构建：目标与选项 → HackStep 序列（纯函数）
 ├── HackRun.Steps.cs    　└ 单步实现：把 HackStep 落到游戏 API 上
+├── NativeExes.cs       原生演出：破解程序的排队、挂载、回显与补开端口
 ├── HackEngine.cs       决策逻辑入口：目标解析与选择（含 ToolTargets）
 ├── HackEngine.Graph.cs 　└ 网络图遍历：可达闭包、广度优先展开、揭图
 ├── HackEngine.Ports.cs 　└ 端口表读取、破解命令、提权门槛（含端口容量）、防火墙
@@ -288,15 +228,19 @@ src/AutoHack/
 └── GlobalUsings.cs     全局 using
 ```
 
+设计上的三条硬边界：**`HackOverlay.cs` 是唯一的 `OS.Draw` / `OS.Update` 补丁出口**；**`ToolDispatch.cs` 是全部工具命令的唯一入口**（命令行与面板按钮共用一份实现，不存在两套行为）；**执行层与绘制解耦** —— `HackRun` 只由每帧 delta 驱动，可脱离 GUI 单独推进与测试。
+
 ### 第二个插件：HacknetSaveFix
 
 `src/SaveFix/` 与 AutoHack **零耦合**，可单独安装/卸载，修的是**游戏本体**的存档缺陷：绕过主菜单进入 OS 的入口（HacknetHotReplace 直连、经扩展直接起 OS 等）会让 `OS.SaveUserAccountName` 停在 null（`OS.cs:148` 缺省即 null，只在 `MainMenu.cs:103/150/235/315` 被赋值），保存时把它当文件名传下去（`OS.cs:1522`），`SaveFileManager.GetSaveFileNameForUsername` 拿到 null（`:238`），`FileSanitiser.purifyStringForDisplay` 对 null 返回 null（`FileSanitiser.cs:9-12`），紧接着的 `.Replace` 打在 null 上 → NRE；而 `WriteSaveData` 把异常吞成一行日志（`SaveFileManager.cs:240-243`），**游戏不崩但存档静默失败**。修法是给崩溃点打一个 Harmony 前缀，用游戏自己在 `OS.cs:372` 用的同一套回落，不另立规则，只在真兜底时打一条 `LogWarning`。
 
 ## 相关开发资料
 
+- `llms.txt` — **编码 agent 的主知识库**：三条硬约束、五十余条「最容易踩的坑 / 最该知道的机制」（每条带 `文件:行号` 指向 `decompiled/`）、以及本仓库的文件索引。改代码前先读它
 - `docs/API.md` — **Pathfinder 框架 + Hacknet 游戏本体的 public API 签名索引**，每条带 `文件:行号` 指向 `decompiled/`。由 `node tools/api-index.ts` 生成，勿手改
 - `docs/EXTENSIONS.md` — 游戏自带 `Extensions/` 官方样本的格式参考：节点 XML、占位符、行为系统、任务、阵营、主题
 - `docs/HACKERSCRIPTS.md` — 自替换占位符全表 + HackerScript 动词表，以游戏实现与官方样本为准，已标出 wiki 的错漏处
+- `docs/TOOLCHAIN.md` — 本地工具链分工与实测坑（动手写脚本前必看）
 
 以下为**本地研究树**，未入库（体积大，且含第三方版权物与 binary；`.gitignore` 已排除，可按下列配方随时重建）：
 

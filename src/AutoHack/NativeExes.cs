@@ -583,6 +583,42 @@ internal static class NativeExes
     }
 
     /// <summary>
+    /// 该台目标此刻<b>还在路上</b>的端口数 —— 已经交给动画、但动画尚未开出来的那些。
+    ///
+    /// 与 <see cref="Settled"/> 同一份名单、同一条 <see cref="IsOpen"/> 判据，只是不早退，
+    /// 把条数数出来。给 <c>HackEngine.PortQuotaMet</c> 的第二参用（v1.40.0）：
+    /// 演出模式下端口由动画的 <c>Completed()</c> 去开、端口步却不等动画，故算门槛时
+    /// 必须把这批算作已破，否则判据恒假、整台可破端口全排上动画。
+    /// </summary>
+    internal static int InFlight(Computer target)
+    {
+        if (target == null)
+        {
+            return 0;
+        }
+
+        var count = 0;
+
+        foreach (var run in Live)
+        {
+            if (ReferenceEquals(run.Target, target) && !IsOpen(target, run.Port))
+            {
+                count++;
+            }
+        }
+
+        foreach (var pending in Queue)
+        {
+            if (ReferenceEquals(pending.Target, target) && !IsOpen(target, pending.Port))
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    /// <summary>
     /// 该端口此刻是不是已破解。<b>按协议名现查端口表</b>，不用 <see cref="PortInfo.Cracked"/> ——
     /// 那是 <c>HackEngine.Ports</c> 在构建步骤时拍的快照，之后动画把端口开了它也不会变。
     ///

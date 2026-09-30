@@ -195,8 +195,24 @@ internal static partial class HackEngine
     /// 端口，故端口步破到够数就该停 —— 剩下的端口对提权毫无贡献，只会白等动画、点燃追踪、
     /// 把终端刷满。实测存档 167 台：可破端口步 650 → 487（省 25.1%），79 台有节省。
     /// </summary>
-    internal static bool PortQuotaMet(Computer comp)
-        => comp != null && OpenPortCount(comp) > comp.portsNeededForCrack;
+    internal static bool PortQuotaMet(Computer comp) => PortQuotaMet(comp, 0);
+
+    /// <summary>
+    /// 同上，但把 <paramref name="reserved"/> 个<b>在途端口</b>算作已破。
+    ///
+    /// <b>为什么需要这个重载（v1.40.0）。</b>演出模式下端口由原生动画的 <c>Completed()</c>
+    /// 去开（见 <c>NativeExes</c>），而端口步一帧一个入队、<b>不等动画</b>。于是走进
+    /// 第 N 个端口步时，前 N-1 个动画一个都没跑完 —— <c>OpenPortCount</c> 恒为 0，
+    /// 判据恒假，<b>该台全部可破端口都会排上动画</b>。实测存档：按门槛应破 472 个，
+    /// 演出模式下实破 635 个，<b>多破 163 个（+34.5%）</b>，79 台的节省全部失效 ——
+    /// 正是本重载存在的理由。
+    ///
+    /// 调用方传 <c>NativeExes.InFlight(target)</c>（队列 + 面板上尚未落地的条数）。
+    /// <b>noshow 模式传 0</b>：那时端口在 <c>ApplyOpenPort</c> 里立即开，无在途，
+    /// 判据逐字退化为单参版本，行为零变化。
+    /// </summary>
+    internal static bool PortQuotaMet(Computer comp, int reserved)
+        => comp != null && OpenPortCount(comp) + reserved > comp.portsNeededForCrack;
 
     /// <summary>
     /// 原生提权门槛 —— 与游戏 porthack 的门禁逐条对齐（OS.cs:1908-1930）：

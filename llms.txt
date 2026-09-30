@@ -3,7 +3,7 @@
 > Hacknet 的 BepInEx / Pathfinder 插件：用游戏自身的原生机制一键入侵全网，带控制面板与脚本驱动。
 > 本文件面向要理解或修改本仓库的编码 agent。规范见 https://llmstxt.org
 
-当前 v1.39.0。构建产物直投游戏插件目录，无需手动拷贝：
+当前 v1.40.0。构建产物直投游戏插件目录，无需手动拷贝：
 
 ```
 D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
@@ -809,6 +809,24 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     脚本里写 `openPort` 的目的是拿下机器，门槛一旦越过，多破的端口对那个目的毫无贡献。
     若将来要破满全部，那是一个**新选项**，不该靠脚本模式绕过 —— 否则同一条脚本
     在内置次序下是另一套行为，更难解释。
+    ⑧ **演出模式下判据会恒假（v1.40.0 修）**。端口现在由原生动画的 `Completed()` 去开，
+    而端口步一帧一个入队、**不等动画**（见 ④ 的那道闸门），故走进第 N 个端口步时
+    前 N-1 个动画一个都没跑完 —— `OpenPortCount` 恒为 0，判据恒假，**该台全部可破端口
+    都会排上动画**。实测存档：按门槛应破 **472** 个，演出模式下实破 **635** 个，
+    **多破 163 个（+34.5%）**，79 台的节省全部失效。修法是给判据加第二个参数：
+    `PortQuotaMet(comp, reserved)`，调用方传 `NativeExes.InFlight(target)`
+    （队列 + 面板上尚未落地的条数，与 `Settled` 同一份名单、同一条 `IsOpen` 判据）。
+    **`noshow` 模式传 0** —— 那时端口在 `ApplyOpenPort` 里立即开、无在途，判据逐字退化
+    为单参版本，行为零变化。差分验证：168 台逐台模拟三口径，修复后与 noshow **逐台一致**
+    （472 == 472），修复前 635、受影响 79 台。
+    ⑨ **提权落定后补原生收尾文案**（v1.40.0）：`--Porthack Complete--`，与
+    `PortHackExe.Completed()` 写的是同一串（`PortHackExe.cs:124`）。插件**不走那个 exe** ——
+    它的 `Completed()` 硬编码 `os.takeAdmin(targetIP)`（`:123`），而 `takeAdmin` 会
+    `runCommand("connect " + ip)`（`OS.cs:1871-1879`），`Programs.connect` 第一件事就是
+    无条件断开旧连接（`Programs.cs:236-241`）→ 触发 `disconnecting` → 管理员反扑关端口；
+    再加上 `CRACK_TIME = 6f` 硬编码，等于每台白等 6 秒。故插件自己 `giveAdmin`，
+    只在**后置条件成立**（`HackEngine.IsOwned`）时补这一行 —— 判「调用了 giveAdmin」会虚报，
+    `adminIP` 已是玩家时 `ForceEscalate` 返回 `false`。
 
 50. **`partial` 拆分只做文件级搬移，不做类型拆分**（v1.36.0）——
    三个上帝类（`HackEngine` 1543 行 / `HackRun` 1108 行 / `HackPanel` 1024 行）按职责簇拆成

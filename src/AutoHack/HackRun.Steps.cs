@@ -202,6 +202,16 @@ internal sealed partial class HackRun
         {
             HackEngine.ForceEscalate(target, os);
         }
+
+        // 补上游戏自己的收尾文案（用户定，v1.40.0）：PortHackExe.Completed() 写完
+        // adminIP 后就写这一行（PortHackExe.cs:123-124）。mod 不走那个 exe（理由见上），
+        // 但玩家该看到同一个终点 —— 否则「提权到手了」在终端上没有落点。
+        // 判后置条件而非「调用了 giveAdmin」：adminIP 已是玩家时 ForceEscalate 返回 false，
+        // 那种情况下写这行等于虚报。
+        if (HackEngine.IsOwned(target, os))
+        {
+            os.write("--Porthack Complete--");
+        }
     }
 
     /// <summary>

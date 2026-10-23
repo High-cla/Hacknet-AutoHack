@@ -200,6 +200,7 @@ src/AutoHack/
 - `docs/API.md` — **Pathfinder 框架 + Hacknet 游戏本体的 public API 签名索引**，每条带 `文件:行号` 指向 `decompiled/`。由 `node tools/api-index.ts` 生成，勿手改
 - `docs/EXTENSIONS.md` — 游戏自带 `Extensions/` 官方样本的格式参考：节点 XML、占位符、行为系统、任务、阵营、主题
 - `docs/HACKERSCRIPTS.md` — 自替换占位符全表 + HackerScript 动词表，以游戏实现与官方样本为准，已标出 wiki 的错漏处
+- `docs/TRACING.md` — **游戏本体的追踪与反追踪机制详解**：三套机制（可见倒计时 / 看不见的脱机追踪 / 管理员反扑）、点火条件、归零后果、反追踪手段全表、一轮完整时序，全部带 `文件:行号`
 - `docs/TOOLCHAIN.md` — 本地工具链分工与实测坑（动手写脚本前必看）
 
 以下为**本地研究树**，未入库（体积大，且含第三方版权物与 binary；`.gitignore` 已排除，可按下列配方随时重建）：

@@ -27,9 +27,13 @@ using Hacknet;
 /// 它们（<c>HackStepKind.CleanLogs</c> → <see cref="HackEngine.WipeTraces"/>），
 /// 那恰好就是上面那条判据的输入。要连自己的痕迹也留着传 <c>keep</c>。
 ///
-/// 计时列表的语义（OS.cs:823-839）：连着被追踪目标时该项<b>既不递减也不移除</b>，
-/// 只有断开后才继续走表。故本工具是玩家唯一能「当场看见、当场掐掉」的入口 ——
-/// 此前 <c>TrackersInProgress</c> 在 mod 里是零引用，玩家看不到谁在追踪自己。
+/// 计时列表的语义（OS.cs:823-839）：条目在<b>断线那一刻</b>排入；此后每帧 <c>timeLeft -= dt</c>，
+/// 归零即 <c>TrackComplete</c>（反向连打 + forkbomb）。而<b>连着被追踪的那台时条目被
+/// <c>RemoveAt</c> 直接移除</b>（不是暂停）—— 重连即取消该条未到期的脱机追踪，
+/// 这是游戏自带的逃生通道，原生零提示。若 /log 里那几行仍在，下次断开还会重排一条。
+/// 故本工具是玩家唯一能「当场看见、当场掐掉」的入口 —— 此前 <c>TrackersInProgress</c>
+/// 在 mod 里是零引用，玩家看不到谁在追踪自己。
+/// 完整机制见 <c>docs/TRACING.md</c>。
 ///
 /// 并发面：<c>TrackersInProgress</c> 由游戏线程每帧遍历（OS.cs:823），而本工具的两个
 /// 入口跑在不同线程（命令行经 <c>OS.execute</c> 开独立线程，OS.cs:1754-1767；面板在

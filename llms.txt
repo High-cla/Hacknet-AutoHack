@@ -260,7 +260,12 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     玩家唯一的感知是 10~20 秒后突然出事。两个易踩点：① 该表在「连着那台目标」时
     是 `RemoveAt` **移除**（`OS.cs:825-830`），不是暂停；② 它的复发源是目标 `/log`
     （`CompShouldStartTrackerFromLogs`，`TrackerCompleteSequence.cs:30-47`），
-    **只清计时不清日志 = 下次断开原地复活**。
+    **只清计时不清日志 = 下次断开原地复活**；③ 第三套常被漏掉：`handleDisconnection` 同一个
+    函数还调 `computer.admin?.disconnectionDetected()`（`BasicAdministrator.cs:5-29`，
+    0~20 秒随机后关端口 + `adminIP` 还原 + 防火墙 `solved=false`）—— 断开前必须
+    `computer.admin = null`（`HackEngine.SuppressCounterattack`）。
+    **完整机制（点火条件、归零后果、反追踪手段全表、一轮时序）见 [docs/TRACING.md](docs/TRACING.md)** ——
+    改任何与追踪 / 清痕 / 换 IP 相关的代码前先读它，别靠猜。
 
 26. **命令动词在 `args[1]`，不在 `args[0]`**（v1.32.0 修，此前从 1.7.0 起全错）。
     Pathfinder 的 `CommandManager.OnCommandExecute`（`:42`）拿**注册名**去比
@@ -1050,6 +1055,7 @@ passcode = 头部第 4 段首个密文数字 - 158485
 - [docs/API.md](docs/API.md): **Pathfinder 框架 + Hacknet 游戏本体的 public API 签名索引**，每条带 `文件:行号` 指向 `decompiled/`。由 `node tools/api-index.ts` 生成，**勿手改**；游戏与框架都不带 XML 注释，故只到签名级，语义按行号读 `decompiled/`
 - [docs/EXTENSIONS.md](docs/EXTENSIONS.md): 游戏自带 `Extensions/` 官方样本的格式参考 —— 节点 XML、占位符、行为系统、任务、阵营、主题
 - [docs/HACKERSCRIPTS.md](docs/HACKERSCRIPTS.md): 自替换占位符全表 + HackerScript 动词表（以游戏实现与官方样本为准，已标出 wiki 错漏处）
+- [docs/TRACING.md](docs/TRACING.md): **追踪与反追踪机制详解** —— 三套机制（`TraceTracker` 倒计时 / `TrackersInProgress` 脱机追踪 / `BasicAdministrator` 反扑）各自的点火条件与归零后果、`traceTime` 分值表、`hostileActionTaken` 全部调用点、反追踪手段全表、一轮完整时序、常见误解、源码索引。与坑 25 / 29 / 30 配套，读代码前先读它
 - [docs/TOOLCHAIN.md](docs/TOOLCHAIN.md): 本地工具链 —— ast-grep（`sg`）/ codebase-memory / fastctx / rg 的分工、用法与实测坑。动 `sg` 前先看坑 2、3、4，能省一轮排错
 - [llms.txt](llms.txt): 本文件
 

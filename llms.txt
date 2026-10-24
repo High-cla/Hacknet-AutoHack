@@ -3,7 +3,7 @@
 > Hacknet 的 BepInEx / Pathfinder 插件：用游戏自身的原生机制一键入侵全网，带控制面板与脚本驱动。
 > 本文件面向要理解或修改本仓库的编码 agent。规范见 https://llmstxt.org
 
-当前 v1.42.0。构建产物直投游戏插件目录，无需手动拷贝：
+当前 v1.43.0。构建产物直投游戏插件目录，无需手动拷贝：
 
 ```
 D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
@@ -21,7 +21,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    **绝不下载 Release 附件回来比对** —— 需要确认部署新鲜度时只看构建输出目录那份。
 3. **`gh release create` 绝不自动执行** —— 等用户显式发令。`git push` 可以直接做。
 
-**五十五条最容易踩的坑 / 最该知道的机制**（都带行号，可直接 grep）
+**五十六条最容易踩的坑 / 最该知道的机制**（都带行号，可直接 grep）
 
 1. `Computer.portsOpen` 恒为 0 —— Pathfinder 用 Harmony Prefix 接管 `openPort`/`openPorts`
    并 `return false`，状态改存 `PortState.Cracked`。任何读 `portsOpen` 的判断都是错的，
@@ -1085,6 +1085,30 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    拒绝、是否真的提权成功）要等执行器跑完、世界视图更新后才能读回（`Session.Observe`）；
    同帧继续推进会让 login 成功后紧跟的端口步白跑 —— 这条是单测 `session.login.port.skipped`
    抓出来的，不是照抄旧代码。
+
+56. **执行层要有救生口，展示文案不该在热圈里构造**（v1.43.0 审计记）——
+
+   **两个会打断游戏帧的口子**：① 面板「RUN」走 `HackOverlay.Start()`，它在 `OS.Draw` 的
+   Postfix 里 `new HackRun(...)`；脚本语法错/读不到时异常会直接冒出绘制帧（`HackPanelState.Script`
+   由 `PanelSettings` 持久化读回，这条路径真会被走到）—— 必须与命令入口同款 try/catch。
+   ② `AutoHackExecutable.CatchException` 是 exe 的唯一救生口（`GameExecutable.cs:60-80` 的
+   `Completed`/`Update` 都过它）：覆盖它 → `HackRun.Abort` 记一行、停动画、掐追踪与炸弹，
+   然后 `return true`。**不要顺手把 `Result` 改成 Failure**：基类会额外打
+   `autohack: failed with ''`，而下一帧 `OnUpdate` 见到 `Run.Finished` 自然会置 Success 并淡出。
+
+   **实测（169 台 × 4 端口 + 逐端口反追踪，共 2366 步 / 846 帧）**：
+   `Session.PhaseFor` 在每个动作上 `ToUpperInvariant` + 拼接，整轮分配 **202 KB**；改成
+   「热圈只记 (kind, ip, custom)、读时惰性构造」后 **17.2 KB（−92%）**，耗时 0.315 → 0.128 ms。
+   展示文案只有一个读者（面板，约每帧一次），不该由状态机逐动作生产 —— 这是分层问题，
+   不是微优化问题。
+
+   **login 判定要用计划快照**：`Observe` 只看 `world.IsOwned` 会把「计划期就已控的机器」
+   （redo 重打肉鸡、凭据已失效）记成「本次靠 login 提权」，于是整段破端口被跳掉。
+   正确判据是 `!TargetView.IsOwned && world.IsOwned` —— `TargetView` 就是为此存在的。
+
+   **指令原文收进 `Core/HackCommands`**：`connect`/`probe`/`porthack`/`dc`/`login` 必须与
+   游戏命令名逐字一致，散落即失同步风险。审计面同时确认：依赖环 0、每帧路径 LINQ 0 处、
+   所有 `catch` 都带 `when` 过滤器、`NativeExes.OnPanel` 复用集合零每帧分配。
 
 ## README 已精简掉的内容（原样保留于此）
 

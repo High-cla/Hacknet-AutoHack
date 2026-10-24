@@ -1,14 +1,10 @@
-namespace AutoHack;
+namespace AutoHack.Core;
 
-using System;
-using System.Collections.Generic;
-using Hacknet;
-using Pathfinder.Port;
 
 /// <summary>
 /// 「模组端口」白名单：允许自动入侵去开的、由其它插件注册的自定义端口协议。
 ///
-/// <b>为什么需要手动表。</b><see cref="HackEngine.CrackablePorts"/> 的判据是
+/// <b>为什么需要手动表。</b><c>HackEngine.CrackablePorts</c> 的判据是
 /// <c>PortExploits.cracks.ContainsKey(codePort)</c>，而 <c>cracks</c> 只含游戏原生的
 /// 36 个端口（<c>PortExploits.cs:51-214</c>）。workshop 模组注册的 16 个端口
 /// （LunarOS 3 / SRPortToolkit 8 / ZeroDayToolKit 5）一个都不在其中，且<b>没有任何模组
@@ -18,11 +14,11 @@ using Pathfinder.Port;
 /// <b>为什么不用反射枚举。</b><c>PortManager</c> 的公开面只有「按名字查」
 /// （<c>IsPortRegistered</c> / <c>GetPortRecordFromProtocol</c> / <c>GetPortRecordFromNumber</c>，
 /// PortManager.cs:47-68），注册表是私有静态 <c>AssemblyAssociatedList&lt;PortRecord&gt; CustomPorts</c>
-/// （:14）。反射能读（<see cref="ModTools.ScanPorts"/> 就是这么做的），但那是<b>诊断</b>用途：
+/// （:14）。反射能读（<c>ModTools.ScanPorts</c> 就是这么做的），但那是<b>诊断</b>用途：
 /// 端口清单不能自动变成「允许开」—— 这些端口是各模组的剧情拼图，提前开等于替玩家跳过解谜。
 ///
 /// <b>手动表只需要回答「允许开哪些协议」</b>，不需要回答「哪台机器有哪个端口」——
-/// 后者由机器的端口表直接给出（见 <see cref="HackEngine.Ports"/>）。
+/// 后者由机器的端口表直接给出（见 <c>HackEngine.Ports</c>）。
 ///
 /// <b>默认空 = 完全 opt-in。</b>命令行 <c>modports=mqtt,ntp</c> 逐协议累加；不写则一个都不开，
 /// 行为与本特性不存在时逐位相同。
@@ -33,7 +29,7 @@ using Pathfinder.Port;
 /// 常量 <c>*</c>，由策略在运行时对所有已注册协议求值；它不枚举、不写死任何具体协议名，
 /// 故不会因为「某台机器的端口表里恰好有什么」而漂移。
 ///
-/// <b>类名为什么是 Policy 而不是 Ports。</b><see cref="HackOptions"/> 上那个属性就叫
+/// <b>类名为什么是 Policy 而不是 Ports。</b><see cref="AutoHack.Core.HackOptions"/> 上那个属性就叫
 /// <c>ModPorts</c>，同名静态类会被实例成员遮蔽 —— 在 <c>HackOptions</c> 的方法里写
 /// <c>ModPorts.Matches(...)</c> 会编译成「对实例属性的成员访问」并报 CS0120。改名一次，
 /// 换掉以后每写一行都要加限定的坑。
@@ -132,45 +128,5 @@ internal static class ModPortPolicy
         }
 
         return false;
-    }
-
-    /// <summary>
-    /// 白名单里<b>没有任何插件注册过</b>的协议名，供调用方在开跑前提示一次。
-    ///
-    /// 为什么必须报：模组未加载（或名字拼错）时端口表里根本没有那个协议，
-    /// 整轮会安静地少开几个端口，玩家只会以为「这个开关没用」。
-    ///
-    /// 判据用 <c>PortManager.IsPortRegistered</c>（公开 API，同时覆盖模组注册表与原生
-    /// <c>OGPorts</c>）。它是 Ordinal 比较，故大小写不符会误报 —— 见类注释的取舍。
-    /// </summary>
-    internal static IReadOnlyList<string> Unknown(IReadOnlyCollection<string> allowed)
-    {
-        var missing = new List<string>();
-        if (allowed == null || IsWildcard(allowed))
-        {
-            return missing;
-        }
-
-        foreach (var name in allowed)
-        {
-            bool known;
-            try
-            {
-                known = PortManager.IsPortRegistered(name);
-            }
-            catch (Exception ex) when (ex is TypeLoadException or MemberAccessException
-                                           or InvalidOperationException or ArgumentException)
-            {
-                // 查不动就别误报：让功能继续，玩家不该因为诊断失败而看到一个假警报。
-                continue;
-            }
-
-            if (!known)
-            {
-                missing.Add(name);
-            }
-        }
-
-        return missing;
     }
 }

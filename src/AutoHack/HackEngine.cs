@@ -1,5 +1,7 @@
 namespace AutoHack;
 
+using AutoHack.Core;
+
 using Hacknet;
 using Pathfinder.Port;
 using Pathfinder.Util;

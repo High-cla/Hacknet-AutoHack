@@ -89,6 +89,47 @@ Directory.Delete(dir, true);
 var missing = ErrorOf(() => HackScript.Load("nope", rel => rel));
 Check("load.missing", missing != null && missing.Contains("No such script"), missing);
 
+// ⑪ 命令行解析：缺省值与别名
+var d = HackOptions.Parse(Array.Empty<string>());
+Check("opt.default.scope", d.Scope == HackScope.Network);
+Check("opt.default.wipe", d.WipeTraces);
+Check("opt.default.connect", d.ConnectFirst && !d.Disconnect);
+Check("opt.default.skipOwned", d.SkipOwned);
+Check("opt.default.creds", !d.UseCredentials);
+Check("opt.default.show", d.ShowExes);
+Check("opt.default.ip", !d.ResetIP);
+Check("opt.default.mods", d.ModPorts.Count == 0);
+Check("opt.default.targets", d.Targets.Count == 0 && d.Script == null);
+
+var flags = HackOptions.Parse(["here", "keep", "dc", "noshow", "creds", "direct", "redo", "allnodes", "mark", "newip"]);
+Check("opt.here", flags.Scope == HackScope.Connected);
+Check("opt.keep", !flags.WipeTraces);
+Check("opt.dc", flags.Disconnect);
+Check("opt.noshow", !flags.ShowExes);
+Check("opt.creds", flags.UseCredentials);
+Check("opt.direct", !flags.ConnectFirst);
+Check("opt.redo", !flags.SkipOwned);
+Check("opt.allnodes", flags.AllNodes);
+Check("opt.mark", flags.UploadMarker);
+Check("opt.newip", flags.ResetIP);
+
+var explicitIds = HackOptions.Parse(["1.2.3.4", "5.6.7.8"]);
+Check("opt.explicit.scope", explicitIds.Scope == HackScope.Explicit);
+Check("opt.explicit.count", explicitIds.Targets.Count == 2, string.Join(",", explicitIds.Targets));
+
+var mods = HackOptions.Parse(["modports=mqtt,ntp"]);
+Check("opt.mods.count", mods.ModPorts.Count == 2, string.Join(",", mods.ModPorts));
+Check("opt.mods.value", mods.ModPorts.Contains("mqtt"));
+
+Check("opt.retired.instant", HackOptions.RetiredTokenIn(["run", "instant"]) == "instant");
+Check("opt.retired.delay", HackOptions.RetiredTokenIn(["run", "delay=3"]) == "delay=3");
+Check("opt.retired.none", HackOptions.RetiredTokenIn(["run", "here"]) == null);
+
+// ⑫ 动作载体
+var act = GameAction.Of(ActionKind.Probe, "1.1.1.1", "probe");
+Check("action.echo", act.Echo == "probe" && act.Kind == ActionKind.Probe);
+Check("action.port.default", act.Port.Protocol == null);
+
 Console.WriteLine(failures == 0
     ? $"PASS {total} checks"
     : $"FAILED {failures}/{total}");

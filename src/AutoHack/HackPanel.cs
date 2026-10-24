@@ -1,5 +1,7 @@
 namespace AutoHack;
 
+using AutoHack.Core;
+
 using Hacknet;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;

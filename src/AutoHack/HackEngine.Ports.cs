@@ -3,6 +3,8 @@
 // HackEngine 的分部实现；类型声明、字段与其余职责见 HackEngine.cs。
 namespace AutoHack;
 
+using AutoHack.Core;
+
 using Hacknet;
 using Pathfinder.Port;
 using Pathfinder.Util;

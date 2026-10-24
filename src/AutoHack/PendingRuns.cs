@@ -1,5 +1,7 @@
 namespace AutoHack;
 
+using AutoHack.Core;
+
 using System.Collections.Concurrent;
 using Hacknet;
 using Microsoft.Xna.Framework;

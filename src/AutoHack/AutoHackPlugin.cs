@@ -223,7 +223,7 @@ public sealed class AutoHackPlugin : BepInEx.Hacknet.HacknetPlugin
         // 协议，整轮会安静地少开几个端口，玩家只会以为「这个开关没用」。
         // 只提示不拦截 —— 大小写不符也会落进这里（判据见 ModPortPolicy.Unknown 的注释），
         // 那种情况功能其实正常，拦下反而更糟。
-        foreach (var missing in ModPortPolicy.Unknown(options.ModPorts))
+        foreach (var missing in ModPortProbe.Unknown(options.ModPorts))
         {
             os.write("[autohack] modports: no plugin has registered a port named '"
                 + missing + "' - check the spelling (names are case-sensitive here).");

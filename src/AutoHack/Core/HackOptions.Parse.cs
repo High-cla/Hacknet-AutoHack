@@ -1,7 +1,7 @@
-// HackTypes.Parse.cs —— 命令行解析：已删 token 拦截、别名查表与 token 归约。
+// HackOptions.Parse.cs —— 命令行解析：已删 token 拦截、别名查表与 token 归约。
 //
-// HackOptions 的分部实现；类型声明、字段与其余职责见 HackTypes.cs。
-namespace AutoHack;
+// HackOptions 的分部实现；类型声明、字段与其余职责见 HackOptions.cs。
+namespace AutoHack.Core;
 
 internal sealed partial record HackOptions
 {

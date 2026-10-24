@@ -3,7 +3,7 @@
 > Hacknet 的 BepInEx / Pathfinder 插件：用游戏自身的原生机制一键入侵全网，带控制面板与脚本驱动。
 > 本文件面向要理解或修改本仓库的编码 agent。规范见 https://llmstxt.org
 
-当前 v1.41.0。构建产物直投游戏插件目录，无需手动拷贝：
+当前 v1.41.1。构建产物直投游戏插件目录，无需手动拷贝：
 
 ```
 D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
@@ -21,7 +21,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    **绝不下载 Release 附件回来比对** —— 需要确认部署新鲜度时只看构建输出目录那份。
 3. **`gh release create` 绝不自动执行** —— 等用户显式发令。`git push` 可以直接做。
 
-**五十三条最容易踩的坑 / 最该知道的机制**（都带行号，可直接 grep）
+**五十四条最容易踩的坑 / 最该知道的机制**（都带行号，可直接 grep）
 
 1. `Computer.portsOpen` 恒为 0 —— Pathfinder 用 Harmony Prefix 接管 `openPort`/`openPorts`
    并 `return false`，状态改存 `PortState.Cracked`。任何读 `portsOpen` 的判断都是错的，
@@ -996,6 +996,42 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    `NativeExes.Tick` 有「一帧只挂一个动画」的约束（见坑 27），两个补丁都调就是同帧挂两个，
    而 Harmony 的装配次序不保证；`OS.Draw` 上两个补丁则要靠注释约定绘制次序（HUD 必须在
    面板之后）。合并成一个补丁后，次序写死在方法体里。
+
+54. **脚本模式的四条不变量：三条是「不用写」，一条是「不能写反」**（v1.41.1 记）——
+   `script=` 走的是 `HackScript.Parse`（解析期校验）→ `HackRun.Plan.AppendScripted`
+   （前置/收尾注入）这条链。玩家最容易踩的四处：
+
+   **① `rm` 必须在 `dc` 之前**（中间隔一个 `connect` 才合法）。
+   清痕的作用域取自当前连接 —— `rm` 的无参形态读 `os.connectedComp`（Programs.cs:956），
+   `dc` 之后再清删的是**玩家自己**的文件系统。校验在 `HackScript.Validate`
+   （HackScript.cs:170-198），判据是「每个 `rm` 之前有没有尚未被 `connect` 抵消的 `dc`」，
+   不粗判成「最后一个 `dc`」（否则 `dc / connect / rm` 会被误拒）。违反抛
+   `FormatException`（:191-193），文案直接给出互换提示。
+   **注意**：`HackEngine.WipeTraces` 本身已不依赖连接（按 folderPath 直取目标 `/log`），
+   但脚本里的 `rm` 代表玩家的**意图**，落在自己机器上仍属该拒的写法 —— 这条刻意不改。
+
+   **② `connect` / `neutralize` / `killtrace` 不用写。**
+   `AppendScripted`（HackRun.Plan.cs:218-262）恒补：`neutralize`（:234）与末尾
+   `killtrace`（:258）；`connect` 只在 `ConnectFirst` 且未连接时补（:227-232）——
+   `connectfirst=0` 的 direct 模式下把决定权留给脚本。脚本里写了同样的动作会被
+   `emitted` 集合去重（:272-290），故写了不报错、也不重复执行。
+   **为什么不能交给玩家手写**：漏了 `neutralize`，断开后 0~20 秒 `BasicAdministrator`
+   会把 `adminIP` 还原、关掉全部端口（坑 25 的姊妹问题），肉鸡标记当场丢失。
+
+   **③ `delay` / `config` 不能写。** 它们是游戏 HackerScript 的节奏设置，而本插件没有步进
+   间隔（坑 47 ③ 把 `HackRun.DelayFor` 整个删了，只剩三道闸门）。这两个词在
+   `UnsupportedVerbs`（HackScript.cs:55-62）里，报错是「这是游戏 NPC 动作，没有玩家侧
+   等价物」而不是含糊的「unknown action」—— **v1.41.1 之前它们不在这个集合里**，
+   玩家只看到 unknown action，得自己猜。
+
+   **④ 其余 NPC 动作同样被点名拒绝**：`forkbomb`/`flash`/`trackseq`/`instanttrace`/
+   `reboot`/`systakeover`/`makefile`/`write*`/`delete`/`setadminpass`/`openCDTray`/
+   `stopmusic`/`startmusic`/`hide*`/`show*`/`clearTerminal` —— 要么是 NPC 视角的破坏动作，
+   要么改的是目标 UI，要么写真实磁盘。把游戏自带的 `Content/HackerScripts/*.txt`
+   直接喂进来会被逐行点名（:129-134）。
+
+   **去重规则**：`openPort` 可重复（逐端口展开），`rm` 可重复（幂等）；
+   其余动作重复出现只取首次（:283-290）。
 
 
 ## README 已精简掉的内容（原样保留于此）

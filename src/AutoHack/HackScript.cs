@@ -55,6 +55,7 @@ internal sealed class HackScript
     private static readonly HashSet<string> UnsupportedVerbs = new(StringComparer.Ordinal)
     {
         "flash", "trackseq", "instanttrace", "forkbomb", "reboot", "systakeover",
+        "config", "delay",
         "clearterminal", "hidenetmap", "hideram", "hidedisplay", "hideterminal",
         "shownetmap", "showram", "showdisplay", "showterminal",
         "stopmusic", "startmusic", "opencdtray", "closecdtray", "setadminpass",

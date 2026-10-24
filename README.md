@@ -12,7 +12,7 @@
 <Hacknet>/BepInEx/plugins/AutoHack.dll
 ```
 
-> 推荐搭配https://github.com/LDTchara/KernelFix. 另有独立插件 **HacknetSaveFix**（修游戏本体存档 NRE，见「架构」）—— 它**单独发版**（[HacknetSaveFix 1.0.0](https://github.com/High-cla/Hacknet-AutoHack/releases/tag/v1.0.0)），取 `HacknetSaveFix.dll` 放进同一个 `plugins/` 目录即可。两者互不依赖，可各自单独安装或卸载。
+> 推荐搭配 [KernelFix](https://github.com/LDTchara/KernelFix)（另一个独立插件，修游戏本体的几处崩溃）。另有 **HacknetSaveFix**（修游戏本体存档 NRE，见「架构」）—— 它**单独发版**（[HacknetSaveFix 1.0.0](https://github.com/High-cla/Hacknet-AutoHack/releases/tag/v1.0.0)），取 `HacknetSaveFix.dll` 放进同一个 `plugins/` 目录即可。两者互不依赖，可各自单独安装或卸载。
 
 ## 使用
 
@@ -127,6 +127,15 @@ dc    $#%#$
 | `mark` | 投放 `~/autohack.txt` 标记 |
 | `rm` | 清除 `/log` |
 | `dc` | 断开连接 |
+
+脚本里有四条**在解析期就检查 / 生效**的规矩 —— 违反即整份拒绝，不会跑一半：
+
+1. **`rm` 必须排在 `dc` 之前**（中间隔一个 `connect` 则合法）。清痕的作用域取自当前连接（`Programs.rm` 读 `os.connectedComp`），`dc` 之后再清，删的是你自己机器上的文件 —— 这正是手敲时「命令敲了却没效果」的根因。写反了会被当场拒绝并提示互换。
+2. **`connect` / `neutralize` / `killtrace` 不用写** —— 插件会补：`connect` 只在 `connect first` 开着且尚未连接时补（`connectfirst=0` 时留给你自己写），`neutralize`（解除管理员反扑）与末尾的 `killtrace` 恒定补上。写了也不重复。这三步是正确性要求，不是风格偏好：漏了 `neutralize`，断开后 0~20 秒肉鸡标记会被管理员反扑抹掉。
+3. **`delay` / `config` 不能写** —— 那是游戏 HackerScript 的节奏设置，而本插件没有步进间隔（整轮只受三道闸门约束：单帧步数预算、端口步每帧一步、提权前的动画等待）。
+4. **其余 NPC 动作同样不能写**（`forkbomb` / `flash` / `trackseq` / `makefile` / `write` / `hide*` / `show*` …）—— 它们要么是 NPC 视角的破坏动作，要么改的是目标 UI，要么写真实磁盘。把游戏自带的 `Content/HackerScripts/*.txt` 直接喂进来会被逐行点名拒绝。
+
+另外两条去重规则：`openPort` 可以重复（逐端口展开），`rm` 可以重复（幂等）；其余动作重复出现只取首次。
 
 ### 设置持久化
 

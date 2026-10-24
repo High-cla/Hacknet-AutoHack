@@ -458,14 +458,14 @@ internal static class NativeExes
 
     /// <summary>
     /// 每帧推进一步：只要预算装得下队首，就把它挂上去（队首的排序键最小，见
-    /// <see cref="Compare"/>）。由 <see cref="HackOverlay"/> 的 OS.Update 补丁调用。
+    /// <see cref="Compare"/>）。由 <see cref="GameHost"/> 的 <c>OSUpdateEvent</c> 回调调用。
     ///
     /// 泵本身不关心入侵是否还在推进 —— 队列何时被清由 <see cref="StopAll"/> 决定，
     /// 那个入口由 <see cref="HackRun"/> 在整轮收尾处调用。换目标时<b>不</b>截断：
     /// 端口步零间隔入队后，本台十几个动画会跨过目标边界继续播，而换目标时端口
     /// 已经全开（提权前等过，见 <see cref="Settled"/>），截断只会白丢观感。
     ///
-    /// 只在游戏线程调用（OS.Update 的 Harmony Postfix），故与 <see cref="Queue"/> /
+    /// 只在游戏线程调用（<c>OSUpdateEvent</c> 回调，位于 OS.Update 之内），故与 <see cref="Queue"/> /
     /// <see cref="Live"/> 的读写天然串行，不需要加锁。
     /// </summary>
     internal static void Tick(OS os)

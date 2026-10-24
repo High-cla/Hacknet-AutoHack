@@ -1,47 +1,33 @@
 namespace AutoHack;
 
-using AutoHack.Core;
-
 using System.Collections.Concurrent;
+using AutoHack.Core;
 using Hacknet;
-using Microsoft.Xna.Framework;
 
 /// <summary>
 /// 无面板（headless）运行队列。命令处理发生在命令线程，不宜直接改游戏状态，
-/// 故入队后由 OS.Update 在游戏线程上逐帧推进。
+/// 故入队后由 <see cref="GameHost"/> 在游戏线程上建出运行并挂成
+/// <see cref="AutoHackExecutable"/>。
+///
+/// <b>只传参数，不传构造好的 HackRun</b>：其构造函数会做可达遍历，其中的
+/// <c>NetworkMap.discoverNode</c> 会改写 <c>netMap.visibleNodes</c>
+/// （NetworkMap.cs:415-431），而游戏线程每帧都在读这个 List —— 在命令线程构造就是
+/// 「一个线程 Add、另一个线程遍历」，轻则抛 Collection was modified，重则索引错乱。
 /// </summary>
 internal static class PendingRuns
 {
-    /// <summary>一条待跑的 headless 运行。构造推迟到游戏线程（见 <see cref="Tick"/>）。</summary>
-    private sealed class Entry(HackOptions options)
-    {
-        internal readonly HackOptions Options = options;
-        internal HackRun Run;
-    }
-
     // 键是 OS 实例。用 ConcurrentDictionary 而非 Queue：
     // 1) 一个 OS 至多一条运行 —— TryAdd 天然是原子的互斥，不必再「先查后加」；
     // 2) 按实例取用，换过 OS（回主菜单再进）后旧条目不会堵住新实例的运行。
-    // 命令由 OS.execute 派生线程执行（OS.cs:1754-1767），推进在游戏线程上。
-    private static readonly ConcurrentDictionary<OS, Entry> Pending = new();
+    private static readonly ConcurrentDictionary<OS, HackOptions> Pending = new();
 
-    /// <summary>
-    /// 入队一次运行；该 OS 已有未跑完的运行则拒绝（原子判定，无 check-then-act 窗口）。
-    ///
-    /// <b>只传参数，不传构造好的 HackRun</b>：其构造函数会做可达遍历，其中的
-    /// <c>NetworkMap.discoverNode</c> 会改写 <c>netMap.visibleNodes</c>
-    /// （NetworkMap.cs:415-431），而游戏线程每帧都在读这个 List
-    /// （HubServerAlertsIcon 等）—— 在命令线程构造就是「一个线程 Add、另一个线程遍历」，
-    /// 轻则抛 Collection was modified，重则索引错乱。
-    /// </summary>
-    internal static bool TryEnqueue(OS os, HackOptions options) => Pending.TryAdd(os, new Entry(options));
+    /// <summary>入队一次运行；该 OS 已有排队或正在跑则为假（原子判定，无 check-then-act 窗口）。</summary>
+    internal static bool TryEnqueue(OS os, HackOptions options) => Pending.TryAdd(os, options);
 
-    /// <summary>该 OS 上是否已有 headless 运行在排队或推进。供面板入口做互斥。</summary>
-    internal static bool BusyFor(OS os) => Pending.ContainsKey(os);
+    /// <summary>该 OS 上是否已有运行在排队、在跑或正在收尾。供面板入口做互斥。</summary>
+    internal static bool BusyFor(OS os) => Pending.ContainsKey(os) || AutoHackExecutable.FindActive(os) != null;
 
-    /// <summary>
-    /// 清掉某个 OS 的全部排队。由 <see cref="HackOverlay.Open"/> 在换局（换过 OS 实例）时调用。
-    /// </summary>
+    /// <summary>清掉某个 OS 的排队。由 <see cref="HackOverlay.Open"/> 在换局时调用。</summary>
     internal static void Forget(OS os)
     {
         if (os != null)
@@ -51,55 +37,41 @@ internal static class PendingRuns
     }
 
     /// <summary>
-    /// 推进队列。<b>由 <see cref="HackOverlay"/> 在它唯一的 <c>OS.Update</c> Postfix 里调用</b>，
-    /// 本类不再自己挂补丁 —— 合并的理由与方法体里的注释同源。
+    /// 把排队的运行挂成 exe。由 <see cref="GameHost"/> 在 <c>OSUpdateEvent</c> 里每帧调用。
+    /// 构造推迟到游戏线程；构造失败（脚本语法错 / 读不到）转成终端可见的一行并丢弃请求。
     /// </summary>
-    internal static void Tick(OS __instance, GameTime gameTime)
+    internal static void Tick(OS os)
     {
-        // 演出队列的泵由 HackOverlay 独家负责（它先调 NativeExes.Tick 再调本方法）——
-        // 两个补丁同挂 OS.Update 时，两边都调 NativeExes.Tick 就是同一帧挂两个动画
-        // （见 NativeExes.Tick 的一帧一个约束）。合并补丁后这个约束由调用次序保证。
-
-        if (!Pending.TryGetValue(__instance, out var entry))
+        if (!Pending.TryGetValue(os, out var options))
         {
             return;
         }
 
-        // 首次推进时才构造：把「读游戏状态并可能回写」的动作全部留在游戏线程。
-        if (entry.Run == null)
+        // 已有运行在跑：等它结束（BusyFor 已挡住新的入队，这里只是兜住换局等竞态）。
+        if (AutoHackExecutable.FindActive(os) != null)
         {
-            HackRun run;
-            try
-            {
-                run = new HackRun(__instance, entry.Options);
-            }
-            catch (Exception ex) when (ex is FormatException or IOException or UnauthorizedAccessException)
-            {
-                // 兜底：插件入口已前置校验过一次。这里是「别把异常抛进 Harmony
-                // Postfix」的护栏 —— 抛出去会打断 OS.Update 的整条补丁链。
-                __instance.write("[autohack] Script error: " + ex.Message);
-                Pending.TryRemove(__instance, out _);
-                return;
-            }
-
-            if (run.Total == 0)
-            {
-                __instance.write("[autohack] No eligible targets found.");
-                __instance.write(HackEngine.NoTargetHint);
-                Pending.TryRemove(__instance, out _);
-                return;
-            }
-
-            entry.Run = run;
+            return;
         }
 
-        entry.Run.Tick(__instance, (float)gameTime.ElapsedGameTime.TotalSeconds);
-
-        if (entry.Run.Finished)
+        try
         {
-            // 只有游戏线程会移除，且移除发生在 Finished 之后：新入队要等互斥放行，
-            // 故此处不会误删刚被 TryAdd 进来的另一条运行。
-            Pending.TryRemove(__instance, out _);
+            var run = new HackRun(os, options);
+            if (run.Total == 0)
+            {
+                Pending.TryRemove(os, out _);
+                os.write("[autohack] No eligible targets found.");
+                os.write(HackEngine.NoTargetHint);
+                return;
+            }
+
+            AutoHackExecutable.Create(os, run);
+            Pending.TryRemove(os, out _);
+        }
+        catch (Exception ex) when (ex is FormatException or IOException or UnauthorizedAccessException)
+        {
+            // 兜底：插件入口已前置校验过一次。这里是「别把异常抛进游戏线程」的护栏。
+            Pending.TryRemove(os, out _);
+            os.write("[autohack] Script error: " + ex.Message);
         }
     }
 }

@@ -32,13 +32,14 @@ using Microsoft.Xna.Framework.Graphics;
 internal static class HackOverlay
 {
     private static HackPanelState _state;
-    private static HackRun _run;
+    /// <summary>当前运行（由 exe 宿主持有，见 <see cref="AutoHackExecutable"/>）。</summary>
+    private static HackRun CurrentRun => AutoHackExecutable.Find(_os);
     private static OS _os;
 
     internal static bool IsOpen => _state is { Open: true };
 
     /// <summary>面板运行是否正在推进。供命令入口做互斥。</summary>
-    internal static bool IsRunning => _run is { Finished: false };
+    internal static bool IsRunning => CurrentRun is { Finished: false };
 
     internal static void Open(OS os)
     {
@@ -65,7 +66,6 @@ internal static class HackOverlay
 
         _os = os;
         _state.Open = true;
-        _run = null;
     }
 
     internal static void Toggle(OS os)
@@ -138,7 +138,7 @@ internal static class HackOverlay
         {
             spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend);
             begun = true;
-            action = HackPanel.Draw(_state, _run, __instance, screen);
+            action = HackPanel.Draw(_state, CurrentRun, __instance, screen);
         }
         catch (InvalidOperationException)
         {
@@ -216,44 +216,21 @@ internal static class HackOverlay
             return;
         }
 
-        _run = new HackRun(_os, _state.ToOptions());
+        var run = new HackRun(_os, _state.ToOptions());
 
-        if (_run.Total == 0)
+        if (run.Total == 0)
         {
             _os.write("[autohack] No eligible targets - nothing to do.");
             _os.write(HackEngine.NoTargetHint);
-            _run = null;
             return;
         }
+
+        // 运行由零 RAM 的隐藏可执行体承载：生命周期交给游戏自己的 exe 循环，
+        // 不再由本类的每帧补丁认领（见 AutoHackExecutable 的类注释）。
+        AutoHackExecutable.Create(_os, run);
 
         // 这里曾有「Engaging N target(s)」汇总行，已删（用户定：终端里只要具体的
         // 命令行输出，不要战果报告）。面板运行视图本来就有进度条与计数。
     }
 
-    /// <summary>
-    /// <c>OS.Update</c> 的唯一 Postfix —— 演出泵、headless 队列、面板运行都从这里分派。
-    ///
-    /// <b>为什么合并</b>：合并前它与 <see cref="PendingRuns"/> 各挂一个 Postfix，两条
-    /// 补丁的先后顺序由 Harmony 的装配顺序决定（不保证），而 <c>NativeExes.Tick</c>
-    /// 有「一帧只挂一个动画」的约束（见该方法的注释）—— 两个补丁都调它就会同帧挂两个。
-    /// 此前靠注释互相约定（「本队列的泵由 HackOverlay 独家负责」），现在靠代码：
-    /// 一个补丁，次序写死在下三行里。
-    /// </summary>
-    [HarmonyPostfix]
-    [HarmonyPatch(typeof(OS), nameof(OS.Update))]
-    private static void OnOSUpdate(OS __instance, GameTime gameTime)
-    {
-        // 演出队列独立于运行推进：跑完收尾后仍要把排着的动画播完。唯一调用点。
-        NativeExes.Tick(__instance);
-
-        // headless 队列（无面板的运行）。它自己按 OS 实例过滤，不读 _os / _run。
-        PendingRuns.Tick(__instance, gameTime);
-
-        if (_run is not { Finished: false } || __instance != _os)
-        {
-            return;
-        }
-
-        _run.Tick(__instance, (float)gameTime.ElapsedGameTime.TotalSeconds);
-    }
 }

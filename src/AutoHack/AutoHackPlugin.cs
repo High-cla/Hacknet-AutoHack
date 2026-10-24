@@ -32,8 +32,12 @@ public sealed class AutoHackPlugin : BepInEx.Hacknet.HacknetPlugin
         // 的调用点会被编译器整条删除；Bind 本身无条件执行（一行赋值，不值得条件化）。
         Trace.Bind(Log);
 
-        // 面板/HUD 靠 patch OS.Draw / OS.Update 叠加到游戏画面上。
+        // 面板/HUD 靠 patch OS.Draw 叠加到游戏画面上；OS.Update 那条走事件（见下）。
         HarmonyInstance.PatchAll(typeof(AutoHackPlugin).Assembly);
+
+        // 每帧泵改为订阅 Pathfinder 的 OSUpdateEvent（不再自挂 OS.Update 补丁）——
+        // 顺序从「Harmony 装配顺序」变成「一个 handler 的方法体」，见 GameHost 的注释。
+        GameHost.Subscribe();
         Log.LogInfo("AutoHack loaded (GUI).");
         return true;
     }

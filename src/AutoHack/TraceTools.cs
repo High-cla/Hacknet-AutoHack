@@ -1,5 +1,6 @@
 namespace AutoHack;
 
+using AutoHack.Core;
 using Hacknet;
 
 /// <summary>

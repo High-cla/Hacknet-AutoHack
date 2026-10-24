@@ -1,5 +1,6 @@
 namespace AutoHack;
 
+using AutoHack.Core;
 using Hacknet;
 using Pathfinder.Port;
 
@@ -93,7 +94,7 @@ internal sealed partial class HackRun
         // 脚本在构造期解析一次：语法错/文件缺失在这里抛出，由调用方转成终端可见
         // 的错误行。放进 Tick 会让错误每帧重复，放进 BuildSteps 会让「目标为空」
         // 与「脚本坏了」两种情况混在一起。
-        _script = string.IsNullOrEmpty(options.Script) ? null : HackScript.Load(options.Script);
+        _script = string.IsNullOrEmpty(options.Script) ? null : HackScript.Load(options.Script, ContentPaths.Resolve);
 
         // 只有「全网扫描 + whole map」需要揭图：ConnectableComputers 只收集、
         // 不 discoverNode，不揭就是「地图全开跑完一台都不亮」。

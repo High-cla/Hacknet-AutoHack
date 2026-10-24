@@ -1,9 +1,7 @@
-namespace AutoHack;
+namespace AutoHack.Core;
 
 using System.Globalization;
 using System.IO;
-using Hacknet;
-using Pathfinder.Util;
 
 /// <summary>
 /// 入侵脚本：一份动作表，决定每个目标按什么次序被打。
@@ -27,6 +25,10 @@ internal sealed class HackScript
     internal readonly record struct Action(HackStepKind Kind, int Port);
 
     /// <summary>行尾分隔符。游戏用 " $#%#$\r\n" 切行，此处按行处理后只剩尾巴。</summary>
+    /// <summary>词法分隔符：<b>只有空格</b>，与游戏的 <c>Utils.spaceDelim = [' ']</c>（Utils.cs:67）逐字一致。
+    /// 制表符不算分隔符 —— 那正是原实现的行为，改成空白族会让缩进过的脚本换个解析结果。</summary>
+    private static readonly char[] SpaceOnly = [' '];
+
     private const string Delimiter = "$#%#$";
 
     /// <summary>脚本默认所在目录（相对游戏的 Content 前缀）。</summary>
@@ -84,18 +86,18 @@ internal sealed class HackScript
     /// <see cref="IOException"/> 读不到）—— 由调用方转成终端可见的错误，
     /// 拒绝「脚本没生效但看起来跑了」这种半成品。
     /// </summary>
-    internal static HackScript Load(string name)
+    internal static HackScript Load(string name, Func<string, string> contentPath)
     {
         if (string.IsNullOrWhiteSpace(name))
         {
             throw new FormatException("script= needs a file name.");
         }
 
-        var path = ResolvePath(name.Trim());
+        var path = ResolvePath(name.Trim(), contentPath);
         if (path == null)
         {
             throw new FileNotFoundException(
-                "No such script: '" + name + "'. Tried: " + string.Join(", ", Candidates(name.Trim())));
+                "No such script: '" + name + "'. Tried: " + string.Join(", ", Candidates(name.Trim(), contentPath)));
         }
 
         return Parse(File.ReadAllText(path), path);
@@ -118,7 +120,7 @@ internal sealed class HackScript
                 continue;
             }
 
-            var tokens = line.Split(Utils.spaceDelim, StringSplitOptions.RemoveEmptyEntries);
+            var tokens = line.Split(SpaceOnly, StringSplitOptions.RemoveEmptyEntries);
             var verb = tokens[0].ToLowerInvariant();
 
             var resolved = ResolveKind(verb);
@@ -226,14 +228,14 @@ internal sealed class HackScript
     /// 路径解析：先当原样路径试（绝对路径或相对工作目录），再走 <see cref="Candidates"/>
     /// 按内容目录次序找 —— 这样放在 <c>Content/HackerScripts/</c> 的脚本能直接按名字引用。
     /// </summary>
-    private static string ResolvePath(string name)
+    private static string ResolvePath(string name, Func<string, string> contentPath)
     {
         if (File.Exists(name))
         {
             return name;
         }
 
-        foreach (var candidate in Candidates(name))
+        foreach (var candidate in Candidates(name, contentPath))
         {
             if (File.Exists(candidate))
             {
@@ -249,30 +251,21 @@ internal sealed class HackScript
     /// 再退到内容根目录直接按名字找。每条各试「带 <c>.txt</c> / 不带」两个变体
     /// —— 游戏自带脚本都带后缀，但玩家未必写。
     ///
-    /// <b>前缀不自己拼</b>：「内容目录在哪」是框架的知识（扩展模式走扩展目录，
-    /// 否则补 <c>"Content/"</c>），游戏本体（<c>Utils.GetFileLoadPrefix</c>，
-    /// Utils.cs:1386-1393）与 Pathfinder（<see cref="StringExtensions.ContentFilePath"/>，
-    /// StringExtensions.cs:19-36）已各实现过一次，本仓库不写第三份。
-    ///
-    /// <b>本地化也不用自己调</b>：<see cref="LocalizationFix"/> 已把
-    /// <c>GetLocalizedFilepath</c> 挂在 <c>ContentFilePath</c> 出口（Postfix），
-    /// 于是这里每一次调用都自动命中译文，再套一层是重复。
-    ///
-    /// <b>与旧写法的一处行为差异</b>：旧实现只给默认目录那组查本地化，根目录回退那组
-    /// 直接取原文。改走 <c>ContentFilePath</c> 后两组都会查（非 en-us 且译文存在即命中）。
-    /// 统一是有意的 —— 同一件事在两条分支上给出不同答案看着是偶然，而非设计。
-    /// en-us 下无任何差异（<see cref="LocalizationFix"/> 的守卫直接放行）。
-    /// </summary>
-    private static IEnumerable<string> Candidates(string name)
+    /// <b>前缀不自己拼</b>：「内容目录在哪」是游戏/框架的知识（扩展模式走扩展目录，
+    /// 否则补 <c>"Content/"</c>），由调用方以 <c>contentPath</c> 委托注入 ——
+    /// 生产实现见 <c>ContentPaths</c>，测试传恒等函数。核心层因此既不认识 Content 目录，
+    /// 也不依赖框架的字符串扩展；本地化原文同样由那个委托负责（它内部就走
+    /// 框架已挂好本地化的那条出口）。
+    private static IEnumerable<string> Candidates(string name, Func<string, string> contentPath)
     {
         foreach (var variant in WithTxtSuffix(DefaultDirectory + "/" + name))
         {
-            yield return variant.ContentFilePath();
+            yield return contentPath(variant);
         }
 
         foreach (var variant in WithTxtSuffix(name))
         {
-            yield return variant.ContentFilePath();
+            yield return contentPath(variant);
         }
     }
 

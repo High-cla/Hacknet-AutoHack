@@ -663,6 +663,25 @@ BENCH_SAVE=<path> node tools/bench.mts              # 换存档
 
 结论：`scan allnodes` 在千级地图上无感（1.6 ms），**万级地图会卡 100 ms 以上** —— 那时才该
 把 `RevealWholeMap` 里的 `discoverNode` 换成自己的哈希集标记（`HackEngine.Graph.cs` 的注释已写明这条待办）。
+## 离线单测（`tests/core-tests`）
+
+核心层（`src/AutoHack/Core/`）的纯逻辑单测。**与 `tools/` 不同，本目录入库** —— 它是长期资产，
+不是一次性探索脚本。
+
+```bash
+cd /d/git/HacknetMod && dotnet run --project tests/core-tests -c Release
+# → PASS 21 checks（失败时打印 FAIL 行并以退出码 1 结束）
+```
+
+- 工程 TFM 是 `net10.0`（本机已有运行时，零 NuGet）；插件仍是 `net472`。两者**编译同一份源码**
+  （`<Compile Include="../../src/AutoHack/Core/**/*.cs" />`），所以核心层一旦误引 `Hacknet` /
+  `Pathfinder` / `BepInEx` / `Harmony`，这里立刻编不过 —— 这条比任何注释都硬。
+- 断言手写（`Check(name, ok, detail)` + 失败计数），不引测试框架：本仓硬约束是零 NuGet。
+- 核心层与游戏侧的接缝：纯类型（`PortView`/`PlanStep`/`GameAction`）+ 读模型（`IWorldView`）
+  + 注入的路径委托（`ContentPaths.Resolve`）。测试用假实现，不需要游戏运行时。
+- 覆盖随迁移增长：当前是脚本解析器（动作/别名/分隔符/注释/`dc` 后 `rm`/NPC 动作报错/路径委托）；
+  已搬进核心的判据必须同时有对应用例。
+
 ## 关键路径
 
 | 用途 | 路径 |

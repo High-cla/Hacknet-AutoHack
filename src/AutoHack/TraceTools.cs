@@ -27,7 +27,7 @@ using Hacknet;
 /// /log 是目标机自己的操作史（谁连过它、它读过什么），整个删掉属于改写对方状态。
 ///
 /// <b>但「含玩家 IP 的条目」不在这个取舍之内</b> —— 入侵流程每台机器末尾都会清掉
-/// 它们（<c>HackStepKind.CleanLogs</c> → <see cref="HackEngine.WipeTraces"/>），
+/// 它们（<c>ActionKind.CleanLogs</c> → <see cref="HackEngine.WipeTraces"/>），
 /// 那恰好就是上面那条判据的输入。要连自己的痕迹也留着传 <c>keep</c>。
 ///
 /// 计时列表的语义（OS.cs:823-839）：条目在<b>断线那一刻</b>排入；此后每帧 <c>timeLeft -= dt</c>，

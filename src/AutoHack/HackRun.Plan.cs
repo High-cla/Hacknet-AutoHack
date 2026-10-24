@@ -59,13 +59,13 @@ internal sealed partial class HackRun
         var alreadyConnected = ReferenceEquals(target, os.connectedComp);
         if (options.ConnectFirst && !alreadyConnected)
         {
-            steps.Add(new HackStep(HackStepKind.Connect, target, default, "connect " + target.ip));
+            steps.Add(new HackStep(ActionKind.Connect, target, default, "connect " + target.ip));
         }
 
         // 独立成步而非挂在 Connect 上：direct/已连接路径没有 Connect 步，同样需要解除反扑。
-        steps.Add(new HackStep(HackStepKind.Neutralize, target, default, null));
+        steps.Add(new HackStep(ActionKind.Neutralize, target, default, null));
 
-        steps.Add(new HackStep(HackStepKind.Probe, target, default, "probe"));
+        steps.Add(new HackStep(ActionKind.Probe, target, default, "probe"));
 
         // 已知凭据登录排在最前：成功即提权，后面整段破端口动作都不必跑。
         // 放在 probe 之后是为了让终端先有原生端口报告，再看到 login。
@@ -74,13 +74,13 @@ internal sealed partial class HackRun
         // 固定密码 "alpine" 才是游戏设计的正路（见 HackEngine.IsEosDevice）。
         if (options.UseCredentials || HackEngine.IsEosDevice(target))
         {
-            steps.Add(new HackStep(HackStepKind.Login, target, default, null));
+            steps.Add(new HackStep(ActionKind.Login, target, default, null));
         }
 
         var ports = HackEngine.CrackablePorts(target, options.ModPorts);
         if (ports.Count > 0 && HackEngine.ProxyActive(target))
         {
-            steps.Add(new HackStep(HackStepKind.BypassProxy, target, default, null));
+            steps.Add(new HackStep(ActionKind.BypassProxy, target, default, null));
         }
     }
 
@@ -89,7 +89,7 @@ internal sealed partial class HackRun
     {
         foreach (var port in HackEngine.CrackablePorts(target, options.ModPorts))
         {
-            steps.Add(new HackStep(HackStepKind.OpenPort, target, port, HackEngine.CrackCommand(port)));
+            steps.Add(new HackStep(ActionKind.OpenPort, target, port, HackEngine.CrackCommand(port)));
 
             // 每个端口后立刻清一次追踪（用户定的行为；此前只在每台末尾清一次）。
             //
@@ -108,7 +108,7 @@ internal sealed partial class HackRun
             //
             // 脚本模式不插这一步 —— 那份次序由玩家显式书写，killtrace 是脚本可写的
             // 动作（HackScript.cs:81），末尾也已有兜底，不该由插件改写脚本语义。
-            steps.Add(new HackStep(HackStepKind.KillTrace, target, default, null));
+            steps.Add(new HackStep(ActionKind.KillTrace, target, default, null));
         }
     }
 
@@ -119,10 +119,10 @@ internal sealed partial class HackRun
         // firewall.solved（OS.cs:1918-1930），未解则 porthack 直接被拒。
         if (target.firewall is { solved: false })
         {
-            steps.Add(new HackStep(HackStepKind.SolveFirewall, target, default, null));
+            steps.Add(new HackStep(ActionKind.SolveFirewall, target, default, null));
         }
 
-        steps.Add(new HackStep(HackStepKind.Escalate, target, default, "porthack"));
+        steps.Add(new HackStep(ActionKind.Escalate, target, default, "porthack"));
 
         // 白名单机器无条件排一步绕过（与开关解耦）：它的 connect 会被拒，
         // 而破端口/提权不经连接、照样能拿下 —— 拿下之后再把自己的 IP 追加进它的
@@ -131,7 +131,7 @@ internal sealed partial class HackRun
         // 明写「append list.txt <你的IP>」），详见 HackEngine.BypassWhitelist。
         if (HackEngine.HasWhitelist(target))
         {
-            steps.Add(new HackStep(HackStepKind.BypassWhitelist, target, default, null));
+            steps.Add(new HackStep(ActionKind.BypassWhitelist, target, default, null));
         }
     }
 
@@ -140,7 +140,7 @@ internal sealed partial class HackRun
     {
         if (options.UploadMarker)
         {
-            steps.Add(new HackStep(HackStepKind.UploadMarker, target, default, null));
+            steps.Add(new HackStep(ActionKind.UploadMarker, target, default, null));
         }
 
         // 清痕排在断开**之前**是硬要求：断开本身会往目标 /log 写一条
@@ -159,17 +159,17 @@ internal sealed partial class HackRun
         // 没有需要玩家权衡的取舍。要留痕传 'keep'。
         if (options.WipeTraces)
         {
-            steps.Add(new HackStep(HackStepKind.CleanLogs, target, default, null));
+            steps.Add(new HackStep(ActionKind.CleanLogs, target, default, null));
         }
 
         if (options.Disconnect)
         {
-            steps.Add(new HackStep(HackStepKind.Disconnect, target, default, "dc"));
+            steps.Add(new HackStep(ActionKind.Disconnect, target, default, "dc"));
         }
 
         // 断开已让 TraceTracker 自己失效；这一步是确定性的兜底 ——
         // stay 模式（不断开）下它是唯一的止血点。走 stop()，零每帧开销。
-        steps.Add(new HackStep(HackStepKind.KillTrace, target, default, null));
+        steps.Add(new HackStep(ActionKind.KillTrace, target, default, null));
     }
 
     /// <summary>为被剔除的机器追加清痕步骤（<c>WipeTraces</c> 为真时）。</summary>
@@ -184,7 +184,7 @@ internal sealed partial class HackRun
         {
             foreach (var comp in skipped)
             {
-                steps.Add(new HackStep(HackStepKind.CleanLogs, comp, default, null));
+                steps.Add(new HackStep(ActionKind.CleanLogs, comp, default, null));
             }
         }
     }
@@ -202,7 +202,7 @@ internal sealed partial class HackRun
         // 每连一台都会往自己机器上写一条，提前清会被后续步骤重新写回来。
         if (options.WipeTraces)
         {
-            steps.Add(new HackStep(HackStepKind.CleanLogs, os.thisComputer, default, null));
+            steps.Add(new HackStep(ActionKind.CleanLogs, os.thisComputer, default, null));
         }
     }
 
@@ -219,7 +219,7 @@ internal sealed partial class HackRun
     private static void AppendScripted(
         List<HackStep> steps, Computer target, HackScript script, HackOptions options, OS os)
     {
-        var emitted = new HashSet<HackStepKind>();
+        var emitted = new HashSet<ActionKind>();
         var connected = ReferenceEquals(target, os.connectedComp);
 
         // 连接与解除反扑是前置条件，不是脚本可选项 —— 见方法注释。
@@ -228,12 +228,12 @@ internal sealed partial class HackRun
         var connectRequired = options.ConnectFirst;
         if (connectRequired && !connected)
         {
-            steps.Add(new HackStep(HackStepKind.Connect, target, default, "connect " + target.ip));
-            emitted.Add(HackStepKind.Connect);
+            steps.Add(new HackStep(ActionKind.Connect, target, default, "connect " + target.ip));
+            emitted.Add(ActionKind.Connect);
         }
 
-        steps.Add(new HackStep(HackStepKind.Neutralize, target, default, null));
-        emitted.Add(HackStepKind.Neutralize);
+        steps.Add(new HackStep(ActionKind.Neutralize, target, default, null));
+        emitted.Add(ActionKind.Neutralize);
 
         foreach (var action in script.Actions)
         {
@@ -249,16 +249,16 @@ internal sealed partial class HackRun
         // 脚本没写 rm 时补上（开关为真才补）—— 留痕的代价是目标机在断开时自动排一个
         // 脱机追踪（TrackerCompleteSequence.cs:30-47）。脚本里写了 rm 就不补：
         // 那是玩家显式指定的位置，多清一次虽幂等，但会把清理点挪到玩家没写的地方。
-        if (options.WipeTraces && !emitted.Contains(HackStepKind.CleanLogs))
+        if (options.WipeTraces && !emitted.Contains(ActionKind.CleanLogs))
         {
-            steps.Add(new HackStep(HackStepKind.CleanLogs, target, default, null));
+            steps.Add(new HackStep(ActionKind.CleanLogs, target, default, null));
         }
 
         // 兜底反追踪：与内置次序同理，脚本没写也要有 —— 断开已让它失效，
         // 这一步覆盖「脚本以 stay 结尾」与「最后一步之后才被点燃」的窗口。
-        if (emitted.Add(HackStepKind.KillTrace))
+        if (emitted.Add(ActionKind.KillTrace))
         {
-            steps.Add(new HackStep(HackStepKind.KillTrace, target, default, null));
+            steps.Add(new HackStep(ActionKind.KillTrace, target, default, null));
         }
     }
 
@@ -268,17 +268,17 @@ internal sealed partial class HackRun
     /// </summary>
     private static void AppendScriptedAction(
         List<HackStep> steps, Computer target, HackScript.Action action,
-        HashSet<HackStepKind> emitted, bool connected, HackOptions options)
+        HashSet<ActionKind> emitted, bool connected, HackOptions options)
     {
         // connect 已被前置步骤登记过时（ConnectFirst 模式），脚本里再写就跳过。
-        if (action.Kind == HackStepKind.Connect)
+        if (action.Kind == ActionKind.Connect)
         {
-            if (connected || !emitted.Add(HackStepKind.Connect))
+            if (connected || !emitted.Add(ActionKind.Connect))
             {
                 return;
             }
 
-            steps.Add(new HackStep(HackStepKind.Connect, target, default, "connect " + target.ip));
+            steps.Add(new HackStep(ActionKind.Connect, target, default, "connect " + target.ip));
             return;
         }
 
@@ -286,13 +286,13 @@ internal sealed partial class HackRun
         // 是幂等的（WipeTraces 返回空列表、不输出），而「证据必须消失」是硬承诺，
         // 让玩家写两次就多清一次比静默吞掉第二个更符合预期。
         // 其余动作改的是游戏状态，重复出现只取首次。
-        if (action.Kind is not (HackStepKind.OpenPort or HackStepKind.CleanLogs) &&
+        if (action.Kind is not (ActionKind.OpenPort or ActionKind.CleanLogs) &&
             !emitted.Add(action.Kind))
         {
             return;
         }
 
-        if (action.Kind == HackStepKind.OpenPort)
+        if (action.Kind == ActionKind.OpenPort)
         {
             foreach (var step in ExpandPorts(target, action.Port, options))
             {
@@ -320,7 +320,7 @@ internal sealed partial class HackRun
                 continue;
             }
 
-            yield return new HackStep(HackStepKind.OpenPort, target, port, HackEngine.CrackCommand(port));
+            yield return new HackStep(ActionKind.OpenPort, target, port, HackEngine.CrackCommand(port));
         }
     }
 
@@ -328,11 +328,11 @@ internal sealed partial class HackRun
     /// 脚本动作对应的终端回显原文；返回 null 表示由 Apply 的分支自行处理
     /// （<c>Connect</c> 拼 ip、<c>OpenPort</c> 用破解程序名、其余非终端指令一律不回显）。
     /// </summary>
-    private static string CommandFor(HackStepKind kind) => kind switch
+    private static string CommandFor(ActionKind kind) => kind switch
     {
-        HackStepKind.Disconnect => "dc",
-        HackStepKind.Escalate => "porthack",
-        HackStepKind.Probe => "probe",
+        ActionKind.Disconnect => "dc",
+        ActionKind.Escalate => "porthack",
+        ActionKind.Probe => "probe",
 
         _ => null,
     };

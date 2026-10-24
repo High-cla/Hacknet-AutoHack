@@ -40,11 +40,11 @@ internal static partial class HackEngine
     /// 故一律走框架端口表；仅当表尚未建立时，按原版端口号反查 <see cref="PortRecord"/>
     /// 以保留端口清单（状态按「未攻破」处理，绝不臆造已开放）。
     /// </summary>
-    internal static IReadOnlyList<PortInfo> Ports(Computer comp)
+    internal static IReadOnlyList<PortView> Ports(Computer comp)
     {
         if (comp == null)
         {
-            return Array.Empty<PortInfo>();
+            return Array.Empty<PortView>();
         }
 
         // GetPortStateDict() 交出的是框架 PortTable 的内部字典本体；GetAllPortStates()
@@ -54,7 +54,7 @@ internal static partial class HackEngine
         var states = comp.GetPortStateDict();
         if (states != null && states.Count > 0)
         {
-            var fromStates = new List<PortInfo>(states.Count);
+            var fromStates = new List<PortView>(states.Count);
             foreach (var pair in states)
             {
                 var state = pair.Value;
@@ -64,7 +64,7 @@ internal static partial class HackEngine
                     continue;
                 }
 
-                fromStates.Add(new PortInfo(
+                fromStates.Add(new PortView(
                     record.Protocol,
                     record.OriginalPortNumber,
                     state.PortNumber,
@@ -86,10 +86,10 @@ internal static partial class HackEngine
         // 这里会静默返回空端口表 —— 那是比多几行更糟的失效方式。
         if (comp.ports == null || comp.ports.Count == 0)
         {
-            return Array.Empty<PortInfo>();
+            return Array.Empty<PortView>();
         }
 
-        var fallback = new List<PortInfo>(comp.ports.Count);
+        var fallback = new List<PortView>(comp.ports.Count);
         foreach (var code in comp.ports)
         {
             var record = PortManager.GetPortRecordFromNumber(code);
@@ -98,7 +98,7 @@ internal static partial class HackEngine
                 continue;
             }
 
-            fallback.Add(new PortInfo(
+            fallback.Add(new PortView(
                 record.Protocol,
                 record.OriginalPortNumber,
                 record.DefaultPortNumber,
@@ -117,15 +117,15 @@ internal static partial class HackEngine
     /// 且没有任何模组往 <c>cracks</c> 写过。理由与取舍见 <see cref="ModPortPolicy"/>。
     /// </summary>
     /// <param name="modPorts">允许开模组端口的协议名；<c>null</c>/空 = 一个都不开（缺省）。</param>
-    internal static IReadOnlyList<PortInfo> CrackablePorts(Computer comp, IReadOnlyCollection<string> modPorts = null)
+    internal static IReadOnlyList<PortView> CrackablePorts(Computer comp, IReadOnlyCollection<string> modPorts = null)
     {
         var ports = Ports(comp);
         if (ports.Count == 0)
         {
-            return Array.Empty<PortInfo>();
+            return Array.Empty<PortView>();
         }
 
-        var found = new List<PortInfo>(ports.Count);
+        var found = new List<PortView>(ports.Count);
         var seen = new HashSet<int>();
         foreach (var port in ports)
         {
@@ -308,7 +308,7 @@ internal static partial class HackEngine
     /// （见 ModTools 的类注释）。故这里给一个<b>一眼可辨的占位</b>，而不是编一条
     /// 看起来像真的、实际敲了会报错的命令。端口本身由 <see cref="OpenPort"/> 直接开。
     /// </summary>
-    internal static string CrackCommand(PortInfo port)
+    internal static string CrackCommand(PortView port)
     {
         var program = HasCrackProgram(port.CodePort)
             ? PortExploits.cracks[port.CodePort].Replace(".exe", string.Empty).ToLowerInvariant()
@@ -323,11 +323,11 @@ internal static partial class HackEngine
     /// <see cref="PortState.Cracked"/>，但游戏签名才是原生破解程序（<c>SSHCrackExe</c> 等）
     /// 完成时的调用形态，且 Pathfinder 用 Prefix 把该重载接到端口表
     /// （<c>Record.OriginalPortNumber == portNum</c>，ComputerExtensions.cs:236-252）。
-    /// 传 <see cref="PortInfo.CodePort"/>（= OriginalPortNumber）即与原生完全同路，
+    /// 传 <see cref="PortView.CodePort"/>（= OriginalPortNumber）即与原生完全同路，
     /// 玩家实际敲的 <c>sshcrack 22</c> 也是「显示端口进、内部换算成原始端口」
     /// （<c>ProgramRunner.AttemptExeProgramExecution</c> 里 <c>GetCodePortNumberFromDisplayPort</c>）。
     /// </summary>
-    internal static void OpenPort(Computer comp, PortInfo port, string ipFrom)
+    internal static void OpenPort(Computer comp, PortView port, string ipFrom)
     {
         if (comp == null || port.Protocol is null)
         {

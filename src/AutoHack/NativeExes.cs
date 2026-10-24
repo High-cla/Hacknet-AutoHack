@@ -1,5 +1,7 @@
 namespace AutoHack;
 
+using AutoHack.Core;
+
 using System;
 using Hacknet;
 using Microsoft.Xna.Framework;
@@ -133,13 +135,13 @@ internal static class NativeExes
     /// 队列满被挤掉的情形都不回显它，由调用方在补开端口时回显（见 <see cref="Show"/>）。</param>
     private readonly record struct Pending(
         ExeModule Exe, string ExeName, int RamCost, Life Life, float Tiebreak,
-        Computer Target, PortInfo Port, Action Echo);
+        Computer Target, PortView Port, Action Echo);
 
     /// <summary>
     /// 一个<b>已经挂上面板</b>的动画。与 <see cref="Pending"/> 同构，只是少了调度字段 ——
     /// 已挂上的不再参与排序。
     /// </summary>
-    private readonly record struct Running(ExeModule Exe, Computer Target, PortInfo Port);
+    private readonly record struct Running(ExeModule Exe, Computer Target, PortView Port);
 
     /// <summary>待播动画，按 <see cref="Compare"/> 排序 —— 代价小的在前。</summary>
     private static readonly List<Pending> Queue = new(MaxQueued);
@@ -341,7 +343,7 @@ internal static class NativeExes
     ///   <c>Completed()</c> 永不执行，端口就此丢失。</item>
     /// </list>
     /// </summary>
-    internal static bool Show(OS os, Computer target, PortInfo port, Action echo)
+    internal static bool Show(OS os, Computer target, PortView port, Action echo)
     {
         if (os == null || target == null || !ReferenceEquals(os.connectedComp, target))
         {
@@ -623,13 +625,13 @@ internal static class NativeExes
     }
 
     /// <summary>
-    /// 该端口此刻是不是已破解。<b>按协议名现查端口表</b>，不用 <see cref="PortInfo.Cracked"/> ——
+    /// 该端口此刻是不是已破解。<b>按协议名现查端口表</b>，不用 <see cref="PortView.Cracked"/> ——
     /// 那是 <c>HackEngine.Ports</c> 在构建步骤时拍的快照，之后动画把端口开了它也不会变。
     ///
     /// 查不到该协议时返回 true（当作「没有可等的」）：那种端口 <c>HackEngine.OpenPort</c>
     /// 也写不进去，等下去只会卡住。
     /// </summary>
-    private static bool IsOpen(Computer target, PortInfo port)
+    private static bool IsOpen(Computer target, PortView port)
     {
         var state = target.GetPortState(port.Protocol);
         return state == null || state.Cracked;

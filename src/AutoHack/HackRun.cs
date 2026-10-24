@@ -69,8 +69,8 @@ internal sealed partial class HackRun
     /// <summary>
     /// 连接被目标主动拒绝（白名单）的机器。
     ///
-    /// 它**只跳过依赖连接的步骤**（<see cref="HackStepKind.Connect"/>、
-    /// <see cref="HackStepKind.CleanLogs"/>、<see cref="HackStepKind.Disconnect"/>），
+    /// 它**只跳过依赖连接的步骤**（<see cref="ActionKind.Connect"/>、
+    /// <see cref="ActionKind.CleanLogs"/>、<see cref="ActionKind.Disconnect"/>），
     /// 其余（破端口 / 解跳板 / 解防火墙 / login / 提权 / 投放）全部照常执行 ——
     /// 那些步骤直接操作 <c>target</c> 对象，本就不经过连接。
     ///
@@ -225,7 +225,7 @@ internal sealed partial class HackRun
             //
             // 代价是端口步恒为 1 帧/个（60 个/秒）：642 个端口约 10.7 秒。
             // 这是刻意的取舍 —— 战果要看得见，而 60/秒已远快于任何人工节奏。
-            if (step.Kind == HackStepKind.OpenPort)
+            if (step.Kind == ActionKind.OpenPort)
             {
                 return;
             }
@@ -247,7 +247,7 @@ internal sealed partial class HackRun
         // 各不相同，而 Cracked 一置真就说明该端口确实开好了（见 NativeExes.Settled）。
         //
         // 不推进 _index，下一帧重来 —— 这是「等」，不是「跳过」。
-        if (step.Kind != HackStepKind.Escalate || NativeExes.Settled(step.Target))
+        if (step.Kind != ActionKind.Escalate || NativeExes.Settled(step.Target))
         {
             return false;
         }
@@ -281,17 +281,17 @@ internal sealed partial class HackRun
             return false;
         }
 
-        return step.Kind is HackStepKind.BypassProxy
-            or HackStepKind.OpenPort
-            or HackStepKind.SolveFirewall
-            or HackStepKind.Escalate;
+        return step.Kind is ActionKind.BypassProxy
+            or ActionKind.OpenPort
+            or ActionKind.SolveFirewall
+            or ActionKind.Escalate;
     }
 
     /// <summary>
     /// 这一步是不是「端口已经破够了，可以不用再破」的端口步。
     ///
-    /// <b>只对 <see cref="HackStepKind.OpenPort"/> 生效。</b>其余步骤都不受端口数量影响 ——
-    /// 尤其是 <see cref="HackStepKind.SolveFirewall"/>：porthack 的第二道门禁要求
+    /// <b>只对 <see cref="ActionKind.OpenPort"/> 生效。</b>其余步骤都不受端口数量影响 ——
+    /// 尤其是 <see cref="ActionKind.SolveFirewall"/>：porthack 的第二道门禁要求
     /// <c>firewall.solved</c>（<c>OS.cs:1920-1927</c>），防火墙该解还得解。
     ///
     /// <b>两种模式都生效（内置次序与脚本）。</b>与 <see cref="IsRedundantAfterLogin"/> 同一
@@ -301,7 +301,7 @@ internal sealed partial class HackRun
     /// </summary>
     private bool IsPortQuotaMet(HackStep step)
     {
-        if (step.Kind != HackStepKind.OpenPort)
+        if (step.Kind != ActionKind.OpenPort)
         {
             return false;
         }
@@ -320,55 +320,55 @@ internal sealed partial class HackRun
 
         switch (step.Kind)
         {
-            case HackStepKind.Connect:
+            case ActionKind.Connect:
                 ApplyConnect(os, step);
                 break;
 
-            case HackStepKind.Neutralize:
+            case ActionKind.Neutralize:
                 ApplyNeutralize(os, target);
                 break;
 
-            case HackStepKind.BypassProxy:
+            case ActionKind.BypassProxy:
                 ApplyBypassProxy(os, target);
                 break;
 
-            case HackStepKind.Login:
+            case ActionKind.Login:
                 ApplyLogin(os, target);
                 break;
 
-            case HackStepKind.Probe:
+            case ActionKind.Probe:
                 ApplyProbe(os, step);
                 break;
 
-            case HackStepKind.OpenPort:
+            case ActionKind.OpenPort:
                 ApplyOpenPort(os, step);
                 break;
 
-            case HackStepKind.SolveFirewall:
+            case ActionKind.SolveFirewall:
                 ApplySolveFirewall(os, target);
                 break;
 
-            case HackStepKind.Escalate:
+            case ActionKind.Escalate:
                 ApplyEscalate(os, step);
                 break;
 
-            case HackStepKind.BypassWhitelist:
+            case ActionKind.BypassWhitelist:
                 ApplyBypassWhitelist(os, target);
                 break;
 
-            case HackStepKind.UploadMarker:
+            case ActionKind.UploadMarker:
                 ApplyUploadMarker(os, target);
                 break;
 
-            case HackStepKind.CleanLogs:
+            case ActionKind.CleanLogs:
                 ApplyCleanLogs(os, target);
                 break;
 
-            case HackStepKind.Disconnect:
+            case ActionKind.Disconnect:
                 ApplyDisconnect(os, step);
                 break;
 
-            case HackStepKind.KillTrace:
+            case ActionKind.KillTrace:
                 ApplyKillTrace(os);
                 break;
         }
@@ -422,7 +422,7 @@ internal sealed partial class HackRun
         {
             // 两个数取自同一次快照：分两次查会各分配一份端口表副本
             // （GetAllPortStates 是 ...Values.ToList()），且理论上可能显示
-            // opened > total 的不一致比例。PortInfo 自带 Cracked，无需第二次遍历。
+            // opened > total 的不一致比例。PortView 自带 Cracked，无需第二次遍历。
             var ports = HackEngine.Ports(target);
             var opened = ports.Count(p => p.Cracked);
 

@@ -22,7 +22,7 @@ using System.IO;
 internal sealed class HackScript
 {
     /// <summary>脚本里的单个动作。<see cref="Port"/> 仅 <c>OpenPort</c> 有意义，0 表示全部可破端口。</summary>
-    internal readonly record struct Action(HackStepKind Kind, int Port);
+    internal readonly record struct Action(ActionKind Kind, int Port);
 
     /// <summary>行尾分隔符。游戏用 " $#%#$\r\n" 切行，此处按行处理后只剩尾巴。</summary>
     /// <summary>词法分隔符：<b>只有空格</b>，与游戏的 <c>Utils.spaceDelim = [' ']</c>（Utils.cs:67）逐字一致。
@@ -65,20 +65,20 @@ internal sealed class HackScript
     };
 
     /// <summary>动作名 → 步骤种类。大小写不敏感；一个概念允许多种写法，与命令行别名同风格。</summary>
-    private static readonly (string[] Names, HackStepKind Kind)[] Vocabulary =
+    private static readonly (string[] Names, ActionKind Kind)[] Vocabulary =
     [
-        (["connect", "c"], HackStepKind.Connect),
-        (["neutralize", "anticounter", "noadmin"], HackStepKind.Neutralize),
-        (["probe", "p"], HackStepKind.Probe),
-        (["login", "creds"], HackStepKind.Login),
-        (["proxy", "bypass", "overload"], HackStepKind.BypassProxy),
-        (["openport", "crack", "port"], HackStepKind.OpenPort),
-        (["solve", "firewall", "analyze"], HackStepKind.SolveFirewall),
-        (["porthack", "escalate", "admin"], HackStepKind.Escalate),
-        (["mark", "upload", "marker"], HackStepKind.UploadMarker),
-        (["rm", "clean", "wipe", "logs"], HackStepKind.CleanLogs),
-        (["dc", "disconnect"], HackStepKind.Disconnect),
-        (["killtrace", "stoptrace", "trace"], HackStepKind.KillTrace),
+        (["connect", "c"], ActionKind.Connect),
+        (["neutralize", "anticounter", "noadmin"], ActionKind.Neutralize),
+        (["probe", "p"], ActionKind.Probe),
+        (["login", "creds"], ActionKind.Login),
+        (["proxy", "bypass", "overload"], ActionKind.BypassProxy),
+        (["openport", "crack", "port"], ActionKind.OpenPort),
+        (["solve", "firewall", "analyze"], ActionKind.SolveFirewall),
+        (["porthack", "escalate", "admin"], ActionKind.Escalate),
+        (["mark", "upload", "marker"], ActionKind.UploadMarker),
+        (["rm", "clean", "wipe", "logs"], ActionKind.CleanLogs),
+        (["dc", "disconnect"], ActionKind.Disconnect),
+        (["killtrace", "stoptrace", "trace"], ActionKind.KillTrace),
     ];
 
     /// <summary>
@@ -141,7 +141,7 @@ internal sealed class HackScript
 
             // openPort 可带一个端口号；不带 = 该目标上全部有破解程序的端口。
             var port = 0;
-            if (kind == HackStepKind.OpenPort && tokens.Length > 1 &&
+            if (kind == ActionKind.OpenPort && tokens.Length > 1 &&
                 !int.TryParse(tokens[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out port))
             {
                 throw new FormatException(
@@ -185,13 +185,13 @@ internal sealed class HackScript
             // 故等价于「其余动作不改连接状态」。
             connected = action.Kind switch
             {
-                HackStepKind.Connect => true,
-                HackStepKind.Disconnect => false,
+                ActionKind.Connect => true,
+                ActionKind.Disconnect => false,
 
                 // 清痕本身已不依赖连接（HackEngine.WipeTraces 按 folderPath 直取目标
                 // /log），但脚本里的 'rm' 仍是玩家写下的**意图** —— 他以为它在目标机上
                 // 执行。dc 之后它落在自己机器上，意图与效果不符，仍属该拒的写法。
-                HackStepKind.CleanLogs when !connected => throw new FormatException(
+                ActionKind.CleanLogs when !connected => throw new FormatException(
                     "In '" + source + "': 'rm' comes after 'dc' with no 'connect' in between - "
                     + "it would act on your own file system, not the target's. Swap the two lines."),
 
@@ -200,7 +200,7 @@ internal sealed class HackScript
         }
     }
 
-    private static HackStepKind? ResolveKind(string verb)
+    private static ActionKind? ResolveKind(string verb)
     {
         foreach (var (names, kind) in Vocabulary)
         {

@@ -25,10 +25,10 @@ internal sealed partial class HackRun
     /// 取自 <c>os.connectedComp</c>（Programs.cs:956）。改为按 IP 逐条点名删之后
     /// （见 <see cref="HackEngine.WipeTraces"/>），它连回显都不需要了，自然也不再依赖连接。
     /// </summary>
-    private static bool DependsOnConnection(HackStepKind kind) => kind switch
+    private static bool DependsOnConnection(ActionKind kind) => kind switch
     {
-        HackStepKind.Connect => true,
-        HackStepKind.Disconnect => true,
+        ActionKind.Connect => true,
+        ActionKind.Disconnect => true,
         _ => false,
     };
 

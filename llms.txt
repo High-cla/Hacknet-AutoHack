@@ -3,7 +3,7 @@
 > Hacknet 的 BepInEx / Pathfinder 插件：用游戏自身的原生机制一键入侵全网，带控制面板与脚本驱动。
 > 本文件面向要理解或修改本仓库的编码 agent。规范见 https://llmstxt.org
 
-当前 v1.41.1。构建产物直投游戏插件目录，无需手动拷贝：
+当前 v1.42.0。构建产物直投游戏插件目录，无需手动拷贝：
 
 ```
 D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
@@ -21,7 +21,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    **绝不下载 Release 附件回来比对** —— 需要确认部署新鲜度时只看构建输出目录那份。
 3. **`gh release create` 绝不自动执行** —— 等用户显式发令。`git push` 可以直接做。
 
-**五十四条最容易踩的坑 / 最该知道的机制**（都带行号，可直接 grep）
+**五十五条最容易踩的坑 / 最该知道的机制**（都带行号，可直接 grep）
 
 1. `Computer.portsOpen` 恒为 0 —— Pathfinder 用 Harmony Prefix 接管 `openPort`/`openPorts`
    并 `return false`，状态改存 `PortState.Cracked`。任何读 `portsOpen` 的判断都是错的，
@@ -1015,20 +1015,20 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    面板之后）。合并成一个补丁后，次序写死在方法体里。
 
 54. **脚本模式的四条不变量：三条是「不用写」，一条是「不能写反」**（v1.41.1 记）——
-   `script=` 走的是 `HackScript.Parse`（解析期校验）→ `HackRun.Plan.AppendScripted`
+   `script=` 走的是 `Core/HackScript.Parse`（解析期校验）→ `Core/Planner.AppendScripted`
    （前置/收尾注入）这条链。玩家最容易踩的四处：
 
    **① `rm` 必须在 `dc` 之前**（中间隔一个 `connect` 才合法）。
    清痕的作用域取自当前连接 —— `rm` 的无参形态读 `os.connectedComp`（Programs.cs:956），
    `dc` 之后再清删的是**玩家自己**的文件系统。校验在 `HackScript.Validate`
-   （HackScript.cs:170-198），判据是「每个 `rm` 之前有没有尚未被 `connect` 抵消的 `dc`」，
+   （Core/HackScript.cs:173-201），判据是「每个 `rm` 之前有没有尚未被 `connect` 抵消的 `dc`」，
    不粗判成「最后一个 `dc`」（否则 `dc / connect / rm` 会被误拒）。违反抛
    `FormatException`（:191-193），文案直接给出互换提示。
    **注意**：`HackEngine.WipeTraces` 本身已不依赖连接（按 folderPath 直取目标 `/log`），
    但脚本里的 `rm` 代表玩家的**意图**，落在自己机器上仍属该拒的写法 —— 这条刻意不改。
 
    **② `connect` / `neutralize` / `killtrace` 不用写。**
-   `AppendScripted`（HackRun.Plan.cs:218-262）恒补：`neutralize`（:234）与末尾
+   `AppendScripted`（Core/Planner.cs:162-196）恒补：`neutralize`（:179）与末尾
    `killtrace`（:258）；`connect` 只在 `ConnectFirst` 且未连接时补（:227-232）——
    `connectfirst=0` 的 direct 模式下把决定权留给脚本。脚本里写了同样的动作会被
    `emitted` 集合去重（:272-290），故写了不报错、也不重复执行。
@@ -1037,7 +1037,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
 
    **③ `delay` / `config` 不能写。** 它们是游戏 HackerScript 的节奏设置，而本插件没有步进
    间隔（坑 47 ③ 把 `HackRun.DelayFor` 整个删了，只剩三道闸门）。这两个词在
-   `UnsupportedVerbs`（HackScript.cs:55-62）里，报错是「这是游戏 NPC 动作，没有玩家侧
+   `UnsupportedVerbs`（Core/HackScript.cs:57-64）里，报错是「这是游戏 NPC 动作，没有玩家侧
    等价物」而不是含糊的「unknown action」—— **v1.41.1 之前它们不在这个集合里**，
    玩家只看到 unknown action，得自己猜。
 
@@ -1050,6 +1050,35 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    **去重规则**：`openPort` 可重复（逐端口展开），`rm` 可重复（幂等）；
    其余动作重复出现只取首次（:283-290）。
 
+
+55. **运行由零 RAM 隐藏 exe 承载，每帧泵走 OSUpdateEvent**（v1.42.0 记）——
+
+   **宿主**：`AutoHackExecutable : GameExecutable`（src/AutoHack/AutoHackExecutable.cs）。
+   `ramCost = 0` 使 `os.ramAvaliable >= ramCost` 恒真（ExecutableManager.cs:165），不占内存；
+   `Draw` 空实现 → 完全不可见；`CanBeKilled = true` 让 `kill` 打出 `] Ended` 而不是
+   `] Did not Respond`（ExeModuleExtensions.cs:5）。生命周期由游戏自己的
+   `exes[i].Update(dt)` 驱动（OS.cs:862-864），`Result = Success` 后基类淡出并移除。
+   **代价**：`os.exes.Count` 与 `ps` 里会多一个 `autohack`（`IdentifierName` 决定显示名）。
+
+   **每帧泵**：订阅 `Pathfinder.Event.Gameplay.OSUpdateEvent`（它本身是 `OS.Update` 的
+   Harmony Postfix，EventManager.cs:38-53），`EventHandler<T>` 按
+   `EventHandlerOptions.PrioritySafe` 排序（EventHandler.cs:15-18）—— 顺序因此显式，
+   不再取决于两个补丁的装配先后。`OS.Draw` 侧仍是补丁：Pathfinder 没有 OS 绘制事件，
+   且 `GuiData.blockingInput` 的抢占必须在正文绘制前（Prefix）。
+
+   **`EventManager<T>.InvokeAssembly` 按程序集派发**（EventManager.cs:56-71）：扩展自己的
+   `PostLoad` 事件只有扩展收得到，故「AutoHack 主动扫描外部插件」不可行。外部工具走
+   `AutoHackApi.RegisterTool(...)` 显式登记（`src/AutoHack/AutoHackApi.cs`），
+   重复动词抛 `ArgumentException` —— 同名会让「命令打哪一个」变成加载顺序的函数。
+
+   **核心层零游戏引用**由 `tests/core-tests` 保证：net10.0 工程
+   `<Compile Include="../../src/AutoHack/Core/**/*.cs" />`，插件编 net472、测试编 net10，
+   同一份源码两处编译 —— 误引 `Hacknet` / `Pathfinder` / `BepInEx` / `Harmony` 立刻编不过。
+
+   **状态机的非显然约束**：`Connect` 与 `Login` 之后必须让出本帧。它们的结论（是否被白名单
+   拒绝、是否真的提权成功）要等执行器跑完、世界视图更新后才能读回（`Session.Observe`）；
+   同帧继续推进会让 login 成功后紧跟的端口步白跑 —— 这条是单测 `session.login.port.skipped`
+   抓出来的，不是照抄旧代码。
 
 ## README 已精简掉的内容（原样保留于此）
 
@@ -1160,7 +1189,14 @@ passcode = 头部第 4 段首个密文数字 - 158485
 
 ## 源码
 
-- [src/AutoHack/ToolDispatch.cs](src/AutoHack/ToolDispatch.cs): 十四个工具的唯一入口（命令与面板共用）；`RemoteTools.cs` 是其中三个远程动作的实现，`ScanTools.cs` 是 `scan`，`TraceTools.cs` 是 `trace`，`IpTools.cs` 是 `ip`，`PortTools.cs` 是 `ports`（见坑 51）
+- [src/AutoHack/ToolDispatch.cs](src/AutoHack/ToolDispatch.cs): 工具的查表入口（命令与面板共用，查 `ToolRegistry`）；`RemoteTools.cs` 是其中三个远程动作的实现，`ScanTools.cs` 是 `scan`，`TraceTools.cs` 是 `trace`，`IpTools.cs` 是 `ip`，`PortTools.cs` 是 `ports`（见坑 51）
+- [src/AutoHack/ToolRegistry.cs](src/AutoHack/ToolRegistry.cs): 工具注册表 —— 内置 14 个与外部登记走同一张表，写入重建快照、读取零分配（见坑 55）
+- [src/AutoHack/AutoHackApi.cs](src/AutoHack/AutoHackApi.cs): 公开扩展入口 —— 其它插件在**自己的** `PostLoad` 里 `RegisterTool`（见坑 55）
+- [src/AutoHack/Core/](src/AutoHack/Core): **纯核心层，零 Hacknet / Pathfinder / BepInEx / Harmony 引用** —— `Planner.cs`（目标快照 → 动作序列）、`Session.cs`（状态机：三道闸门 + 四类跳过）、`GameAction.cs` / `TargetView.cs` / `PortView.cs` / `Plan.cs` / `IWorldView.cs` / `HackOptions*.cs` / `HackScript.cs` / `ModPortPolicy.cs`；离线单测在 `tests/core-tests`
+- [src/AutoHack/GameWorldView.cs](src/AutoHack/GameWorldView.cs): 适配器 —— `Computer` → `TargetView` 素材化 + `IWorldView` 五问（只读，无 setter）
+- [src/AutoHack/GameHost.cs](src/AutoHack/GameHost.cs): 每帧泵 —— 订阅 `OSUpdateEvent`，驱动演出队列与 headless 队列（见坑 55）
+- [src/AutoHack/AutoHackExecutable.cs](src/AutoHack/AutoHackExecutable.cs): 运行宿主 —— 零 RAM、不可见、可 kill 的 `GameExecutable` 壳（见坑 55）
+- [tests/core-tests/](tests/core-tests): 核心层离线单测（net10.0，零 NuGet，`dotnet run --project tests/core-tests`）
 - [src/AutoHack/DecTools.cs](src/AutoHack/DecTools.cs): DEC 解密 —— 反推 passcode + 多层递归 + 批量落盘
 - [src/AutoHack/MemTools.cs](src/AutoHack/MemTools.cs): 内存转储 —— 查看 / 导出 / 扫描内嵌 DEC
 - [src/AutoHack/ExeTools.cs](src/AutoHack/ExeTools.cs): 程序补全 —— 幂等填充 `/bin`
@@ -1171,9 +1207,9 @@ passcode = 头部第 4 段首个密文数字 - 158485
 - [src/AutoHack/PanelSettings.cs](src/AutoHack/PanelSettings.cs): 面板设置的落盘层（ConfigFile 读写，无 UI；见坑 33）
 - [src/AutoHack/ReplaceFeedback.cs](src/AutoHack/ReplaceFeedback.cs): 给原生 `replace` 补「失败要说出来」（见坑 34）
 - [src/AutoHack/ScanTools.cs](src/AutoHack/ScanTools.cs): 地图扫描 —— 标出当前节点所在连通分量
-- [src/AutoHack/HackRun.cs](src/AutoHack/HackRun.cs): 执行层 —— 逐帧推进、动作分派、收尾；`partial` 分部：`HackRun.Plan.cs`（计划构建，纯函数）/ `HackRun.Steps.cs`（单步实现）
-- [src/AutoHack/HackScript.cs](src/AutoHack/HackScript.cs): 入侵脚本的解析与校验（`script=` 模式）；路径解析交给框架 `StringExtensions.ContentFilePath`，不自己拼内容目录前缀
-- [src/AutoHack/ModPortPolicy.cs](src/AutoHack/ModPortPolicy.cs): 模组端口白名单 —— `modports=` 的解析、命中判定、未注册协议提示（见坑 48）
+- [src/AutoHack/HackRun.cs](src/AutoHack/HackRun.cs): 执行器 —— 执行核心给出的动作 + 收尾；`partial` 分部 `HackRun.Steps.cs` 是唯一大量调用游戏 API 的区域
+- [src/AutoHack/Core/HackScript.cs](src/AutoHack/Core/HackScript.cs): 入侵脚本的解析与校验（`script=` 模式）；内容目录解析以委托注入（生产实现 `ContentPaths.cs`），本文件不认识框架
+- [src/AutoHack/Core/ModPortPolicy.cs](src/AutoHack/Core/ModPortPolicy.cs): 模组端口白名单的**纯策略**（解析、命中判定、通配）；查 `PortManager` 的未注册提示在 `ModPortProbe.cs`（见坑 48）
 - [src/AutoHack/IpTools.cs](src/AutoHack/IpTools.cs): 收尾换 IP —— 原生三步 + 肉鸡归属迁移 + 重建 Pathfinder 查找表（见坑 30）
 - [src/SaveFix/SaveFixPlugin.cs](src/SaveFix/SaveFixPlugin.cs): 独立插件 HacknetSaveFix，修游戏本体存档 NRE
 - [src/AutoHack/HackPanel.cs](src/AutoHack/HackPanel.cs): 自绘控制面板（布局与入口）；`partial` 分部 `HackPanel.Draw.cs` 是绘制原语与文本度量

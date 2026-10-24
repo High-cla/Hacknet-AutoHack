@@ -172,14 +172,24 @@ dotnet build src/SaveFix/SaveFix.csproj -c Release
 
 ```
 src/AutoHack/
-├── AutoHackPlugin.cs   插件入口：命令注册（属性扫描）+ PostLoad 自检 + 装配 Harmony
-├── HackOverlay.cs      叠加层：OS.Draw / OS.Update 的补丁出口 —— 画面板 + 追踪 HUD、推进入侵 + headless 队列
-├── ToolDispatch.cs     工具分派：全部 autohack 子命令的唯一入口（命令行与面板共用）
+├── AutoHackPlugin.cs   插件入口：命令注册（属性扫描）+ PostLoad 自检 + 装配 Harmony + 订阅每帧事件
+├── Core/               纯核心层：零 Hacknet / Pathfinder / BepInEx / Harmony 引用（离线可测）
+│   ├── HackOptions.cs / HackOptions.Parse.cs 　选项与命令行解析
+│   ├── HackScript.cs   　脚本解析与校验（内容路径由委托注入）
+│   ├── Planner.cs      　目标快照 × 选项 → 动作序列（内置次序与脚本两条路）
+│   ├── Session.cs      　状态机：三道闸门 + 四类跳过（连接被拒 / login 已提权 / 端口到门槛 / 其余照常）
+│   └── GameAction / PortView / TargetView / Plan / IWorldView / ModPortPolicy
+├── GameWorldView.cs    适配器：Computer → TargetView 素材化，实现 IWorldView 的五问（只读）
+├── GameHost.cs         每帧泵：订阅 Pathfinder 的 OSUpdateEvent，驱动演出队列与 headless 队列
+├── AutoHackExecutable.cs 运行宿主：零 RAM、不可见、可 kill 的 GameExecutable 壳
+├── HackOverlay.cs      叠加层：只补 OS.Draw（面板 + 追踪 HUD）与输入抢占
+├── ToolRegistry.cs     工具注册表：内置 14 个 + 其它插件经 AutoHackApi 登记的工具
+├── AutoHackApi.cs      公开扩展入口（扩展在自己的 PostLoad 里调用）
+├── ToolDispatch.cs     工具的查表入口：命令行与面板共用一份实现
 ├── HackPanel.cs        面板绘制：布局、绘制入口、状态与常量
 ├── HackPanel.Draw.cs   　└ 自绘控件与绘制原语（Segment/Track/Measure 等）
-├── HackRun.cs          执行模型：逐帧推进、动作分派、收尾（与绘制解耦）
-├── HackRun.Plan.cs     　└ 计划构建：目标与选项 → HackStep 序列（纯函数）
-├── HackRun.Steps.cs    　└ 单步实现：把 HackStep 落到游戏 API 上
+├── HackRun.cs          执行器：执行核心给出的动作 + 收尾（与绘制解耦）
+├── HackRun.Steps.cs    　└ 动作执行：唯一大量调用游戏 API 的区域
 ├── NativeExes.cs       原生演出：破解程序的排队、挂载、回显与补开端口
 ├── HackEngine.cs       决策逻辑入口：目标解析与选择（含 ToolTargets）
 ├── HackEngine.Graph.cs 　└ 网络图遍历：可达闭包、广度优先展开、揭图
@@ -187,17 +197,31 @@ src/AutoHack/
 ├── HackEngine.Wipe.cs  　└ 日志清痕：识别、删除与全网扫描
 ├── HackEngine.Whitelist.cs └ 白名单绕过
 ├── HackEngine.Counter.cs　└ 反追踪、抑制管理员反扑、跳板拆除、静默断开
-├── HackTypes.cs        不可变数据：HackOptions / HackStep / PortInfo
-├── HackTypes.Parse.cs  　└ 命令行解析：别名表与 token 归约
-├── HackScript.cs       入侵脚本：行式动作表的解析与校验（script= 模式）
-├── ModPortPolicy.cs    模组端口白名单：modports= 的解析、命中判定、未注册提示
+├── ModPortProbe.cs     模组端口白名单的未注册提示（查 PortManager，属适配层）
 ├── PortTools.cs        端口清单：显示端口 / 协议名 / 原始端口号 / 破解状态（只读）
 ├── PendingRuns.cs      无面板运行的调度：命令线程只传参数，游戏线程构造并推进（按 OS 键控的 ConcurrentDictionary）
 ├── IsExternalInit.cs   net472 兼容垫片（record/init 需要）
 └── GlobalUsings.cs     全局 using
 ```
 
-设计上的三条硬边界：**`OS.Draw` / `OS.Update` 上的补丁只有 `HackOverlay.cs` 一处**（同一条 Update 的次序是硬约束：演出泵 → headless 队列 → 面板运行）；**`ToolDispatch.cs` 是全部工具命令的唯一入口**（命令行与面板按钮共用一份实现，不存在两套行为）；**执行层与绘制解耦** —— `HackRun` 只由每帧 delta 驱动，可脱离 GUI 单独推进与测试。另有四个补丁类挂在非 `OS` 补丁点上（`WebRenderGuard` / `ReplaceFeedback` / `RefusedWhitelist` / `LocalizationFix`），完整清单见 `llms.txt` 坑 53。
+设计上的四条硬边界：
+
+1. **决策与副作用分层** —— `Core/` 不出现任何游戏/框架 `using`，判据与次序都在那里；`tests/core-tests`（net10 编译同一份源码）离线验证。
+2. **补丁面只剩 UI** —— `HackOverlay.cs` 只补 `OS.Draw`（面板绘制 + 输入抢占）；每帧驱动改为订阅 Pathfinder 的 `OSUpdateEvent`，运行本身由零 RAM 的 `AutoHackExecutable` 承载。
+3. **`ToolDispatch.cs` 是全部工具命令的唯一入口** —— 查询 `ToolRegistry`，命令行与面板共用一份实现。
+4. **执行层与绘制解耦** —— `HackRun` 只执行核心给出的动作。
+
+另有四个补丁类挂在非 `OS` 补丁点上（`WebRenderGuard` / `ReplaceFeedback` / `RefusedWhitelist` / `LocalizationFix`），完整清单见 `llms.txt` 坑 53。
+
+### 给其它插件的扩展点
+
+其它插件可在自己的 `PostLoad` 里把一个工具挂进 `autohack` 命令与面板：
+
+```csharp
+AutoHackApi.RegisterTool("myverb", "myverb  do something", (os, allNodes) => { /* ... */ }, label: "MY TOOL");
+```
+
+重复动词会被拒绝（抛 `ArgumentException`）—— 同名工具会让「命令打哪一个」变成加载顺序的函数。
 
 ### 第二个插件：HacknetSaveFix
 

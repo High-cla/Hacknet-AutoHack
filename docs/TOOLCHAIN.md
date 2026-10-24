@@ -670,7 +670,7 @@ BENCH_SAVE=<path> node tools/bench.mts              # 换存档
 
 ```bash
 cd /d/git/HacknetMod && dotnet run --project tests/core-tests -c Release
-# → PASS 21 checks（失败时打印 FAIL 行并以退出码 1 结束）
+# → PASS 80 checks（失败时打印 FAIL 行并以退出码 1 结束）
 ```
 
 - 工程 TFM 是 `net10.0`（本机已有运行时，零 NuGet）；插件仍是 `net472`。两者**编译同一份源码**
@@ -679,7 +679,7 @@ cd /d/git/HacknetMod && dotnet run --project tests/core-tests -c Release
 - 断言手写（`Check(name, ok, detail)` + 失败计数），不引测试框架：本仓硬约束是零 NuGet。
 - 核心层与游戏侧的接缝：纯类型（`PortView`/`TargetView`/`GameAction`）+ 读模型（`IWorldView`）
   + 注入的路径委托（`ContentPaths.Resolve`）。测试用假实现，不需要游戏运行时。
-- 覆盖随迁移增长：当前是脚本解析器（动作/别名/分隔符/注释/`dc` 后 `rm`/NPC 动作报错/路径委托）；
+- 覆盖随迁移增长：脚本解析器、命令行选项、规划次序（含脚本去重）、状态机的四类跳过与三道闸门；
   已搬进核心的判据必须同时有对应用例。
 
 ## 关键路径

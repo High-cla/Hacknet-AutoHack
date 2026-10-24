@@ -46,7 +46,6 @@ internal sealed class Session
     {
         _plan = plan ?? throw new ArgumentNullException(nameof(plan));
         _options = options ?? throw new ArgumentNullException(nameof(options));
-        Phase = "IDLE";
     }
 
     /// <summary>全部步骤是否已处理完（跳过也计入）。</summary>
@@ -58,8 +57,32 @@ internal sealed class Session
     /// <summary>总步数。</summary>
     internal int Total => _plan.Steps.Count;
 
-    /// <summary>当前阶段的展示文案（面板用）。</summary>
-    internal string Phase { get; private set; }
+    private ActionKind? _lastKind;
+    private string _lastIp;
+    private string _lastCustom;
+    private bool _phaseDirty;
+    private string _phase = "IDLE";
+
+    /// <summary>
+    /// 当前阶段的展示文案（面板用）。
+    ///
+    /// <b>惰性构造</b>：文案只在有人读时才拼（面板开着时约每帧一次），状态机热圈里只记
+    /// 「刚发了哪个动作、对谁」两个字段。此前是每个动作 `ToUpperInvariant` + 拼接一次，
+    /// 实测整轮 202 KB 分配全来自这里 —— 展示文案不该由核心在逐动作循环里生产。
+    /// </summary>
+    internal string Phase
+    {
+        get
+        {
+            if (_lastKind is { } kind && _phaseDirty)
+            {
+                _phase = PhaseFor(kind, _lastIp, _lastCustom);
+                _phaseDirty = false;
+            }
+
+            return _phase;
+        }
+    }
 
     /// <summary>被目标白名单拒绝的机器（只读视图，供统计）。</summary>
     internal IReadOnlyCollection<string> Refused => _refused;
@@ -76,6 +99,9 @@ internal sealed class Session
     /// <summary>
     /// 推进一帧，返回本帧应执行的动作（可能为空）。执行器同步跑完后，下一帧的世界视图
     /// 自然反映结果 —— 状态机不接收任何返回值，世界是唯一的信息源。
+    ///
+    /// <b>返回值是复用缓冲</b>：同一实例连续调用会覆盖上一次的内容，调用方必须在本次调用内
+    /// 遍历完（<see cref="HackRun"/> 正是边遍历边执行）。跨帧持有它只会读到别的东西。
     /// </summary>
     internal IReadOnlyList<GameAction> Tick(IWorldView world, float deltaSeconds)
     {
@@ -145,7 +171,11 @@ internal sealed class Session
 
         if (_expectLogin != null)
         {
-            if (world.IsOwned(_expectLogin))
+            // 只登记「本次靠 login 拿下」：计划期就已控的机器（redo 模式重打肉鸡）
+            // 即便 adminIP 本来就是玩家，也不算这一步的功劳 —— 否则凭据失效时会
+            // 把整段破端口步骤跳掉，与旧实现（只在 login 真返回成功时登记）不等价。
+            var alreadyOwned = _plan.Targets.TryGetValue(_expectLogin, out var planned) && planned.IsOwned;
+            if (!alreadyOwned && world.IsOwned(_expectLogin))
             {
                 _loggedIn.Add(_expectLogin);
             }
@@ -206,19 +236,22 @@ internal sealed class Session
     private void Emit(GameAction step)
     {
         _out.Add(step);
-        Phase = PhaseFor(step);
+        _lastKind = step.Kind;
+        _lastIp = step.TargetIp;
+        _lastCustom = step.Custom;
+        _phaseDirty = true;
 
         if (step.Kind == ActionKind.Connect) { _expectConnect = step.TargetIp; }
         if (step.Kind == ActionKind.Login) { _expectLogin = step.TargetIp; }
     }
 
-    private string PhaseFor(GameAction step)
+    private string PhaseFor(ActionKind kind, string ip, string custom)
     {
-        var name = _plan.Targets.TryGetValue(step.TargetIp, out var target) && !string.IsNullOrEmpty(target.Name)
+        var name = _plan.Targets.TryGetValue(ip, out var target) && !string.IsNullOrEmpty(target.Name)
             ? target.Name.ToUpperInvariant()
-            : step.TargetIp;
+            : ip;
 
-        return step.Kind switch
+        return kind switch
         {
             ActionKind.Connect => "CONNECTING TO " + name,
             ActionKind.Neutralize => "DISABLING COUNTERATTACK ON " + name,
@@ -234,8 +267,8 @@ internal sealed class Session
             ActionKind.Disconnect => "DISCONNECTING",
             ActionKind.KillTrace => "KILLING TRACE",
             ActionKind.ResetIp => "RESETTING IP",
-            ActionKind.Custom => "CUSTOM " + (step.Custom ?? "ACTION"),
-            _ => Phase,
+            ActionKind.Custom => "CUSTOM " + (custom ?? "ACTION"),
+            _ => _phase,
         };
     }
 }

@@ -95,6 +95,20 @@ internal sealed class AutoHackExecutable : GameExecutable
         }
     }
 
+    /// <summary>
+    /// 执行层抛异常时的唯一救生口：记一行、止血、吞掉异常（返回 true），
+    /// 不让它穿过 <c>OS.Update</c> 打断整个游戏帧。
+    ///
+    /// 不在这里改 <c>Result</c>：下一帧 <see cref="OnUpdate"/> 见到 <c>Run.Finished</c> 会置
+    /// <c>Success</c> 并正常淡出 —— 若改成 Failure，基类还会额外打一行
+    /// <c>autohack: failed with ''</c> 的噪音。
+    /// </summary>
+    public override bool CatchException(Exception exception)
+    {
+        Run.Abort(_os, exception);
+        return true;
+    }
+
     /// <summary>不绘制任何东西 —— 零 RAM 的隐形宿主，面板另有自己的绘制层。</summary>
     public override void Draw(float t)
     {

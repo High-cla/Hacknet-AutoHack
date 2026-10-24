@@ -260,6 +260,17 @@ Check("custom.arg.rejected", argCustom != null && argCustom.Contains("takes no a
 var builtinStillBuiltin = HackScript.Parse("probe", "t", new[] { "probe" });
 Check("custom.builtin.wins", builtinStillBuiltin.Actions[0].Kind == ActionKind.Probe);
 
+// ㉓ 计划期就已控的机器：login 不算「本次提权」，端口步照常执行
+var ownedOpts = HackOptions.Parse(["here", "creds"]);
+var ownedScript = HackScript.Parse("login\nopenPort 22", "t");
+var ownedPlan = Planner.Build([Host("10.0.0.9", 1, [P("ssh", 22)], owned: true)], [], null, null, ownedOpts, ownedScript);
+var ownedWorld = new FakeWorld();
+ownedWorld.Owned.Add("10.0.0.9");
+var ownedSession = new Session(ownedPlan, ownedOpts);
+var ownedActions = Runner.Run(ownedSession, ownedWorld, _ => { });
+Check("session.login.owned.port.kept", ownedActions.Exists(a => a.Kind == ActionKind.OpenPort), string.Join(",", ownedActions.Select(a => a.Kind)));
+Check("session.login.owned.not.flagged", !ownedSession.LoggedIn.Contains("10.0.0.9"));
+
 Console.WriteLine(failures == 0
     ? $"PASS {total} checks"
     : $"FAILED {failures}/{total}");

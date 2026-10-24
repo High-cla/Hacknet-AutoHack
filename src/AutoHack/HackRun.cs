@@ -29,6 +29,11 @@ internal sealed partial class HackRun
     private readonly Dictionary<string, Computer> _byIp = new(StringComparer.Ordinal);
     private readonly List<Computer> _targets = new();
 
+    private string _phaseOverride;
+    private string _currentIp;
+    private string _current;
+    private string _currentOverride;
+
     internal HackRun(OS os, HackOptions options)
     {
         Options = options;
@@ -63,8 +68,8 @@ internal sealed partial class HackRun
             LoadScript(options));
 
         _session = new Session(plan, options);
-        Phase = "ENGAGING";
-        Current = _targets.Count > 0 ? _targets[0].name : "-";
+        _currentIp = _targets.Count > 0 ? _targets[0].ip : null;
+        _current = _targets.Count > 0 ? _targets[0].name : "-";
     }
 
     internal HackOptions Options { get; }
@@ -77,9 +82,11 @@ internal sealed partial class HackRun
 
     internal bool Finished { get; private set; }
 
-    internal string Phase { get; private set; }
+    /// <summary>阶段文案：收尾/中止时由本地覆盖，其余时候直接读状态机（惰性构造）。</summary>
+    internal string Phase => _phaseOverride ?? _session.Phase;
 
-    internal string Current { get; private set; }
+    /// <summary>当前目标文案 —— 只在换目标时拼一次，不随每个动作重算。</summary>
+    internal string Current => _currentOverride ?? _current;
 
     internal IReadOnlyList<Computer> Targets => _targets;
 
@@ -102,8 +109,6 @@ internal sealed partial class HackRun
             Apply(os, action);
         }
 
-        Phase = _session.Phase;
-
         if (_session.Finished)
         {
             Finish(os);
@@ -114,7 +119,11 @@ internal sealed partial class HackRun
     private void Apply(OS os, GameAction action)
     {
         var target = Resolve(action.TargetIp);
-        Current = target != null ? target.name + " @ " + target.ip : action.TargetIp;
+        if (!string.Equals(_currentIp, action.TargetIp, StringComparison.Ordinal))
+        {
+            _currentIp = action.TargetIp;
+            _current = target != null ? target.name + " @ " + target.ip : action.TargetIp;
+        }
 
         switch (action.Kind)
         {
@@ -224,10 +233,35 @@ internal sealed partial class HackRun
         => string.IsNullOrEmpty(options.Script)
             ? null
             : HackScript.Load(options.Script, ContentPaths.Resolve, ScriptActionRegistry.Names);
+    /// <summary>
+    /// 异常中止：执行层抛出的异常不该打断游戏帧（见 <see cref="AutoHackExecutable.CatchException"/>）。
+    ///
+    /// 只做止血 —— 停掉还没播完的动画、掐掉追踪与炸弹、写一行原因；<b>不做全量清痕</b>：
+    /// 这一轮没跑完，清到哪台算「干净」没有客观依据，交给玩家用 <c>autohack wipe</c> 决定。
+    /// </summary>
+    internal void Abort(OS os, Exception error)
+    {
+        if (Finished)
+        {
+            return;
+        }
+
+        Finished = true;
+        _phaseOverride = "ABORTED";
+        _currentOverride = "aborted: " + error.GetType().Name;
+
+        NativeExes.StopAll(os);
+        TraceTools.Run(os, announce: false);
+        HackEngine.KillForkBombs(os);
+
+        Trace.Write("run aborted: " + error);
+        os?.write("[autohack] run aborted - " + error.GetType().Name + ": " + error.Message);
+    }
+
     private void Finish(OS os)
     {
         Finished = true;
-        Phase = "COMPLETE";
+        _phaseOverride = "COMPLETE";
 
         // 收尾演出 —— 与反追踪同理，无条件执行：本轮的破解动画不该在「已经打完了」
         // 之后继续拖尾。队列里通常还满着（容量 8，每个动画 8~33 秒，而并发上限由
@@ -292,6 +326,6 @@ internal sealed partial class HackRun
             os.write("[autohack]   'redo' includes owned nodes; 'allnodes' sweeps the whole map.");
         }
 
-        Current = "done - " + _targets.Count + " target(s)";
+        _currentOverride = "done - " + _targets.Count + " target(s)";
     }
 }

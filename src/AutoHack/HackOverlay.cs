@@ -216,7 +216,18 @@ internal static class HackOverlay
             return;
         }
 
-        var run = new HackRun(_os, _state.ToOptions());
+        HackRun run;
+        try
+        {
+            run = new HackRun(_os, _state.ToOptions());
+        }
+        catch (Exception ex) when (ex is FormatException or IOException or UnauthorizedAccessException)
+        {
+            // 与命令入口同一道护栏（PendingRuns.Tick 的 catch）：脚本语法错/读不到
+            // 必须变成终端里一行，而不是从 OS.Draw 的 Postfix 冒出去打断绘制帧。
+            _os.write("[autohack] Script error: " + ex.Message);
+            return;
+        }
 
         if (run.Total == 0)
         {

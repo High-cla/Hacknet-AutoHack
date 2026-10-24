@@ -468,6 +468,10 @@ internal static class NativeExes
     /// </summary>
     internal static void Tick(OS os)
     {
+        // 换局清空在这里落地（游戏线程），不是在被请求的那一刻（命令行线程）——
+        // 理由见 Reset 与 _resetPending 的注释。放在 null 判之前：清空与 os 无关。
+        ApplyPendingReset();
+
         if (os == null)
         {
             return;
@@ -757,8 +761,38 @@ internal static class NativeExes
     /// 能拿到的只有新 OS 的玩家 IP —— 拿它去开旧机器的端口是错的；回显同理，
     /// 旧 OS 的终端已经不存在了。而旧 OS 已经整个被丢弃（回主菜单再进档），
     /// 那些端口开不开都不再有意义。故这里<b>不</b>走 <see cref="ClearQueueEntry"/>。
-    internal static void Reset()
+    internal static void Reset() => _resetPending = true;
+
+    /// <summary>
+    /// 「换局要清空演出队列」的请求位。<b>这是本类唯一允许跨线程写的状态</b>。
+    ///
+    /// <b>为什么要绕过「直接清」。</b><see cref="Reset"/> 由 <see cref="HackOverlay.Open"/>
+    /// 调用，而那条路径是 <c>AutoHackCommand → Toggle → Open</c>，跑在 <c>OS.execute</c>
+    /// 派生出来的<b>命令行线程</b>上（OS.cs:1754-1767）；<see cref="Tick"/> 在游戏线程，
+    /// 每帧按索引读 <see cref="Queue"/> / <see cref="Live"/>、并写 <see cref="ShownCount"/>。
+    /// 在命令行线程 <c>Clear()</c> 它们就是「一个线程清、另一个线程按下标取」——
+    /// <c>Queue[0]</c> 越界、<c>Live[i]</c> 越界、<c>ShownCount</c> 写期被清，
+    /// 任一都可能抛在 <c>OS.Update</c> 的 Postfix 里，代价是整个存档界面的崩溃。
+    /// <see cref="OnPanel"/> 的字段注释早就立了这条规矩（「Reset 不得触碰本集合」），
+    /// 此前只落实到了它一个集合上 —— 本字段把其余三个一起补齐。
+    ///
+    /// <c>volatile</c> 足够：跨线程共享的只有「有没有请求」这一个比特，
+    /// 集合本身仍只由游戏线程触碰，不需要任何锁，也不给每帧路径添一纳秒。
+    /// </summary>
+    private static volatile bool _resetPending;
+
+    /// <summary>
+    /// 执行 <see cref="Reset"/> 挂起的清空。<b>只在游戏线程调用</b>（<see cref="Tick"/> 第一句）。
+    /// </summary>
+    /// <remarks>三个集合的容量都 ≤ <see cref="MaxQueued"/>，清空是 O(32)。</remarks>
+    private static void ApplyPendingReset()
     {
+        if (!_resetPending)
+        {
+            return;
+        }
+
+        _resetPending = false;
         Queue.Clear();
         Live.Clear();
         ShownCount.Clear();
@@ -766,10 +800,9 @@ internal static class NativeExes
         // <b>刻意不清 OnPanel。</b>两个理由：
         // ① 没必要 —— 它的每个读点（Tick 的剪枝、Flush 的补开）之前都紧接一次
         //    RebuildPanel，读到的必是本批快照，旧 OS 的残留引用结构上不可能被读到。
-        // ② 有代价 —— Reset 由 HackOverlay.Open 调用，而 Open 的触发路径
-        //    （AutoHackCommand → HackOverlay.Toggle）跑在 OS.execute 派生的**命令行线程**上
-        //    （OS.cs:1754-1767），Tick 在游戏线程。在此处 Clear 会与 Tick 的
-        //    RebuildPanel + 读取循环形成读-清竞争，让仍在播的动画被误判为「已离开面板」。
+        // ② 有代价 —— 在这里 Clear 会与 Tick 的 RebuildPanel + 读取循环形成读-清竞争，
+        //    让仍在播的动画被误判为「已离开面板」。OnPanel 的写者本来就只有游戏线程
+        //    （RebuildPanel / Flush），故它不出现在本方法里。
     }
 
     /// <summary>

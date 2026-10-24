@@ -42,7 +42,7 @@ internal static class ToolDispatch
         (Pull, "download every file in the current directory to local home"),
         (Purge, "delete every file in the current directory"),
         (Drop, "disconnect and remove the connected node from the map"),
-        (Trace, "anti-trace: stop the countdown and every pending tracker"),
+        (Trace, "anti-trace: stop the countdown + every pending tracker, kill forkbombs"),
         (Skip, "complete the active mission and take the next one"),
         (Ip, "assign this machine a new IP (keeps owned-node tags in sync)"),
         (Wipe, "wipe MY traces  [here]  (/log entries naming your IP; default: whole map)"),
@@ -73,8 +73,11 @@ internal static class ToolDispatch
         // 三个远程动作，作用于**当前连接的节点**；未连接时 pull/drop 报错，
         // purge 退到玩家自己的机器（与终端 rm 的作用域规则一致，回显里会写明）。
         // 前两个看的是「当前目录」，取自 Programs.getCurrentFolder(os)。
-        // 换 IP 与它们不同：作用于**本机**，与「当前节点」无关，故排在远程动作之前。
-        (Ip, "NEW IP", false),
+        // 反追踪 + 杀炸弹（v1.41.0，用户定）：作用于**本机**，与「当前节点」无关，
+        // 故排在远程动作之前。此前这里是 NEW IP 按钮 —— 换 IP 不可逆、还会打断
+        // 「IP 不变」类任务链，不宜常驻；它现在只剩命令行 autohack ip 与选项区的
+        // new IP after run 复选框两条路（缺省关）。
+        (Trace, "ANTI-TRACE", false),
 
         (Pull, "PULL FILES", false),
         (Purge, "PURGE FILES", true),
@@ -84,9 +87,10 @@ internal static class ToolDispatch
         // 用告警色是因为它删的是数据。
         (Wipe, "WIPE TRACES", true),
 
-        // 这里**没有**独立的反追踪按钮：止追踪已并进选项区的「disconnect & clear
-        // traces」复选框（见 HackPanelState.Disconnect）—— 面板上只该有一个与追踪
-        // 有关的控件。
+        // 上述两处关于追踪的说明在 v1.41.0 变了（用户定）：收尾的反追踪仍是恒定的，
+        // 但玩家需要一个「当场看见、当场掐掉」的手动入口 —— 追踪倒计时只有 45~90 秒，
+        // 而追踪链送来的 forkbomb 会先吃干 RAM 再崩机。故 ANTI-TRACE 是一个按钮，
+        // 一次清掉三件：倒计时 / 脱机追踪列表 / os.exes 里的 ForkBombExe。
     };
 
     /// <summary>help 里动词列的宽度，供调用方排版。</summary>

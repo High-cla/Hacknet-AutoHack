@@ -53,7 +53,7 @@ autohack -h                                     # 帮助
 | TOOLS 区 `PULL FILES` / `PURGE FILES` / `DROP NODE` | 对**当前连接的节点**动手：下载 / 删除当前目录下全部文件、把节点从网络图摘掉（后两个用告警色） |
 | TOOLS 区 `UNBREAKABLE` | 加固本机，**不可逆**，用告警色标注 |
 | TOOLS 区 `WIPE TRACES` | 清掉我的痕迹，用告警色标注。范围**随 SCOPE 段走**：「当前节点」只清当前节点所在的连通分量，其余清地图全表 |
-| TOOLS 区 | **反追踪不进 TOOLS 区**：清追踪已是每轮收尾的恒定动作。命令行即时清除仍可用 `autohack trace` |
+| TOOLS 区 `ANTI-TRACE` | **清追踪 + 杀炸弹**（v1.41.0 起替代原 `NEW IP` 按钮）：一次清掉三件 —— 左下角倒计时、看不见的脱机追踪列表、以及追踪链送进来的 `ForkBombExe`（它吃干 RAM 就崩你的机器）。清追踪本身仍是**每轮收尾的恒定动作**，这个按钮只是「当场看见、当场掐掉」的手动入口。换 IP 现在只剩命令行 `autohack ip` 与 `new IP after run` 复选框两条路 |
 
 执行期间面板切换为进度视图：阶段 + 百分比、分段进度条、当前目标与动作计数，下方滚动显示逐目标战果。完成后显示 `LAST RUN` 与 `RUN AGAIN`。
 
@@ -97,9 +97,9 @@ autohack -h                                     # 帮助
 | `autohack pull` | 把**当前目录**下全部文件下载到本机 `/home/stash`（**一个夹**，不分流）。**注意**：`FileDownload` 类任务的判定不递归子目录（`Folder.containsFileWithData` 只查一级），故 `pull` 拉回的文件**不能**用于过这类任务 —— 要过请手敲 `scp <file>`（落 `/home`） |
 | `autohack purge` | 删除**当前目录**下全部文件（同游戏 `rm`；与清痕**同一实现**；**只删文件，不删文件夹**）。`clearfolder` 类任务要求目标目录一个文件不剩，**先 `cd` 对再敲** —— 站错目录会删掉任务不需要的东西而目标目录仍非空 |
 | `autohack drop` | 断开并把当前连接的节点从网络图上摘掉 |
-| `autohack ip` | 给本机换一个新 IP（原生 `Assign New IP` 三步 + 全图已控机器归属迁移 + 重建 Pathfinder 查找表），与面板 `NEW IP` 按钮同一实现 |
+| `autohack ip` | 给本机换一个新 IP（原生 `Assign New IP` 三步 + 全图已控机器归属迁移 + 重建 Pathfinder 查找表）。面板已不再放出这个按钮（v1.41.0 起让位给 `ANTI-TRACE`），命令行与 `new IP after run` 复选框仍可用 |
 | `autohack wipe [here]` | **清掉我的痕迹**：删掉 `/log` 里含你 IP 的条目。缺省**地图全表**；传 `here` 收窄到当前节点所在的连通分量。与面板 `WIPE TRACES` 按钮同一实现，也与每轮收尾那次兜底同一份代码 |
-| `autohack trace` | **反追踪**：同时止住两套追踪（倒计时 + 脱机追踪），**不碰对方 `/log`** |
+| `autohack trace` | **反追踪**：止住两套追踪（倒计时 + 脱机追踪）并杀掉 `os.exes` 里的 `ForkBombExe`（v1.41.0 起），**不碰对方 `/log`**。与面板 `ANTI-TRACE` 按钮同一实现 |
 | `autohack skip` | **跳过当前任务**：完成它并接下一个（走游戏自己的三条原生收尾通道，含 DLC 合同与 Kaguya Trials） |
 
 注意 `pull` 拉回来的 `.exe` **不能直接跑**：游戏只在 `/bin` 里解析可执行程序（`ProgramRunner.cs:689` 写死 `searchForFolder("bin")`），要用得先 `mv` 到 `/bin`。
@@ -164,7 +164,7 @@ dotnet build src/SaveFix/SaveFix.csproj -c Release
 ```
 src/AutoHack/
 ├── AutoHackPlugin.cs   插件入口：命令注册（属性扫描）+ PostLoad 自检 + 装配 Harmony
-├── HackOverlay.cs      叠加层：唯一的 OS.Draw / OS.Update 补丁出口 —— 画面板 + 追踪 HUD、推进入侵 + headless 队列
+├── HackOverlay.cs      叠加层：OS.Draw / OS.Update 的补丁出口 —— 画面板 + 追踪 HUD、推进入侵 + headless 队列
 ├── ToolDispatch.cs     工具分派：全部 autohack 子命令的唯一入口（命令行与面板共用）
 ├── HackPanel.cs        面板绘制：布局、绘制入口、状态与常量
 ├── HackPanel.Draw.cs   　└ 自绘控件与绘制原语（Segment/Track/Measure 等）
@@ -188,7 +188,7 @@ src/AutoHack/
 └── GlobalUsings.cs     全局 using
 ```
 
-设计上的三条硬边界：**`HackOverlay.cs` 是唯一的 `OS.Draw` / `OS.Update` 补丁出口**；**`ToolDispatch.cs` 是全部工具命令的唯一入口**（命令行与面板按钮共用一份实现，不存在两套行为）；**执行层与绘制解耦** —— `HackRun` 只由每帧 delta 驱动，可脱离 GUI 单独推进与测试。
+设计上的三条硬边界：**`OS.Draw` / `OS.Update` 上的补丁只有 `HackOverlay.cs` 一处**（同一条 Update 的次序是硬约束：演出泵 → headless 队列 → 面板运行）；**`ToolDispatch.cs` 是全部工具命令的唯一入口**（命令行与面板按钮共用一份实现，不存在两套行为）；**执行层与绘制解耦** —— `HackRun` 只由每帧 delta 驱动，可脱离 GUI 单独推进与测试。另有四个补丁类挂在非 `OS` 补丁点上（`WebRenderGuard` / `ReplaceFeedback` / `RefusedWhitelist` / `LocalizationFix`），完整清单见 `llms.txt` 坑 53。
 
 ### 第二个插件：HacknetSaveFix
 

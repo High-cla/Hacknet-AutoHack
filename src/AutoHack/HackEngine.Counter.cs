@@ -103,6 +103,51 @@ internal static partial class HackEngine
     }
 
     /// <summary>
+    /// 杀掉玩家机器上所有正在跑的 <c>ForkBombExe</c> —— 追踪链的终点，也是唯一会自毁的 exe。
+    ///
+    /// <b>它为什么会要你的命。</b><c>ForkBombExe.Update</c>（ForkBombExe.cs:67-82）每帧把
+    /// <c>ramCost</c> 涨 <c>(int)(t * RAM_CHANGE_PS)</c>；涨到 <c>os.ramAvaliable</c> 不够分时
+    /// 直接 <c>Completed()</c> → <c>os.thisComputer.crash(runnerIP)</c>（:118）—— 崩的是
+    /// <b>玩家自己的机器</b>。追踪链正是往这里送它：<c>TrackSequence.txt</c> 的
+    /// <c>trackseq</c> + <c>forkbomb</c> → <c>Multiplayer.parseInputMessage("eForkBomb")</c>
+    /// → <c>os.exes.Add(new ForkBombExe(...))</c>（Multiplayer.cs:250/260）。
+    ///
+    /// <b>为什么是「标记移除」而不是当场 RemoveAt。</b><c>os.exes</c> 由游戏线程每帧按下标
+    /// 遍历、判 <c>needsRemoval</c> 再 <c>RemoveAt</c>（OS.cs:845-861），而命令行入口跑在
+    /// <c>OS.execute</c> 的独立线程上（OS.cs:1754-1767）。结构性修改交给游戏线程本人做，
+    /// 这里只写两个字段：任何线程都安全，且当帧生效（移除循环排在 Update 循环之前）。
+    /// RAM 不手工归还 —— 游戏每帧按 <c>totalRam</c> 重算（OS.cs:840）。
+    ///
+    /// <b>必须调 <c>Killed()</c></b>：它复位静态标志
+    /// <c>TrackerCompleteSequence.NextCompleteForkbombShouldTrace</c>（ForkBombExe.cs:49-53）。
+    /// 不复位的话，追踪链那条「下一个 forkbomb 改为点火追踪」的标记会留给下一颗真炸弹。
+    /// </summary>
+    /// <returns>杀掉的炸弹数（供回显报数）。</returns>
+    internal static int KillForkBombs(OS os)
+    {
+        var exes = os?.exes;
+        if (exes == null)
+        {
+            return 0;
+        }
+
+        var killed = 0;
+        for (var i = 0; i < exes.Count; i++)
+        {
+            if (exes[i] is not ForkBombExe bomb)
+            {
+                continue;
+            }
+
+            bomb.Killed();
+            bomb.needsRemoval = true;
+            killed++;
+        }
+
+        return killed;
+    }
+
+    /// <summary>
     /// 静默断开当前连接。未连接时是空操作 —— 避免多余的 "Disconnected" 噪音。
     ///
     /// <c>silent</c> 是游戏自己的 public 开关（Computer.cs:57），

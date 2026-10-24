@@ -627,6 +627,42 @@ cp usr/bin/jq.exe usr/bin/msys-onig-5.dll ~/.local/bin/   # 依赖必须一并�
 
 ---
 
+## 离线基准（`tools/bench.mts`）
+
+决策层那些「每轮 / 每台 / 每端口」跑一遍的算法，抽成等价模型在**真实存档**上计时。
+测的是算法与数据结构，不是 C# 运行时；每个用例注明它对位哪个方法。
+`tools/` 在 `.gitignore` 里（与 `api-index.ts` 同待遇），换机器需自行带上。
+
+```bash
+cd /d/git/HacknetMod && node tools/bench.mts        # 默认读 Accounts/save_1.xml
+BENCH_SAVE=<path> node tools/bench.mts              # 换存档
+```
+
+基准自身的开销规则（「理论最快」的边界就在这五条）：热圈零分配（缓冲预建、判重用世代号
+而不做每轮 memset）、对照用例用手写线性扫描而非 `subarray().indexOf()`（后者每次分配视图）、
+解析与建图在计时之外、预热 2000 次再采样、`process.hrtime.bigint()` 计时 7 次取中位数，
+结果累进 sink 防 V8 删代码。
+
+| 用例 | 对位 | 实测（169 台存档） |
+|---|---|---|
+| `closure-bfs(stamp)` | `HackEngine.ReachableFrom` / `Closure` | 27 ns（真实图很稀疏，最大分量仅 3 台） |
+| `closure-tree(169)` | 同上，换成 169 台的连通树 | **989 ns / 次闭包** |
+| `port-quota-scan` | `HackEngine.PortQuotaMet` 整表求值 | 89 ns / 169 台 |
+| `in-flight-scan` | `NativeExes.InFlight` / `Settled` | 16 ns / 次（Live+Queue ≤ 32 项） |
+| `wipe-contains` | `HackEngine.WipeTraces` 的 `data.Contains(ip)` | 9.8 µs / 407 条 log（24 KB） |
+| `queue-sort(32)` | `NativeExes.Queue.Sort(Compare)` | 2.1 µs / 次重排（每帧最多一次） |
+
+扩展性对照（一次 BFS，微秒）—— 这就是 `NetworkMap.discoverNode` 的 O(V²) 代价模型：
+
+| V | 世代标记 | 线性判重 | 倍数 |
+|---|---|---|---|
+| 169 | 1.3 | 4.1 | 3.2× |
+| 1 000 | 93.3 | 1 614 | 17× |
+| 10 000 | 78.3 | **105 654** | 1 349× |
+| 50 000 | 712 | **2 648 831** | 3 719× |
+
+结论：`scan allnodes` 在千级地图上无感（1.6 ms），**万级地图会卡 100 ms 以上** —— 那时才该
+把 `RevealWholeMap` 里的 `discoverNode` 换成自己的哈希集标记（`HackEngine.Graph.cs` 的注释已写明这条待办）。
 ## 关键路径
 
 | 用途 | 路径 |

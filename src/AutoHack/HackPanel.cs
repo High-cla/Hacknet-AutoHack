@@ -65,7 +65,8 @@ internal sealed class HackPanelState
     internal bool ConnectFirst { get; set; } = true;
 
     /// <summary>
-    /// 每个目标跑完是否 dc。<b>只控制断开</b> —— 清追踪已不由它管。
+    /// 每个目标跑完是否 dc。<b>只控制断开</b> —— 清追踪已不由它管（手动即时清除
+    /// 走面板 ANTI-TRACE 按钮或 `autohack trace`）。
     ///
     /// 缺省**关**（v1.16.0 起）：保持连接是更中性的默认，断开是改变本轮行为的手段
     /// （终止会话、清空 navigationPath），玩家有理由不要。
@@ -452,7 +453,8 @@ internal static partial class HackPanel
 
         // 这个控件只管断开。清追踪（TraceTracker 倒计时 + TrackersInProgress
         // 脱机追踪；不碰对方 /log）已改为每轮收尾无条件执行，不再由这里控制 ——
-        // 理由见 HackPanelState.Disconnect 与 TraceTools 的文档注释。
+        // 理由见 HackPanelState.Disconnect 与 TraceTools 的文档注释；手动即时清除
+        // 是独立的 ANTI-TRACE 按钮（v1.41.0，同一次清掉 os.exes 里的 ForkBombExe）。
         state.Disconnect = Check(state.IdBase + 21, left + ColumnWidth + 8, y, ColumnWidth, state.Disconnect, Loc.T("disconnect when done"), c);
         y += CheckRowHeight;
 
@@ -562,16 +564,9 @@ internal static partial class HackPanel
 
     // ── 自绘控件 ────────────────────────────────────────────────
 
-
-
-
-
-
     // ── 框架与外框 ──────────────────────────────────────────────
 
-
     private static Point _dragOffset;
-
 
     private static (int X, int Y) ResolveOrigin(HackPanelState state, Rectangle screen, int height)
     {
@@ -613,11 +608,6 @@ internal static partial class HackPanel
 
     // ── 基础绘制 ────────────────────────────────────────────────
 
-
-
-
-
-
     /// <summary>
     /// 测量缓存的容量上限，超过即整体清空。
     ///
@@ -645,8 +635,6 @@ internal static partial class HackPanel
 
     /// <summary>建立当前缓存时所用的字体，用于检测 <see cref="GuiData.smallfont"/> 是否换了实例。</summary>
     private static SpriteFont _measureCacheFont;
-
-
 
     /// <summary>
     /// 测量缓存的键：文本 + 缩放。
@@ -681,7 +669,6 @@ internal static partial class HackPanel
         }
     }
 
-
     /// <summary>
     /// <see cref="Mid"/> 的线程本地暂存缓冲。
     ///
@@ -691,10 +678,6 @@ internal static partial class HackPanel
     /// </summary>
     [ThreadStatic]
     private static char[] _midBuffer;
-
-
-
-
 
     /// <summary>配色取自游戏当前主题，换主题时面板跟随。</summary>
     private readonly struct Palette

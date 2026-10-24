@@ -437,7 +437,8 @@ public override void disconnectionDetected(Computer c, OS os)
 |---|---|---|
 | `TraceTracker` | `HackEngine.KillTrace(os)` → `traceTracker.stop()` | `HackEngine.Counter.cs:94-103` |
 | `TrackersInProgress` | `TraceTools.Run` 里 `trackers.Clear()` | `TraceTools.cs:58-60` |
-| 两套一起清 | `autohack trace`（立即）/ `HackRun.Finish`（每轮无条件） | `TraceTools.cs:46`、`HackRun.cs:373-374` |
+| 两套一起清 | 面板 `ANTI-TRACE` 按钮 / `autohack trace`（立即）/ `HackRun.Finish`（每轮无条件） | `TraceTools.cs`、`HackRun.cs:408` |
+| 追踪链送来的 forkbomb | `HackEngine.KillForkBombs(os)`：`Killed()` + `needsRemoval`，由游戏线程当帧移除 | `HackEngine.Counter.cs` |
 | 脱机追踪的复发源 | `HackStepKind.CleanLogs` → `HackEngine.WipeTraces`，只删含玩家 IP 的行 | `HackRun.Plan.cs:161`、`HackEngine.Wipe.cs` |
 | 管理员反扑 | `SuppressCounterattack`：`computer.admin = null` | `HackEngine.Counter.cs` |
 | 换 IP | `IpTools.Reset`：原生三步 + 归属迁移 + 重建 Pathfinder 查找表 | `IpTools.cs` |

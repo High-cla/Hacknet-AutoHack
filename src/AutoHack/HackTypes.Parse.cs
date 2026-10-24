@@ -92,7 +92,8 @@ internal sealed partial record HackOptions
         // lelzSec 那条明写「Your IP's been whitelisted (so dont go changing it for now)」
         // （lelzSec/MessageBoardIntro.xml），白名单记的是当时的 IP，换掉即失效。
         // 缺省开时这类任务会莫名其妙进不去，而玩家很难把两件事联系起来。
-        // 要换用 newip 显式开启，或直接用面板的 NEW IP 按钮换一次。
+        // 要换用 newip 显式开启，或用命令行 autohack ip 换一次（面板不再放出该按钮，
+        // v1.41.0 起那个位置是 ANTI-TRACE）。
         var resetIP = false;
 
         // 模组端口白名单：缺省空（完全 opt-in）。命令行可给多次 modports=，逐协议累加。

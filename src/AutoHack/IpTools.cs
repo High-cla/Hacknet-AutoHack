@@ -60,21 +60,18 @@ using Pathfinder.Util;
 internal static class IpTools
 {
     /// <summary>
-    /// 给玩家机换一个新 IP，并把全部已控机器的归属迁移过去。
-    /// </summary>
-    /// <param name="os">游戏状态。</param>
-    /// <returns>回显用的结果描述；未执行则返回 null（调用方不输出）。</returns>
-    /// <summary>
     /// 工具的入口：换一次 IP 并把结果写出来。
     ///
     /// 与 <c>autohack run</c> 收尾的自动换 IP 共用 <see cref="Reset"/> 这一份实现，
     /// 回显也收在这里 —— 两个入口各写一句措辞就会漂移。
-    /// 失败时**必须**出声：面板按钮单击没有回显，玩家只会觉得「按了没反应」。
+    /// 失败时**必须**出声：换 IP 没有别的反馈面，沉默的失败等于「敲了没反应」。
+    /// 面板已不再放出这个按钮（v1.41.0 起那个位置是 ANTI-TRACE）。
     /// </summary>
+    /// <param name="os">游戏状态。</param>
     /// <param name="announce">
     /// 是否把结果写进终端。<c>HackRun.Finish</c> 传 <c>false</c> —— 收尾换 IP 是自动动作，
     /// 不是玩家敲的命令（用户定：终端里只要具体的命令行输出）。
-    /// 显式入口 <c>autohack ip</c> 与面板 NEW IP 按钮走默认值，照常回显。
+    /// 显式入口 <c>autohack ip</c> 走默认值，照常回显。
     /// </param>
     internal static void Run(OS os, bool announce = true)
     {
@@ -89,6 +86,10 @@ internal static class IpTools
             : "[autohack] new local IP: " + note + ".");
     }
 
+    /// <summary>
+    /// 给玩家机换一个新 IP，并把全部已控机器的归属迁移过去。
+    /// </summary>
+    /// <returns>回显用的结果描述；未执行则返回 null（调用方不输出）。</returns>
     internal static string Reset(OS os)
     {
         var self = os?.thisComputer;

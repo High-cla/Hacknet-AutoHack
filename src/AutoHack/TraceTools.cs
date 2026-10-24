@@ -3,10 +3,12 @@ namespace AutoHack;
 using Hacknet;
 
 /// <summary>
-/// 反追踪：把<b>两套</b>追踪一起止住 ——
+/// 反追踪：把<b>两套</b>追踪一起止住，并清掉追踪链送来的炸弹 ——
 /// <list type="number">
 /// <item><c>os.traceTracker</c>：左下角那个看得见的倒计时（归零崩玩家机）；</item>
-/// <item><c>os.TrackersInProgress</c>：看不见的那批脱机追踪。</item>
+/// <item><c>os.TrackersInProgress</c>：看不见的那批脱机追踪；</item>
+/// <item><c>os.exes</c> 里的 <c>ForkBombExe</c>：追踪链的终点（<c>trackseq</c> + <c>forkbomb</c>），
+/// 吃干 RAM 就崩玩家机器 —— 见 <see cref="HackEngine.KillForkBombs"/>。</item>
 /// </list>
 /// 两个入口：<c>autohack trace</c>（立即清，是「我现在就要清」的唯一入口）与入侵收尾
 /// （<c>HackRun.Finish</c>，每轮无条件执行）。它们回答的是同一个问题：
@@ -62,21 +64,32 @@ internal static class TraceTools
         var trackers = os.TrackersInProgress;
         var pendingCount = trackers?.Count ?? 0;
         trackers?.Clear();
+
+        // 第三件：炸弹。追踪链的终点就是它 —— TrackSequence.txt 的 trackseq + forkbomb
+        // 往 os.exes 里加一颗 ForkBombExe，吃干 RAM 就崩玩家机器（见 HackEngine.KillForkBombs）。
+        // 与上面两套并列，是因为它们回答同一个问题：「现在有什么东西正在弄死我」。
+        var bombs = HackEngine.KillForkBombs(os);
+
         if (!announce)
         {
             return;
         }
 
-        if (!timerStopped && pendingCount == 0)
+        if (!timerStopped && pendingCount == 0 && bombs == 0)
         {
-            // 两套都没有：明确说出来。这一行也是「按钮确实生效了」的自证 ——
+            // 三件都没有：明确说出来。这一行也是「按钮确实生效了」的自证 ——
             // 没有它，玩家无从区分「反追踪成功但本来就没被追」与「点了没反应」。
             os.write("[autohack] anti-trace: nothing is tracking you.");
             return;
         }
 
         var head = timerStopped ? "timer stopped" : "no active timer";
-        os.write("[autohack] anti-trace: " + head + "; "
-                 + pendingCount + " tracker(s) stopped.");
+        var line = head + "; " + pendingCount + " tracker(s) stopped";
+        if (bombs > 0)
+        {
+            line += "; " + bombs + " forkbomb(s) killed";
+        }
+
+        os.write("[autohack] anti-trace: " + line + ".");
     }
 }

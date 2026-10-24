@@ -282,11 +282,16 @@ internal sealed partial class HackRun
         Leave(os, step.Target, step.Command ?? "dc");
     }
 
-    /// <summary>终止进行中的追踪（静默 —— 收尾动作不写终端）。</summary>
+    /// <summary>终止进行中的追踪并清掉炸弹（静默 —— 收尾动作不写终端）。</summary>
     private void ApplyKillTrace(OS os)
     {
         Phase = "KILLING TRACE";
         KillTrace(os);
+
+        // 炸弹一起清（v1.41.0，用户定）：这一步是流程里唯一的止血点，
+        // 追踪链若在中途把 forkbomb 送进来，不在这里杀就要等收尾 ——
+        // 而它会先把玩家机器吃掉再崩掉（见 HackEngine.KillForkBombs）。
+        HackEngine.KillForkBombs(os);
     }
 
     /// <summary>

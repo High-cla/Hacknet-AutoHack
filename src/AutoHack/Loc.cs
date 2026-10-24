@@ -68,7 +68,7 @@ internal static class Loc
             ["PURGE FILES"] = "清除文件",
             ["DROP NODE"] = "摘除节点",
             ["WIPE TRACES"] = "全网清痕",
-            ["NEW IP"] = "换 IP",
+            ["ANTI-TRACE"] = "清追踪杀炸弹",
 
             // 运行态
             ["ENGAGING"] = "执行中",

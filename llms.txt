@@ -3,7 +3,7 @@
 > Hacknet 的 BepInEx / Pathfinder 插件：用游戏自身的原生机制一键入侵全网，带控制面板与脚本驱动。
 > 本文件面向要理解或修改本仓库的编码 agent。规范见 https://llmstxt.org
 
-当前 v1.40.0。构建产物直投游戏插件目录，无需手动拷贝：
+当前 v1.41.0。构建产物直投游戏插件目录，无需手动拷贝：
 
 ```
 D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
@@ -21,7 +21,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    **绝不下载 Release 附件回来比对** —— 需要确认部署新鲜度时只看构建输出目录那份。
 3. **`gh release create` 绝不自动执行** —— 等用户显式发令。`git push` 可以直接做。
 
-**五十一条最容易踩的坑 / 最该知道的机制**（都带行号，可直接 grep）
+**五十三条最容易踩的坑 / 最该知道的机制**（都带行号，可直接 grep）
 
 1. `Computer.portsOpen` 恒为 0 —— Pathfinder 用 Harmony Prefix 接管 `openPort`/`openPorts`
    并 `return false`，状态改存 `PortState.Cracked`。任何读 `portsOpen` 的判断都是错的，
@@ -301,7 +301,8 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
 
 29. **收尾清追踪是恒定动作，且不擦追踪者 /log** —— 每轮 `autohack run` 的
     `HackRun.Finish` 无条件调 `TraceTools.Run`：止 `traceTracker` 倒计时、清
-    `TrackersInProgress` 列表，**但不碰对方 /log**。整个删掉对方 /log 属于改写对方状态，
+    `TrackersInProgress` 列表、杀掉 `os.exes` 里的 `ForkBombExe`（v1.41.0 起，
+    见坑 52），**但不碰对方 /log**。整个删掉对方 /log 属于改写对方状态，
     反追踪不顺手替玩家做。
     已知代价：`CompShouldStartTrackerFromLogs`（`TrackerCompleteSequence.cs:30-47`）的
     复发源就是那些日志，故同一台机器上的追踪**可能复发**。
@@ -404,7 +405,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     白名单（`/Whitelist/list.txt`）记的是**当时的玩家 IP**，换掉即失效，
     表现为「按提示去连却进不去」，而玩家几乎不可能把两件事联系起来。
     换 IP 本身是好的保命机制（见坑 30），要每轮自动换就显式开 `newip` 或勾复选框；
-    只换这一次用面板 `NEW IP` 按钮或 `autohack ip`（两者同一实现）。
+    只换这一次用 `autohack ip`（面板不再放出这个按钮，v1.41.0 起该位置换成 `ANTI-TRACE`）。
 
 36. **任务判定面审计：17 种 goal 里，mod 会碰到其中 3 种** —— 逐个读
     `Hacknet.Mission/*.cs` 的 `isComplete` 得到下表。**判据几乎都是「纯读某个状态」**，
@@ -951,6 +952,51 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    故 `AutoHackPlugin` 必须声明 `[BepInDependency("com.Pathfinder.API")]` ——
    缺它本插件会先加载、扫描覆盖不到、命令静默失效（`AutoHackPlugin.cs:13-15`）。
 
+52. **`forkbomb` 是自毁程序，`os.exes` 里的 `ForkBombExe` 可以安全杀掉**（v1.41.0）——
+   `ForkBombExe.Update`（ForkBombExe.cs:67-82）每帧把 `ramCost` 涨
+   `(int)(t * RAM_CHANGE_PS)`（`RAM_CHANGE_PS = 150f`，:7），涨到 `os.ramAvaliable`
+   不够分时 → `Completed()` → `os.thisComputer.crash(runnerIP)`（:118）—— 崩的是
+   **玩家自己的机器**。追踪链正是往这里送它：`TrackSequence.txt` 的 `trackseq` +
+   `forkbomb` → `Multiplayer.parseInputMessage("eForkBomb")` →
+   `os.exes.Add(new ForkBombExe(...))`（Multiplayer.cs:250/260）。故「杀炸弹」是反追踪的
+   一部分：`HackEngine.KillForkBombs` 挂在三处 —— 面板 `ANTI-TRACE` 按钮、`autohack trace`、
+   `HackRun.Finish`（收尾无条件），外加流程里每台末尾的 `killtrace` 步。
+
+   **两个实现要点：**
+   - **标记移除，不要当场 `RemoveAt`。** `os.exes` 由游戏线程每帧按下标遍历、判
+     `needsRemoval` 再移除（OS.cs:845-861），而命令行入口跑在 `OS.execute` 的独立线程
+     （OS.cs:1754-1767）。只写 `bomb.needsRemoval = true` 交给游戏线程自己删，任何线程都安全，
+     且当帧生效（移除循环排在 Update 循环之前）。RAM 不手工归还 —— 每帧按 `totalRam` 重算（:840）。
+   - **必须调 `Killed()`。** 它复位静态标志 `TrackerCompleteSequence.NextCompleteForkbombShouldTrace`
+     （ForkBombExe.cs:49-53）；不复位的话，追踪链那条「下一个 forkbomb 改为点火追踪」的标记
+     会留给下一颗真炸弹。`Programs.kill`（Programs.cs:552-578）是 `Killed()` + `RemoveAt`
+     组合，但它自己也跑在命令行线程上，不是可以照抄的线程模型。
+
+53. **补丁点有 5 个类 / 10 个补丁方法，不是「只有一个 HackOverlay」**（v1.41.0 记）——
+   旧文档写「唯一补丁出口 HackOverlay.cs」，指的是 `OS.Draw` / `OS.Update` 那两条；
+   其余补丁点按**游戏对象**分散在四个类里。改补丁前先看这张表，否则会漏改一处：
+
+   | 补丁点 | 类 | 方法（Prefix/Postfix） | 干什么 |
+   |---|---|---|---|
+   | `OS.Draw` | `HackOverlay` | `OnOSDrawPrefix` / `OnOSDraw` | 抢输入 / 画面板 + 追踪 HUD |
+   | `OS.Update` | `HackOverlay` | `OnOSUpdate` | 演出泵 → headless 队列 → 面板运行（次序写死） |
+   | `WebRenderer.setSize` | `WebRenderGuard` | Prefix | 尺寸没变就不 Dispose/重建纹理（CEF 越界读的主因） |
+   | `WebRenderer.TextureUpdated` | `WebRenderGuard` | Prefix | 不可用对象不盲拷（`ObjectDisposedException` 会冒出原生回调） |
+   | `Utils.writeToFile` | `WebRenderGuard` | Prefix | 网页缓存改原子写（所有服务器共用一个路径） |
+   | `Programs.replace2` | `ReplaceFeedback` | Prefix + Postfix | 替换没命中要说出来 |
+   | `WhitelistConnectionDaemon.DisconnectTarget` | `RefusedWhitelist` | Prefix | 记下「刚被白名单拒的那台」 |
+   | `StringExtensions.ContentFilePath` | `LocalizationFix` | Postfix | 补本地化查表，修 DLC 对话不翻译 |
+
+   **为什么不是一个类。** 补丁点按「被补的对象」分组才有内聚：WebUI 渲染守卫三处都围着
+   `WebRenderer` 与它写的那个缓存文件；替换反馈的 Prefix 与 Postfix 是**一对**（前者记旧值、
+   后者比对），拆开就失效。硬塞进 `HackOverlay` 只会造一个巨型类，并把 CEF 与本地化的
+   细节混进「渲染叠加层」的阅读路径。
+
+   **反过来，`OS.Draw` / `OS.Update` 必须唯一** —— 不是风格要求：`OS.Update` 上的
+   `NativeExes.Tick` 有「一帧只挂一个动画」的约束（见坑 27），两个补丁都调就是同帧挂两个，
+   而 Harmony 的装配次序不保证；`OS.Draw` 上两个补丁则要靠注释约定绘制次序（HUD 必须在
+   面板之后）。合并成一个补丁后，次序写死在方法体里。
+
 
 ## README 已精简掉的内容（原样保留于此）
 
@@ -964,14 +1010,14 @@ README 在 v1.32.6 之后被刻意精简过一轮（删了 94 行），只留使
 
 | | 表现 | 怎么应付 |
 |---|---|---|
-| `TRACE :` 倒计时 | 屏幕**左下角**红色数字从 100 往下走，提示音逐渐变密。归零 = 玩家机崩 | **每轮收尾自动清除**（无需设置）；手动即时清除用 `autohack trace`，或断开连接 |
+| `TRACE :` 倒计时 | 屏幕**左下角**红色数字从 100 往下走，提示音逐渐变密。归零 = 玩家机崩 | **每轮收尾自动清除**（无需设置）；手动即时清除用面板 `ANTI-TRACE` 按钮或 `autohack trace`（同一实现），或断开连接 |
 | 追踪中（无任何提示） | **完全看不见**。断线时若那台机器 `/log` 里留有你 IP 的 copy/delete/move 记录，它 10~20 秒后自动反打：开端口 → 闪屏 → forkbomb → 玩家机崩 | v1.30.0 起**左下角常驻显示**「追踪中 : N 台 · M 秒」；v1.33.2 起每台机器末尾的 `wipe my traces`（缺省开）会删掉那些含你 IP 的记录，从源头断掉 |
 
 **清追踪是每轮收尾的恒定动作，不需要设置**：一次 `autohack run` 收尾时无条件止住两套追踪。
 **不擦追踪者的 `/log`** —— 那是目标机自己的操作史，整个删掉属于改写对方状态。
 它曾与「跑完断开」合成一个复选框，现拆开 —— 清追踪只是收拾自己制造的烂摊子，
 留着只有坏处（忘记勾选就被倒计时崩掉机器）；断开则是玩家的行为选择。
-要**当场**清除（不等本轮结束）用 `autohack trace`。
+要**当场**清除（不等本轮结束）用面板 `ANTI-TRACE` 按钮或 `autohack trace`（v1.41.0 起顺带杀掉 `os.exes` 里的 `ForkBombExe`）。
 
 第二套的**复发源就是日志**，而反追踪**不擦**它（用户定）—— `/log` 是目标机自己的操作史，
 整个删掉对方 /log 属于改写对方状态，反追踪不顺手替玩家做。
@@ -1067,7 +1113,7 @@ passcode = 头部第 4 段首个密文数字 - 158485
 - [src/AutoHack/ExeTools.cs](src/AutoHack/ExeTools.cs): 程序补全 —— 幂等填充 `/bin`
 - [src/AutoHack/HardenTools.cs](src/AutoHack/HardenTools.cs): 自身加固（不可逆）
 - [src/AutoHack/ToolFiles.cs](src/AutoHack/ToolFiles.cs): 工具的落盘公共部分
-- [src/AutoHack/HackEngine.cs](src/AutoHack/HackEngine.cs): 决策层入口 —— 目标解析与选择（含 `ToolTargets`）；`partial` 分部：`HackEngine.Graph.cs`（图遍历）/ `HackEngine.Ports.cs`（端口与提权）/ `HackEngine.Wipe.cs`（清痕）/ `HackEngine.Whitelist.cs`（白名单）/ `HackEngine.Counter.cs`（反追踪与反扑）
+- [src/AutoHack/HackEngine.cs](src/AutoHack/HackEngine.cs): 决策层入口 —— 目标解析与选择（含 `ToolTargets`）；`partial` 分部：`HackEngine.Graph.cs`（图遍历）/ `HackEngine.Ports.cs`（端口与提权）/ `HackEngine.Wipe.cs`（清痕）/ `HackEngine.Whitelist.cs`（白名单）/ `HackEngine.Counter.cs`（反追踪、杀炸弹与反扑）
 - [src/AutoHack/RefusedWhitelist.cs](src/AutoHack/RefusedWhitelist.cs): 记下「刚被白名单拒的那台」，供 `here` 在池空时回落（见坑 32）
 - [src/AutoHack/PanelSettings.cs](src/AutoHack/PanelSettings.cs): 面板设置的落盘层（ConfigFile 读写，无 UI；见坑 33）
 - [src/AutoHack/ReplaceFeedback.cs](src/AutoHack/ReplaceFeedback.cs): 给原生 `replace` 补「失败要说出来」（见坑 34）
@@ -1078,7 +1124,10 @@ passcode = 头部第 4 段首个密文数字 - 158485
 - [src/AutoHack/IpTools.cs](src/AutoHack/IpTools.cs): 收尾换 IP —— 原生三步 + 肉鸡归属迁移 + 重建 Pathfinder 查找表（见坑 30）
 - [src/SaveFix/SaveFixPlugin.cs](src/SaveFix/SaveFixPlugin.cs): 独立插件 HacknetSaveFix，修游戏本体存档 NRE
 - [src/AutoHack/HackPanel.cs](src/AutoHack/HackPanel.cs): 自绘控制面板（布局与入口）；`partial` 分部 `HackPanel.Draw.cs` 是绘制原语与文本度量
-- [src/AutoHack/HackOverlay.cs](src/AutoHack/HackOverlay.cs): 叠加层 —— patch `OS.Draw` / `OS.Update`
+- [src/AutoHack/HackOverlay.cs](src/AutoHack/HackOverlay.cs): 叠加层 —— patch `OS.Draw` / `OS.Update`（全仓仅此一处挂这两个补丁点，见坑 53）
+- [src/AutoHack/WebRenderGuard.cs](src/AutoHack/WebRenderGuard.cs): 原生网页渲染器（CEF）的三处稳定性补丁 —— `setSize` 尺寸未变不重建、`TextureUpdated` 空判、网页缓存原子写（见坑 53）
+- [src/AutoHack/LocalizationFix.cs](src/AutoHack/LocalizationFix.cs): 在 `StringExtensions.ContentFilePath` 出口补本地化查表，修 Pathfinder 重写 Action 加载器后 DLC 对话不翻译（见坑 53）
+- [src/AutoHack/BootBoost.cs](src/AutoHack/BootBoost.cs): 启动加速（覆写 `CrashModule.BOOT_TIME`，见坑 28）
 - [src/AutoHack/HackTypes.cs](src/AutoHack/HackTypes.cs): 不可变数据 —— `HackOptions` / `HackStep` / `PortInfo`；`partial` 分部 `HackTypes.Parse.cs` 是命令行解析
 - [src/AutoHack/PendingRuns.cs](src/AutoHack/PendingRuns.cs): headless 运行的跨线程调度
 - [src/AutoHack/AutoHackPlugin.cs](src/AutoHack/AutoHackPlugin.cs): 插件入口与命令注册

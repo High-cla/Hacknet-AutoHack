@@ -234,6 +234,7 @@ internal sealed class Session
             ActionKind.Disconnect => "DISCONNECTING",
             ActionKind.KillTrace => "KILLING TRACE",
             ActionKind.ResetIp => "RESETTING IP",
+            ActionKind.Custom => "CUSTOM " + (step.Custom ?? "ACTION"),
             _ => Phase,
         };
     }

@@ -53,4 +53,33 @@ public static class AutoHackApi
             throw new ArgumentException(error, nameof(verb));
         }
     }
+
+    /// <summary>
+    /// 登记一个<b>脚本动作</b>：`script=` 文件里写这个动词，就在该位置对该目标执行一次。
+    ///
+    /// 执行体收到的是当时的目标机器与 OS —— <c>os.connectedComp</c> 的取值取决于脚本此刻
+    /// 是否连着（脚本没写 <c>connect</c> 时可能为空），语义与幂等完全由扩展负责。
+    /// 动作名不能与内置动词或其他已登记动作重名（抛 <see cref="ArgumentException"/>）。
+    /// </summary>
+    /// <param name="name">动词名，大小写不敏感。</param>
+    /// <param name="help">帮助行，出现在脚本报错的「可用动作」列表里。</param>
+    /// <param name="run">执行体，参数为目标机器与 OS。</param>
+    public static void RegisterScriptAction(string name, string help, Action<OS, Computer> run)
+    {
+        if (help == null)
+        {
+            throw new ArgumentNullException(nameof(help));
+        }
+
+        if (run == null)
+        {
+            throw new ArgumentNullException(nameof(run));
+        }
+
+        var definition = new ScriptActionDefinition(name, help, run);
+        if (!ScriptActionRegistry.TryRegister(definition, out var error))
+        {
+            throw new ArgumentException(error, nameof(name));
+        }
+    }
 }

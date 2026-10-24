@@ -1075,6 +1075,12 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    `<Compile Include="../../src/AutoHack/Core/**/*.cs" />`，插件编 net472、测试编 net10，
    同一份源码两处编译 —— 误引 `Hacknet` / `Pathfinder` / `BepInEx` / `Harmony` 立刻编不过。
 
+   **扩展脚本动作**（同版）：`AutoHackApi.RegisterScriptAction(name, help, (os, target) => …)`。
+   名字通过 `ScriptActionRegistry.Names` 传给 `HackScript.Parse`（**注入**，核心不引用任何注册表，
+   单测传一个字符串数组即可）；计划里存名字（`GameAction.Custom`），执行期由 `HackRun.ApplyCustomAction`
+   查表调用。内置词表优先（`HackScript.IsBuiltInVerb`），扩展不能覆盖 `probe` 之类；
+   扩展动作可重复、不接受参数（解析期直接拒绝 `myverb 1`）。
+
    **状态机的非显然约束**：`Connect` 与 `Login` 之后必须让出本帧。它们的结论（是否被白名单
    拒绝、是否真的提权成功）要等执行器跑完、世界视图更新后才能读回（`Session.Observe`）；
    同帧继续推进会让 login 成功后紧跟的端口步白跑 —— 这条是单测 `session.login.port.skipped`

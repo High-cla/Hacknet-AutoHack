@@ -22,7 +22,7 @@ using System.IO;
 internal sealed class HackScript
 {
     /// <summary>脚本里的单个动作。<see cref="Port"/> 仅 <c>OpenPort</c> 有意义，0 表示全部可破端口。</summary>
-    internal readonly record struct Action(ActionKind Kind, int Port);
+    internal readonly record struct Action(ActionKind Kind, int Port, string Name = null);
 
     /// <summary>行尾分隔符。游戏用 " $#%#$\r\n" 切行，此处按行处理后只剩尾巴。</summary>
     /// <summary>词法分隔符：<b>只有空格</b>，与游戏的 <c>Utils.spaceDelim = [' ']</c>（Utils.cs:67）逐字一致。
@@ -86,7 +86,8 @@ internal sealed class HackScript
     /// <see cref="IOException"/> 读不到）—— 由调用方转成终端可见的错误，
     /// 拒绝「脚本没生效但看起来跑了」这种半成品。
     /// </summary>
-    internal static HackScript Load(string name, Func<string, string> contentPath)
+    internal static HackScript Load(
+        string name, Func<string, string> contentPath, IReadOnlyCollection<string> customVerbs = null)
     {
         if (string.IsNullOrWhiteSpace(name))
         {
@@ -100,11 +101,11 @@ internal sealed class HackScript
                 "No such script: '" + name + "'. Tried: " + string.Join(", ", Candidates(name.Trim(), contentPath)));
         }
 
-        return Parse(File.ReadAllText(path), path);
+        return Parse(File.ReadAllText(path), path, customVerbs);
     }
 
     /// <summary>按行的文本解析成脚本。公开给测试与内部复用。</summary>
-    internal static HackScript Parse(string text, string source)
+    internal static HackScript Parse(string text, string source, IReadOnlyCollection<string> customVerbs = null)
     {
         var actions = new List<Action>();
         var lineNumber = 0;
@@ -123,7 +124,7 @@ internal sealed class HackScript
             var tokens = line.Split(SpaceOnly, StringSplitOptions.RemoveEmptyEntries);
             var verb = tokens[0].ToLowerInvariant();
 
-            var resolved = ResolveKind(verb);
+            var resolved = ResolveKind(verb, customVerbs);
             if (resolved == null)
             {
                 // 区分两种「不认识」：喂了游戏的 NPC 脚本 vs 单纯拼错。
@@ -133,13 +134,15 @@ internal sealed class HackScript
                     ? new FormatException(
                         "Line " + lineNumber + ": '" + tokens[0] + "' is a game NPC action "
                         + "(HackerScript) with no player-side equivalent - it cannot be used here. "
-                        + "AutoHack actions: " + string.Join(", ", Vocabulary.SelectMany(v => v.Names.Take(1))) + ".")
-                    : new FormatException("Line " + lineNumber + ": unknown action '" + tokens[0] + "'.");
+                        + "AutoHack actions: " + KnownVerbs(customVerbs) + ".")
+                    : new FormatException("Line " + lineNumber + ": unknown action '" + tokens[0]
+                        + "'. Known actions: " + KnownVerbs(customVerbs) + ".");
             }
 
             var kind = resolved.Value;
 
             // openPort 可带一个端口号；不带 = 该目标上全部有破解程序的端口。
+            // 扩展动作不接受参数：它的语义由扩展自己定义，参数该怎么解析不该由解析器猜。
             var port = 0;
             if (kind == ActionKind.OpenPort && tokens.Length > 1 &&
                 !int.TryParse(tokens[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out port))
@@ -148,7 +151,13 @@ internal sealed class HackScript
                     "Line " + lineNumber + ": 'openPort' takes a port number, got '" + tokens[1] + "'.");
             }
 
-            actions.Add(new Action(kind, port));
+            if (kind == ActionKind.Custom && tokens.Length > 1)
+            {
+                throw new FormatException(
+                    "Line " + lineNumber + ": '" + tokens[0] + "' is an extension action and takes no arguments.");
+            }
+
+            actions.Add(new Action(kind, port, kind == ActionKind.Custom ? verb : null));
         }
 
         if (actions.Count == 0)
@@ -200,7 +209,11 @@ internal sealed class HackScript
         }
     }
 
-    private static ActionKind? ResolveKind(string verb)
+    /// <summary>
+    /// 动词 → 动作种类。<b>内置词表优先</b>：扩展登记的名字若与内置重名，解析成内置那个 ——
+    /// 语义由本插件定义，不会被外部悄悄覆盖。
+    /// </summary>
+    private static ActionKind? ResolveKind(string verb, IReadOnlyCollection<string> customVerbs)
     {
         foreach (var (names, kind) in Vocabulary)
         {
@@ -210,7 +223,39 @@ internal sealed class HackScript
             }
         }
 
+        if (customVerbs != null)
+        {
+            foreach (var name in customVerbs)
+            {
+                if (string.Equals(name, verb, StringComparison.OrdinalIgnoreCase))
+                {
+                    return ActionKind.Custom;
+                }
+            }
+        }
+
         return null;
+    }
+
+    /// <summary>该动词是否已由内置词表占用（扩展不得重名）。</summary>
+    internal static bool IsBuiltInVerb(string verb)
+        => verb != null && ResolveKind(verb.ToLowerInvariant(), null) != null;
+
+    /// <summary>报错时列出可用动作：内置词表 + 已登记扩展动作。</summary>
+    private static string KnownVerbs(IReadOnlyCollection<string> customVerbs)
+    {
+        var names = new List<string>();
+        foreach (var (aliases, _) in Vocabulary)
+        {
+            names.Add(aliases[0]);
+        }
+
+        if (customVerbs != null)
+        {
+            names.AddRange(customVerbs);
+        }
+
+        return string.Join(", ", names);
     }
 
     private static string StripDelimiter(string line)

@@ -173,7 +173,26 @@ internal sealed partial class HackRun
             case ActionKind.FlushAnimations:
                 NativeExes.Flush(os, target, force: true);
                 break;
+
+            case ActionKind.Custom:
+                ApplyCustomAction(os, action, target);
+                break;
         }
+    }
+
+    /// <summary>
+    /// 执行扩展登记的脚本动作。解析期已校验过名字存在，故这里查不到只可能是
+    /// 登记表在运行中被清空（插件卸载）—— 报一行即可，不抛异常。
+    /// </summary>
+    private static void ApplyCustomAction(OS os, GameAction action, Computer target)
+    {
+        if (!ScriptActionRegistry.TryGet(action.Custom, out var definition))
+        {
+            os.write("[autohack] script action '" + action.Custom + "' is not registered.");
+            return;
+        }
+
+        definition.Run(os, target);
     }
 
     private Computer Resolve(string ip)
@@ -202,7 +221,9 @@ internal sealed partial class HackRun
     /// 放进 Tick 会让错误每帧重复，放进计划构建会让「目标为空」与「脚本坏了」两种情况混在一起。
     /// </summary>
     private static HackScript LoadScript(HackOptions options)
-        => string.IsNullOrEmpty(options.Script) ? null : HackScript.Load(options.Script, ContentPaths.Resolve);
+        => string.IsNullOrEmpty(options.Script)
+            ? null
+            : HackScript.Load(options.Script, ContentPaths.Resolve, ScriptActionRegistry.Names);
     private void Finish(OS os)
     {
         Finished = true;

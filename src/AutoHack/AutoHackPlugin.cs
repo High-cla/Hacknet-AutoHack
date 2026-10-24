@@ -242,7 +242,7 @@ public sealed class AutoHackPlugin : BepInEx.Hacknet.HacknetPlugin
         {
             try
             {
-                var script = HackScript.Load(options.Script, ContentPaths.Resolve);
+                var script = HackScript.Load(options.Script, ContentPaths.Resolve, ScriptActionRegistry.Names);
                 os.write("[autohack] Script: " + script.Source + " (" + script.Actions.Count + " action(s)).");
             }
             catch (Exception ex) when (ex is FormatException or IOException or UnauthorizedAccessException)

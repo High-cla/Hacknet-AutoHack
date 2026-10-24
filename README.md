@@ -218,10 +218,15 @@ src/AutoHack/
 其它插件可在自己的 `PostLoad` 里把一个工具挂进 `autohack` 命令与面板：
 
 ```csharp
+// 挂一个终端命令 / 面板按钮
 AutoHackApi.RegisterTool("myverb", "myverb  do something", (os, allNodes) => { /* ... */ }, label: "MY TOOL");
+
+// 挂一个脚本动作：script= 文件里写这个动词，就在该位置对该目标执行一次
+AutoHackApi.RegisterScriptAction("myaction", "myaction  do something to the target", (os, target) => { /* ... */ });
 ```
 
-重复动词会被拒绝（抛 `ArgumentException`）—— 同名工具会让「命令打哪一个」变成加载顺序的函数。
+两处登记都拒绝重名（抛 `ArgumentException`）—— 同名会让「这个词到底做什么」变成加载顺序的函数。
+脚本动作按脚本次序执行、可重复出现、不接受参数；此刻的 `os.connectedComp` 取决于脚本是否写了 `connect`。
 
 ### 第二个插件：HacknetSaveFix
 

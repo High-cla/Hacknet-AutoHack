@@ -206,7 +206,9 @@ internal static class Planner
             return;
         }
 
-        var repeatable = action.Kind is ActionKind.OpenPort or ActionKind.CleanLogs;
+        // 扩展动作也允许重复：它的语义由扩展定义（可能是逐文件、逐端口之类），
+        // 解析器不该替它决定「第二次没意义」。
+        var repeatable = action.Kind is ActionKind.OpenPort or ActionKind.CleanLogs or ActionKind.Custom;
         if (!repeatable && !emitted.Add(action.Kind)) { return; }
 
         if (action.Kind == ActionKind.OpenPort)
@@ -217,6 +219,12 @@ internal static class Planner
                 steps.Add(new GameAction(ActionKind.OpenPort, target.Ip, port));
             }
 
+            return;
+        }
+
+        if (action.Kind == ActionKind.Custom)
+        {
+            steps.Add(GameAction.CustomAction(action.Name, target.Ip));
             return;
         }
 

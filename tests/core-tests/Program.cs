@@ -234,6 +234,32 @@ var capActions = Runner.Run(capSession, capWorld, _ => { }, 200f);
 Check("session.wait.flush", capActions.Exists(a => a.Kind == ActionKind.FlushAnimations), string.Join(",", capActions.Select(a => a.Kind)));
 Check("session.wait.escalate", capActions.Exists(a => a.Kind == ActionKind.Escalate));
 
+// ㉑ 扩展动作：解析、规划、可重复、不设帧闸
+var customVerbs = new[] { "myverb" };
+var customScript = HackScript.Parse("connect\nmyverb\nmyverb", "t", customVerbs);
+Check("custom.parse.count", customScript.Actions.Count == 3, "got " + customScript.Actions.Count);
+Check("custom.parse.kind", customScript.Actions[1].Kind == ActionKind.Custom);
+Check("custom.parse.name", customScript.Actions[1].Name == "myverb", customScript.Actions[1].Name);
+
+var customPlan = Planner.Build(
+    [Host("10.0.0.8", 1, [P("ssh", 22)])], [], null, null, HackOptions.Parse(["direct", "keep"]), customScript);
+var customSteps = customPlan.Steps.Where(s => s.Kind == ActionKind.Custom).ToArray();
+Check("custom.plan.count", customSteps.Length == 2, "got " + customSteps.Length);
+Check("custom.plan.name", customSteps[0].Custom == "myverb", customSteps[0].Custom);
+
+var customWorld = new FakeWorld { ConnectedIp = "10.0.0.8" };
+var customSession = new Session(customPlan, HackOptions.Parse(["direct", "keep"]));
+var customActions = Runner.Run(customSession, customWorld, _ => { });
+Check("custom.session.count", customActions.Count(a => a.Kind == ActionKind.Custom) == 2);
+
+// ㉒ 扩展动作的报错边界
+var unknownCustom = ErrorOf(() => HackScript.Parse("bogus", "t", customVerbs));
+Check("custom.unknown.lists", unknownCustom != null && unknownCustom.Contains("myverb"), unknownCustom);
+var argCustom = ErrorOf(() => HackScript.Parse("myverb 1", "t", customVerbs));
+Check("custom.arg.rejected", argCustom != null && argCustom.Contains("takes no arguments"), argCustom);
+var builtinStillBuiltin = HackScript.Parse("probe", "t", new[] { "probe" });
+Check("custom.builtin.wins", builtinStillBuiltin.Actions[0].Kind == ActionKind.Probe);
+
 Console.WriteLine(failures == 0
     ? $"PASS {total} checks"
     : $"FAILED {failures}/{total}");

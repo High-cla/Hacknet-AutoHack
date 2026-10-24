@@ -47,6 +47,12 @@ internal enum ActionKind
 
     /// <summary>把该目标尚未落地的原生动画直接结清（提权等待超时后的兜底）。</summary>
     FlushAnimations,
+
+    /// <summary>
+    /// 扩展登记的自定义动作（<see cref="GameAction.Custom"/> 携带动词名）。
+    /// 执行体在 <c>AutoHackApi.RegisterScriptAction</c> 那张表里，核心只负责按序发出。
+    /// </summary>
+    Custom,
 }
 
 /// <summary>
@@ -56,9 +62,14 @@ internal enum ActionKind
 /// 现算（破解程序名来自游戏数据表），故计划期留空。
 /// </summary>
 internal sealed record GameAction(
-    ActionKind Kind, string TargetIp, PortView Port = default, string Echo = null)
+    ActionKind Kind, string TargetIp, PortView Port = default, string Echo = null,
+    string Custom = null)
 {
     /// <summary>不需要端口详情的动作。</summary>
     internal static GameAction Of(ActionKind kind, string ip, string echo = null)
         => new(kind, ip, default, echo);
+
+    /// <summary>扩展登记的自定义动作：动词名即执行体的键。</summary>
+    internal static GameAction CustomAction(string name, string ip)
+        => new(ActionKind.Custom, ip, default, null, name);
 }

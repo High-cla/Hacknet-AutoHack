@@ -670,7 +670,7 @@ BENCH_SAVE=<path> node tools/bench.mts              # 换存档
 
 ```bash
 cd /d/git/HacknetMod && dotnet run --project tests/core-tests -c Release
-# → PASS 80 checks（失败时打印 FAIL 行并以退出码 1 结束）
+# → PASS 89 checks（失败时打印 FAIL 行并以退出码 1 结束）
 ```
 
 - 工程 TFM 是 `net10.0`（本机已有运行时，零 NuGet）；插件仍是 `net472`。两者**编译同一份源码**

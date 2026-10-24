@@ -63,12 +63,12 @@ internal static class Planner
     {
         if (options.ConnectFirst && !string.Equals(connectedIp, target.Ip, StringComparison.Ordinal))
         {
-            steps.Add(GameAction.Of(ActionKind.Connect, target.Ip, "connect " + target.Ip));
+            steps.Add(GameAction.Of(ActionKind.Connect, target.Ip, HackCommands.Connect(target.Ip)));
         }
 
         // 独立成步而非挂在 Connect 上：direct / 已连接路径没有 Connect 步，同样需要解除反扑。
         steps.Add(GameAction.Of(ActionKind.Neutralize, target.Ip));
-        steps.Add(GameAction.Of(ActionKind.Probe, target.Ip, "probe"));
+        steps.Add(GameAction.Of(ActionKind.Probe, target.Ip, HackCommands.Probe));
 
         // 凭据登录排在最前：成功即提权，后面整段破端口动作都不必跑。
         // EOS 设备的端口容量等于提权门槛，破端口是死路，固定密码才是游戏设计的正路。
@@ -101,7 +101,7 @@ internal static class Planner
             steps.Add(GameAction.Of(ActionKind.SolveFirewall, target.Ip));
         }
 
-        steps.Add(GameAction.Of(ActionKind.Escalate, target.Ip, "porthack"));
+        steps.Add(GameAction.Of(ActionKind.Escalate, target.Ip, HackCommands.Escalate));
 
         // 白名单机器无条件排一步绕过（与开关解耦）：它的 connect 会被拒，而破端口、提权
         // 不经连接照样拿下；拿下后把自己的 IP 追加进它的 /Whitelist/list.txt，
@@ -128,7 +128,7 @@ internal static class Planner
 
         if (options.Disconnect)
         {
-            steps.Add(GameAction.Of(ActionKind.Disconnect, target.Ip, "dc"));
+            steps.Add(GameAction.Of(ActionKind.Disconnect, target.Ip, HackCommands.Disconnect));
         }
 
         // 断开已让 TraceTracker 自己失效；这一步是确定性兜底 —— stay 模式下它是唯一的止血点。
@@ -167,7 +167,7 @@ internal static class Planner
 
         if (options.ConnectFirst && !connected)
         {
-            steps.Add(GameAction.Of(ActionKind.Connect, target.Ip, "connect " + target.Ip));
+            steps.Add(GameAction.Of(ActionKind.Connect, target.Ip, HackCommands.Connect(target.Ip)));
             emitted.Add(ActionKind.Connect);
         }
 
@@ -202,7 +202,7 @@ internal static class Planner
         if (action.Kind == ActionKind.Connect)
         {
             if (connected || !emitted.Add(ActionKind.Connect)) { return; }
-            steps.Add(GameAction.Of(ActionKind.Connect, target.Ip, "connect " + target.Ip));
+            steps.Add(GameAction.Of(ActionKind.Connect, target.Ip, HackCommands.Connect(target.Ip)));
             return;
         }
 
@@ -234,9 +234,9 @@ internal static class Planner
     /// <summary>脚本动作的终端回显原文；null = 该动作不是终端指令（或不回显）。</summary>
     private static string EchoFor(ActionKind kind) => kind switch
     {
-        ActionKind.Probe => "probe",
-        ActionKind.Escalate => "porthack",
-        ActionKind.Disconnect => "dc",
+        ActionKind.Probe => HackCommands.Probe,
+        ActionKind.Escalate => HackCommands.Escalate,
+        ActionKind.Disconnect => HackCommands.Disconnect,
         _ => null,
     };
 }

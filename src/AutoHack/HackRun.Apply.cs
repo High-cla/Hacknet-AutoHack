@@ -61,7 +61,7 @@ internal sealed partial class HackRun
             // 只回显 login 本身：原版 login 是交互式的（先问用户名再问密码，
             // Programs.cs:404-448），没有 "login <user> <pass>" 这种写法，
             // 拼上参数会是条游戏里不存在的命令。
-            Echo(os, "login");
+            Echo(os, HackCommands.Login);
 
             // 提权结论由核心状态机在下一帧用世界视图读回（Session.Observe → world.IsOwned），
             // 执行层不登记任何状态 —— 否则「本次靠 login 拿下」与「本来就是我控的」会混在一处。
@@ -78,7 +78,7 @@ internal sealed partial class HackRun
         // 那个顾虑对**游戏原语**成立，对本步不成立：端口报告取自目标对象本身
         // （HackEngine.ProbeReport），不看连接 —— 侦察确实发生了，就该看得见。
         // 缺了它，玩家只看到端口被破，看不到在探什么。
-        Echo(os, step.Echo ?? "probe");
+        Echo(os, step.Echo ?? HackCommands.Probe);
         // 端口报告**无条件**打（v1.34.0 修正）。
         //
         // 曾短暂地在 noshow 下压掉它，理由是「167 台上千行太吵」。那是把
@@ -139,7 +139,7 @@ internal sealed partial class HackRun
     {
         // 无条件回显（v1.34.0）。下面走 giveAdmin 直接写目标机 adminIP，
         // 不经连接 —— 提权确实发生了，回显与效果对应。
-        Echo(os, step.Echo ?? "porthack");
+        Echo(os, step.Echo ?? HackCommands.Escalate);
 
         // 只用 giveAdmin，不用 os.takeAdmin(ip)：后者内部还会 runCommand("connect " + ip)
         // （OS.cs:1871-1879），而 connect 的第一件事就是无条件断开旧连接
@@ -235,7 +235,7 @@ internal sealed partial class HackRun
     /// <summary>断开连接：由 Leave 解除反扑、回显并静默断开；未连接时是空操作。</summary>
     private void ApplyDisconnect(OS os, GameAction step, Computer target)
     {
-        Leave(os, target, step.Echo ?? "dc");
+        Leave(os, target, step.Echo ?? HackCommands.Disconnect);
     }
 
     /// <summary>终止进行中的追踪并清掉炸弹（静默 —— 收尾动作不写终端）。</summary>

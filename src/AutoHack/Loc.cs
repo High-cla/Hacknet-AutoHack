@@ -54,21 +54,23 @@ internal static class Loc
             ["native exes"] = "原生演出",
             ["new IP after run"] = "跑完换 IP",
 
-            // TOOLS
+            // TOOLS —— 键必须与 ToolRegistry 的 Label 逐字一致（那个才是按钮文案）
             ["TOOLS"] = "工具",
             ["SCAN NETWORK"] = "扫描网络",
             ["DEC DECRYPT"] = "解密 DEC",
             ["MEMORY DUMP"] = "内存转储",
-            ["ALL PROGRAMS"] = "全部程序",
-            ["MOD PROGRAMS"] = "模组程序",
-            ["PORT LIST"] = "端口列表",
+            ["FILL /BIN"] = "填充程序",
+            ["MOD EXES"] = "模组程序",
+            ["PORTS"] = "端口列表",
+            ["HARDEN"] = "加固本机",
             ["auto mod ports"] = "自动开模组端口",
-            ["UNBREAKABLE"] = "不可摧毁",
             ["PULL FILES"] = "拉取文件",
             ["PURGE FILES"] = "清除文件",
             ["DROP NODE"] = "摘除节点",
-            ["WIPE TRACES"] = "全网清痕",
             ["ANTI-TRACE"] = "清追踪杀炸弹",
+            ["SKIP MISSION"] = "跳过任务",
+            ["NEW IP"] = "换 IP",
+            ["WIPE TRACES"] = "全网清痕",
 
             // 运行态
             ["ENGAGING"] = "执行中",

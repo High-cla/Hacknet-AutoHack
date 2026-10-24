@@ -49,11 +49,12 @@ autohack -h                                     # 帮助
 | `auto mod ports` | 允许自动入侵去开**全部已注册的模组端口**（缺省**关**），等价于命令行 `modports=*`。勾上后不必再逐个点名协议 —— 这些端口由插件直接开，不跑模组自己的破解程序 |
 | — | **强行提权已常驻**（v1.33.2 起，不再是开关）：porthack 门禁过不了时直接给目标写 `adminIP`。防护机（`portsToCrack=9999998`）与端口表凑不够门槛的机器只有这条路拿得下。提权落定后补一行原生收尾文案 `--Porthack Complete--`（v1.40.0，与 `PortHackExe.Completed()` 同串） |
 | `RUN` | 按当前设置执行 |
-| TOOLS 区 `SCAN NETWORK` / `DEC DECRYPT` / `MEMORY DUMP` / `ALL PROGRAMS` / `MOD PROGRAMS` / `PORT LIST` | 单击**立即执行**，无二次确认（见下表） |
-| TOOLS 区 `PULL FILES` / `PURGE FILES` / `DROP NODE` | 对**当前连接的节点**动手：下载 / 删除当前目录下全部文件、把节点从网络图摘掉（后两个用告警色） |
-| TOOLS 区 `UNBREAKABLE` | 加固本机，**不可逆**，用告警色标注 |
-| TOOLS 区 `WIPE TRACES` | 清掉我的痕迹，用告警色标注。范围**随 SCOPE 段走**：「当前节点」只清当前节点所在的连通分量，其余清地图全表 |
-| TOOLS 区 `ANTI-TRACE` | **清追踪 + 杀炸弹**（v1.41.0 起替代原 `NEW IP` 按钮）：一次清掉三件 —— 左下角倒计时、看不见的脱机追踪列表、以及追踪链送进来的 `ForkBombExe`（它吃干 RAM 就崩你的机器）。清追踪本身仍是**每轮收尾的恒定动作**，这个按钮只是「当场看见、当场掐掉」的手动入口。换 IP 现在只剩命令行 `autohack ip` 与 `new IP after run` 复选框两条路 |
+| TOOLS 区 `扫描网络` / `解密 DEC` / `内存转储` / `填充程序` / `模组程序` / `端口列表` | 单击**立即执行**，无二次确认（见下表）。按钮文案跟随游戏语言 —— 中文 locale 显示中文，其它 locale 显示注册表里的英文原名（此前有 6 个按钮漏译，现已全部中文） |
+| TOOLS 区 `拉取文件` / `清除文件` / `摘除节点` | 对**当前连接的节点**动手：下载 / 删除当前目录下全部文件、把节点从网络图摘掉（后两个用告警色） |
+| TOOLS 区 `加固本机` | 加固本机，**不可逆**，用告警色标注 |
+| TOOLS 区 `全网清痕` | 清掉我的痕迹，用告警色标注。范围**随 SCOPE 段走**：「当前节点」只清当前节点所在的连通分量，其余清地图全表 |
+| TOOLS 区 `清追踪杀炸弹` | **清追踪 + 杀炸弹**（v1.41.0 起替代原 `NEW IP` 按钮）：一次清掉三件 —— 左下角倒计时、看不见的脱机追踪列表、以及追踪链送进来的 `ForkBombExe`（它吃干 RAM 就崩你的机器）。清追踪本身仍是**每轮收尾的恒定动作**，这个按钮只是「当场看见、当场掐掉」的手动入口。换 IP 现由面板 `换 IP` 按钮、命令行 `autohack ip`、`new IP after run` 复选框三条路可达 |
+| TOOLS 区 `跳过任务` | 完成当前任务并接下一个（与 `autohack skip` 同一实现，走游戏自己的三条原生收尾通道，含 DLC 合同与 Kaguya Trials） |
 
 执行期间面板切换为进度视图：阶段 + 百分比、分段进度条、当前目标与动作计数，下方滚动显示逐目标战果。完成后显示 `LAST RUN` 与 `RUN AGAIN`。
 
@@ -97,7 +98,7 @@ autohack -h                                     # 帮助
 | `autohack pull` | 把**当前目录**下全部文件下载到本机 `/home/stash`（**一个夹**，不分流）。**注意**：`FileDownload` 类任务的判定不递归子目录（`Folder.containsFileWithData` 只查一级），故 `pull` 拉回的文件**不能**用于过这类任务 —— 要过请手敲 `scp <file>`（落 `/home`） |
 | `autohack purge` | 删除**当前目录**下全部文件（同游戏 `rm`；与清痕**同一实现**；**只删文件，不删文件夹**）。`clearfolder` 类任务要求目标目录一个文件不剩，**先 `cd` 对再敲** —— 站错目录会删掉任务不需要的东西而目标目录仍非空 |
 | `autohack drop` | 断开并把当前连接的节点从网络图上摘掉 |
-| `autohack ip` | 给本机换一个新 IP（原生 `Assign New IP` 三步 + 全图已控机器归属迁移 + 重建 Pathfinder 查找表）。面板已不再放出这个按钮（v1.41.0 起让位给 `ANTI-TRACE`），命令行与 `new IP after run` 复选框仍可用 |
+| `autohack ip` | 给本机换一个新 IP（原生 `Assign New IP` 三步 + 全图已控机器归属迁移 + 重建 Pathfinder 查找表）。与面板 `换 IP` 按钮同一实现；`new IP after run` 复选框是跑完自动换 |
 | `autohack wipe [here]` | **清掉我的痕迹**：删掉 `/log` 里含你 IP 的条目。缺省**地图全表**；传 `here` 收窄到当前节点所在的连通分量。与面板 `WIPE TRACES` 按钮同一实现，也与每轮收尾那次兜底同一份代码 |
 | `autohack trace` | **反追踪**：止住两套追踪（倒计时 + 脱机追踪）并杀掉 `os.exes` 里的 `ForkBombExe`（v1.41.0 起），**不碰对方 `/log`**。与面板 `ANTI-TRACE` 按钮同一实现 |
 | `autohack skip` | **跳过当前任务**：完成它并接下一个（走游戏自己的三条原生收尾通道，含 DLC 合同与 Kaguya Trials） |

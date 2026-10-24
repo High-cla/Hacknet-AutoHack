@@ -19,7 +19,7 @@ public sealed class AutoHackPlugin : BepInEx.Hacknet.HacknetPlugin
     internal const string Guid = "com.highcla.autohack";
 
     /// <summary>插件版本（<c>[BepInPlugin]</c> 与 <see cref="AutoHackApi.Version"/> 共用一处）。</summary>
-    internal const string Version = "1.43.0";
+    internal const string Version = "1.43.1";
 
     public override bool Load()
     {

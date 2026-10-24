@@ -3,7 +3,7 @@
 > Hacknet 的 BepInEx / Pathfinder 插件：用游戏自身的原生机制一键入侵全网，带控制面板与脚本驱动。
 > 本文件面向要理解或修改本仓库的编码 agent。规范见 https://llmstxt.org
 
-当前 v1.43.0。构建产物直投游戏插件目录，无需手动拷贝：
+当前 v1.43.1。构建产物直投游戏插件目录，无需手动拷贝：
 
 ```
 D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
@@ -422,7 +422,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     白名单（`/Whitelist/list.txt`）记的是**当时的玩家 IP**，换掉即失效，
     表现为「按提示去连却进不去」，而玩家几乎不可能把两件事联系起来。
     换 IP 本身是好的保命机制（见坑 30），要每轮自动换就显式开 `newip` 或勾复选框；
-    只换这一次用 `autohack ip`（面板不再放出这个按钮，v1.41.0 起该位置换成 `ANTI-TRACE`）。
+    只换这一次用 `autohack ip` 或面板 `换 IP` 按钮。
 
 36. **任务判定面审计：17 种 goal 里，mod 会碰到其中 3 种** —— 逐个读
     `Hacknet.Mission/*.cs` 的 `isComplete` 得到下表。**判据几乎都是「纯读某个状态」**，

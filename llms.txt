@@ -293,11 +293,28 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
     教训：把「回显」当成调用方的职责时，要问一句**这件事真的发生了吗** ——
     端口那条路早已改由动画自己开（v1.33.3），回显却慢了半拍仍是提前写。
 
-28. **`CrashModule.BOOT_TIME` 是 static 字段，值在静态初始化器里固化**
-    （`CrashModule.cs:15`）—— 之后再改 `Settings.FastBootText` **无效**（且该设置根本不落
-    `Settings.txt`），只能覆写字段本身。`bootTextDelay` 是实例字段、只在 `LoadContent()`
-    （`:78`）算一次，那一刻读到的已是新值，**不要手动重算**：`reset()`（`:319-331`）
-    不重算它，手动补的那份重启后失效。
+28. **开机有<b>两个</b>闸门：动画时长（`CrashModule`）与「能不能进系统」（`bootTimer`）**
+    —— 只压前者会得到「文字飞快、然后黑屏干等十几秒」（v1.41.1 修的 bug）。
+
+    **闸门 A：动画。** `CrashModule.Update` 的状态机（`CrashModule.cs:108-172`）按
+    `BLUESCREEN_TIME(8f)` → `BLACK_TIME(2f)` → `BOOT_TIME(14.5f)` 推进；
+    `bootTextDelay = BOOT_TIME / ((lines-1)*2)`（`:78`，实例字段、只在 `LoadContent` 算一次，
+    **不要手动重算** —— `reset()`（`:319-331`）不重算，补的那份重启后失效）。
+
+    **闸门 B：进系统。** `OS.Update` 的判据是 `if (!thisComputer.disabled)`
+    （OS.cs:753-771）→ `disabled` 由 `Computer.bootupTick` 把 `bootTimer` 减到 0 才置假
+    （Computer.cs:310-317）→ `bootTimer` 初值 `Computer.BASE_BOOT_TIME = 25.5f`
+    （Computer.cs:23，由 `Computer.crash` 写入，`:437`）。**这个 25.5 秒与文字毫无关系**，
+    不压它，文字再快也白搭。
+
+    `BootBoost.cs` 现在四个常量一起压（`[ModuleInitializer]` 覆盖，早于 `OS` 构造）：
+    蓝屏 1.0 / 黑屏 0.2 / 文字 1.2 / `BASE_BOOT_TIME` 2.5（=三者之和 + 0.1 一帧余量），
+    文字跑完那一刻即进系统。`BASE_REBOOT_TIME` 一并对齐（远程机 `bootTimer` 从不被 tick，
+    对时长无影响）。`POST_BLACK_TIME` 在游戏里零读点，不覆盖。
+
+    **这些字段都是 static、值在静态初始化器里一次固化**，改 `Settings.FastBootText` 无效
+    （该设置也不落 `Settings.txt`）—— 只能覆写字段。代价：崩溃时的假蓝屏同样变短
+    （同一组常量管两条路径）。
 
 29. **收尾清追踪是恒定动作，且不擦追踪者 /log** —— 每轮 `autohack run` 的
     `HackRun.Finish` 无条件调 `TraceTools.Run`：止 `traceTracker` 倒计时、清
@@ -1163,7 +1180,7 @@ passcode = 头部第 4 段首个密文数字 - 158485
 - [src/AutoHack/HackOverlay.cs](src/AutoHack/HackOverlay.cs): 叠加层 —— patch `OS.Draw` / `OS.Update`（全仓仅此一处挂这两个补丁点，见坑 53）
 - [src/AutoHack/WebRenderGuard.cs](src/AutoHack/WebRenderGuard.cs): 原生网页渲染器（CEF）的三处稳定性补丁 —— `setSize` 尺寸未变不重建、`TextureUpdated` 空判、网页缓存原子写（见坑 53）
 - [src/AutoHack/LocalizationFix.cs](src/AutoHack/LocalizationFix.cs): 在 `StringExtensions.ContentFilePath` 出口补本地化查表，修 Pathfinder 重写 Action 加载器后 DLC 对话不翻译（见坑 53）
-- [src/AutoHack/BootBoost.cs](src/AutoHack/BootBoost.cs): 启动加速（覆写 `CrashModule.BOOT_TIME`，见坑 28）
+- [src/AutoHack/BootBoost.cs](src/AutoHack/BootBoost.cs): 启动加速 —— 四个静态常量一起压（动画 + `BASE_BOOT_TIME` 闸门），见坑 28
 - [src/AutoHack/HackTypes.cs](src/AutoHack/HackTypes.cs): 不可变数据 —— `HackOptions` / `HackStep` / `PortInfo`；`partial` 分部 `HackTypes.Parse.cs` 是命令行解析
 - [src/AutoHack/PendingRuns.cs](src/AutoHack/PendingRuns.cs): headless 运行的跨线程调度
 - [src/AutoHack/AutoHackPlugin.cs](src/AutoHack/AutoHackPlugin.cs): 插件入口与命令注册

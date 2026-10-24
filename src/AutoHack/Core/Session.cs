@@ -68,6 +68,12 @@ internal sealed class Session
     internal IReadOnlyCollection<string> LoggedIn => _loggedIn;
 
     /// <summary>
+    /// 撤掉「被拒」标记 —— 白名单被绕过并重连成功后调用（执行层发现的既成事实），
+    /// 之后的清痕与断开步才会重新走一遍依赖连接的路径。
+    /// </summary>
+    internal void ClearRefused(string ip) => _refused.Remove(ip);
+
+    /// <summary>
     /// 推进一帧，返回本帧应执行的动作（可能为空）。执行器同步跑完后，下一帧的世界视图
     /// 自然反映结果 —— 状态机不接收任何返回值，世界是唯一的信息源。
     /// </summary>

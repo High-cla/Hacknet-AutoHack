@@ -2,132 +2,78 @@ namespace AutoHack;
 
 using AutoHack.Core;
 using Hacknet;
-using Pathfinder.Port;
+using Pathfinder.Util;
 
 /// <summary>单个目标的战果（GUI 展示用）。</summary>
 internal sealed record TargetOutcome(string Name, int Opened, int Total, bool Escalated);
 
 /// <summary>
-/// 一次入侵运行的执行状态与推进逻辑。
-/// 由 OS.Update / OSUpdateEvent 每帧驱动；与绘制解耦，便于单独测试。
-/// 每个动作都把对应指令回显到终端（格式同 OS.runCommand），并执行之 ——
-/// 唯端口步的命令由原生演出去回显（动画挂上面板那一刻，见 HackRun.Steps.ApplyOpenPort）。
-/// 端口一律按 Pathfinder 的协议名操作（<c>openPort(protocol, ipFrom)</c>），
-/// 而非原版按端口号 —— 原版那条路径已被框架 Prefix 拦下。
+/// 一次入侵运行的<b>执行器</b>：核心状态机给出动作，这里落到游戏 API 上。
 ///
-/// 五条必须尊重的游戏机制：
-/// 1. 管理员反扑：断开连接时 OS.handleDisconnection() 会调
-///    admin?.disconnectionDetected()，BasicAdministrator 在 0~20 秒后关掉全部端口并把
-///    adminIP 还原成机器自己 —— 肉鸡标记当场丢失，这就是「全网扫描失去效果」的根因。
-///    必须在断开前把 computer.admin 置 null（<see cref="HackEngine.SuppressCounterattack"/>）。
-/// 2. 追踪：TraceTracker 只在「连着被追踪目标」时推进（Update 见 connectedComp 为空
-///    即刻置 active = false），故跑完一个目标就断开连接即等于反追踪；
-///    否则计时归零会走 OS.timerExpired() 端掉玩家。
-/// 3. 清痕必须在断开**之前**：rm 这类命令的目标机取自 os.connectedComp
-///    （Programs.rm，Programs.cs:956），且 Programs.disconnect 会清空
-///    os.navigationPath —— 断开之后再清，回显的 rm 就是条假命令，正如玩家
-///    手敲时那样「没有效果」。断开本身会写 "&lt;玩家IP&gt; Disconnected"
-///    （Computer.cs:722-727），故 Leave 断开时把 silent 置真，避免刚清的痕迹被写回。
-/// 4. 跳板：proxyActive 的机器上，需要跳板访问权的破解程序被 OS.addExe 门禁拦下
-///    （OS.cs:2165）。解除即把 proxyOverloadTicks 收敛到 0、proxyActive 置 false ——
-///    与 ShellExe 过载跑完的终态逐字节相同，只是不等那 30 秒。
-///    刻意不照抄 ShellExe.cs:105 的 hostileActionTaken() —— 那只会点燃追踪。
-/// 5. <b>推进没有任何时间节流</b>（v1.34.0 起）。此前非端口步吃 NormalStepDelay
-///    （0.35s）、端口步吃 PortDelay（缺省 0.6s），实测存档 167 台 / 642 可破端口
-///    一轮要 5 分钟以上，其中 292 秒纯粹是「等」—— 而关掉演出后端口在
-///    ApplyOpenPort 里立即开，压根没有可等的东西。现在整轮只剩三道闸门：
-///    单帧步数预算、<b>端口步每帧一步（与演出开关无关）</b>、提权前的动画等待
-///    （仅演出开着时）。实测同一存档：noshow 一轮由 5.2 min 降到约 11 秒。
+/// 本类只剩三件事：构造期解析目标、把快照交给 <see cref="Planner"/>；每帧执行
+/// <see cref="Session"/> 给出的动作；收尾。判据、次序、四类跳过都不在这里 ——
+/// 它们在 <c>src/AutoHack/Core/</c>，并且有离线单测（<c>tests/core-tests</c>）。
+///
+/// 三条与游戏时序绑定的硬事实（执行层必须继续尊重，核心不感知）：
+/// 1. <b>管理员反扑</b>：断开时 <c>handleDisconnection</c> 调 <c>admin.disconnectionDetected()</c>，
+///    0~20 秒后关掉全部端口并把 <c>adminIP</c> 还原 —— 故断开前必须
+///    <see cref="HackEngine.SuppressCounterattack"/>。
+/// 2. <b>追踪</b>：<c>TraceTracker</c> 只在「连着被追踪目标」时推进，跑完一个目标就断开即等于反追踪。
+/// 3. <b>清痕在断开之前</b>：断开本身会往目标 /log 写一条「玩家 IP Disconnected」。
+/// 这三条都由 <see cref="Planner"/> 的次序表达，执行层只负责照做。
 /// </summary>
 internal sealed partial class HackRun
 {
-    /// <summary>
-    /// 等本台端口开完的上限（秒），超时就把剩下的端口直接开掉并继续。
-    ///
-    /// <b>为什么必须有上限。</b>等待的判据是「端口是否已 Cracked」，而端口由动画的
-    /// <c>Completed()</c> 去开；动画要挂上 RAM 面板才跑，挂载受 <c>os.ramAvaliable</c>
-    /// 门禁。玩家自己开着几个吃内存的 exe（ShellExe 600mb 之类）时，本插件排的动画
-    /// 可能永远装不下 —— 那时没有上限就是<b>整轮永久停在 ESCALATING</b>，比少开一个
-    /// 端口糟得多。
-    ///
-    /// 取 180 秒：实测单台最坏 72.3 秒（167 台 / 642 可破端口全量仿真），留 2.5 倍余量。
-    /// 超时走 <see cref="NativeExes.Flush"/> —— 把还没开的直接开掉，战果不丢。
-    /// </summary>
-    private const float NativeWaitCapSeconds = 180f;
-
-    /// <summary>在提权等待上已经花掉的秒数（见 <see cref="NativeWaitCapSeconds"/>）。</summary>
-    private float _waitSeconds;
-
-    private readonly List<Computer> _targets;
-    private readonly List<HackStep> _steps;
-
-    private int _index;
-
-    /// <summary>本次运行中靠已知凭据登入（即已提权）的机器，其破端口类步骤整体跳过。</summary>
-    private readonly HashSet<Computer> _loggedIn = new();
-
-    /// <summary>
-    /// 连接被目标主动拒绝（白名单）的机器。
-    ///
-    /// 它**只跳过依赖连接的步骤**（<see cref="ActionKind.Connect"/>、
-    /// <see cref="ActionKind.CleanLogs"/>、<see cref="ActionKind.Disconnect"/>），
-    /// 其余（破端口 / 解跳板 / 解防火墙 / login / 提权 / 投放）全部照常执行 ——
-    /// 那些步骤直接操作 <c>target</c> 对象，本就不经过连接。
-    ///
-    /// v1.23.0 曾整段跳过这类目标，理由是「连接没成而后续照样成功 = 假战果」。
-    /// 那个顾虑只对<b>依赖连接语义</b>的步骤成立（rm 的目标机取自
-    /// <c>os.connectedComp</c>，断开后 rm 会打到自己的文件系统上）；
-    /// 对操作对象本身的步骤并不成立 —— 端口表的 <c>Cracked</c> 状态、
-    /// <c>giveAdmin</c> 写入的 <c>adminIP</c> 都落在目标机上，是真的战果。
-    /// 整段跳过等于把一台本来能拿下的机器直接放弃，这才是真损失。
-    /// </summary>
-    private readonly HashSet<Computer> _refused = new();
-
-
-    /// <summary>本次运行的入侵脚本；null = 用内置次序。构造期已解析完成。</summary>
-    private readonly HackScript _script;
+    private readonly Session _session;
+    private readonly GameWorldView _world;
+    private readonly Dictionary<string, Computer> _byIp = new(StringComparer.Ordinal);
+    private readonly List<Computer> _targets = new();
 
     internal HackRun(OS os, HackOptions options)
     {
         Options = options;
 
-        // 脚本在构造期解析一次：语法错/文件缺失在这里抛出，由调用方转成终端可见
-        // 的错误行。放进 Tick 会让错误每帧重复，放进 BuildSteps 会让「目标为空」
-        // 与「脚本坏了」两种情况混在一起。
-        _script = string.IsNullOrEmpty(options.Script) ? null : HackScript.Load(options.Script, ContentPaths.Resolve);
-
-        // 只有「全网扫描 + whole map」需要揭图：ConnectableComputers 只收集、
-        // 不 discoverNode，不揭就是「地图全开跑完一台都不亮」。
-        //
-        // 单节点（CURRENT NODE / here）与显式点名（ids=…）刻意不揭（v1.39.0，用户定）：
-        // 它们的池取自 ConnectedPool / 点名表，与 visibleNodes 无关 —— 只打这一台，
-        // 却在图上点亮整片连通分量（勾了 whole map 更是点亮全图）。
-        // Network 非 allnodes 同理不揭：ReachableComputers 的 BFS 自己就逐节点
-        // discoverNode（见 Closure→Expand），这里再揭一遍是重复遍历。
-        //
-        // 标记走原生 NetworkMap.discoverNode（NetworkMap.cs:415-423），
-        // 与游戏自身的「已发现」同源，不做自绘的伪发现。
+        // 只有「全网扫描 + allnodes」需要揭图：ConnectableComputers 只收集、不 discoverNode，
+        // 不揭就是「地图全开跑完一台都不亮」。单节点与显式点名刻意不揭（v1.39.0，用户定）：
+        // 它们的池与 visibleNodes 无关，只打这一台却点亮整片连通分量是没人要的副作用。
         if (options.Scope == HackScope.Network && options.AllNodes)
         {
             HackEngine.RevealWholeMap(os);
         }
 
-        var plan = HackEngine.ResolveTargets(os, options);
-        _targets = plan.Targets;
-        SkippedOwned = plan.SkippedOwned;
+        var resolved = HackEngine.ResolveTargets(os, options);
+        _targets.AddRange(resolved.Targets);
+        SkippedOwned = resolved.SkippedOwned;
 
-        _steps = BuildSteps(_targets, plan.Skipped, options, os, _script);
-        Current = _targets.Count > 0 ? _targets[0].name : "-";
+        Index(_targets);
+        Index(resolved.Skipped);
+        if (os.thisComputer != null)
+        {
+            _byIp[os.thisComputer.ip] = os.thisComputer;
+        }
+
+        _world = new GameWorldView(os, _byIp);
+
+        var plan = Planner.Build(
+            _world.Of(_targets, options),
+            _world.Of(resolved.Skipped, options),
+            _world.Of(os.thisComputer, options),
+            os.connectedComp?.ip,
+            options,
+            LoadScript(options));
+
+        _session = new Session(plan, options);
         Phase = "ENGAGING";
+        Current = _targets.Count > 0 ? _targets[0].name : "-";
     }
 
     internal HackOptions Options { get; }
 
     internal List<TargetOutcome> Outcomes { get; } = new();
 
-    internal int Total => _steps.Count;
+    internal int Total => _session.Total;
 
-    internal int Done => Math.Min(_index, _steps.Count);
+    internal int Done => _session.Done;
 
     internal bool Finished { get; private set; }
 
@@ -141,13 +87,9 @@ internal sealed partial class HackRun
     internal int SkippedOwned { get; }
 
     /// <summary>
-    /// 面板标题一律大写。在每个 Phase 赋值处转换一次，
-    /// 而不是在绘制期每帧对同一字符串重复转换。
+    /// 推进一帧。只允许游戏线程调用 —— 会改动游戏状态。
+    /// 动作由核心状态机给出，本方法只做「执行」；执行结果不回流，世界视图下一帧自然反映。
     /// </summary>
-    private static string Upper(string value)
-        => string.IsNullOrEmpty(value) ? string.Empty : value.ToUpperInvariant();
-
-    /// <summary>推进一帧。只允许游戏线程调用 —— 会改动游戏状态。</summary>
     internal void Tick(OS os, float deltaSeconds)
     {
         if (Finished)
@@ -155,193 +97,49 @@ internal sealed partial class HackRun
             return;
         }
 
-        // 推进不再有任何时间节流（v1.34.0 起，见类注释）。deltaSeconds 只服务于
-        // 提权等待的上限计时（见 WaitForNativeAnimation），不参与步进节流。
-        // 剩下的三道闸门：
-        // ① 端口步每帧只推进一步（与演出开关无关，见循环末尾）—— 它同时管
-        //    动画入队速率与终端回显速率；
-        // ② 提权前的原生动画等待 —— 仅当演出开着（见 WaitForNativeAnimation）；
-        // ③ 单帧步数预算 MaxStepsPerFrame。
-        var budget = MaxStepsPerFrame;
-        while (!Finished && budget-- > 0)
+        foreach (var action in _session.Tick(_world, deltaSeconds))
         {
-            if (_index >= _steps.Count)
-            {
-                Finish(os);
-                return;
-            }
+            Apply(os, action);
+        }
 
-            var step = _steps[_index];
+        Phase = _session.Phase;
 
-            // 该目标的连接被拒（白名单）：只跳过**依赖连接**的步骤，其余照常执行。
-            // 依据见 _refused 的字段注释 —— 破端口/提权/投放操作的是 target 对象本身，
-            // 不经连接，跳过它们等于白白放弃一台能拿下的机器。
-            if (_refused.Contains(step.Target) && DependsOnConnection(step.Kind))
-            {
-                _index++;
-                continue;
-            }
-
-            // 该目标已靠 login 提权：破端口/解防火墙/porthack 都是无用功，
-            // 直接跳过（不回显、不耗时）。停机也计入 Done，进度条才走得准。
-            if (IsRedundantAfterLogin(step))
-            {
-                _index++;
-                continue;
-            }
-
-            // 端口数已达提权门槛：剩下的端口步全部跳过，直接去解防火墙 + porthack。
-            // 判据与游戏门禁同源（见 HackEngine.PortQuotaMet），破端口是顺序的，
-            // 故「破到够为止」与「按门槛挑着破」等价，且自动覆盖某步没破成的情形。
-            //
-            // 跳过时静默（不回显）—— 没敲过的命令不该出现在终端里。
-            // 也正因为跳过的步不触发循环末尾那道「端口步每帧一步」闸门，
-            // 一帧内就能把该台剩余端口步全部跳完，不额外耗时。
-            if (IsPortQuotaMet(step))
-            {
-                _index++;
-                continue;
-            }
-
-            if (WaitForNativeAnimation(step, deltaSeconds, os))
-            {
-                return;
-            }
-
-            _waitSeconds = 0f;
-            Apply(os, step);
-            _index++;
-
-            // 端口步每帧只推进一步 —— **与演出开关无关**（用户定，v1.34.0）。
-            //
-            // 这道闸同时管两件事，两件都要求「一帧一个」：
-            // ① **动画入队速率**（演出开着时）：一帧至多入队一个动画请求，
-            //    动画由 RAM 门禁自行并发（实测峰值 3 个同屏）；
-            // ② **终端回显速率**（两种模式都要）：一帧至多一行破解指令。
-            //
-            // 去掉它，一帧 512 步的预算会把整台的端口（noshow 下是整轮 642 个）
-            // 挤进同一帧 —— 终端一次刷出十几到几百行 sshcrack，玩家根本看不清
-            // 破了哪个端口，动画请求也会全挤进队列。
-            //
-            // 代价是端口步恒为 1 帧/个（60 个/秒）：642 个端口约 10.7 秒。
-            // 这是刻意的取舍 —— 战果要看得见，而 60/秒已远快于任何人工节奏。
-            if (step.Kind == ActionKind.OpenPort)
-            {
-                return;
-            }
+        if (_session.Finished)
+        {
+            Finish(os);
         }
     }
 
-    /// <summary>
-    /// 提权前的等待：本台交给动画的端口还没开完就不推进，返回 true 表示本帧就此打住；
-    /// 超过上限则把剩余端口直接开掉并回显，随后照常推进。
-    /// </summary>
-    private bool WaitForNativeAnimation(HackStep step, float deltaSeconds, OS os)
+    /// <summary>把动作落到游戏 API 上。目标按 IP 解析 —— 计划里只有 IP，没有对象引用。</summary>
+    private void Apply(OS os, GameAction action)
     {
-        // 提权读的是已破解端口数（HackEngine.CanEscalate → OpenPortCount >
-        // portsNeededForCrack 且防火墙已解）。端口现在由动画的 Completed() 去开，
-        // 故必须等本台交给动画的端口全部开完再提权 —— 否则读数是假的，
-        // porthack 门禁必然不过，终端会多打一行 escalation gate not met。
-        //
-        // 等的是战果本身（PortState.Cracked），不是动画内部状态：九种程序的完成标志
-        // 各不相同，而 Cracked 一置真就说明该端口确实开好了（见 NativeExes.Settled）。
-        //
-        // 不推进 _index，下一帧重来 —— 这是「等」，不是「跳过」。
-        if (step.Kind != ActionKind.Escalate || NativeExes.Settled(step.Target))
-        {
-            return false;
-        }
+        var target = Resolve(action.TargetIp);
+        Current = target != null ? target.name + " @ " + target.ip : action.TargetIp;
 
-        _waitSeconds += deltaSeconds;
-        if (_waitSeconds < NativeWaitCapSeconds)
-        {
-            return true;
-        }
-
-        // 超时兜底：把这一台还没开的端口直接开掉，不再等动画。
-        // 必须回显 —— 玩家看到的动画没有跑完，得知道战果是补上的。
-        //
-        // force 连还在播的一起补，且复位计时：否则下一帧 Settled 仍为假，
-        // 会每帧重进这个分支、把同一行刷满终端。
-        var forced = NativeExes.Flush(os, step.Target, force: true);
-        Trace.Write("escalate wait timed out on " + step.Target.ip + " after " + (int)NativeWaitCapSeconds + "s - forced " + forced + " port(s) open");
-        _waitSeconds = 0f;
-
-        return false;
-    }
-
-    /// <summary>
-    /// 该步骤是否已被 login 提权化为无用功。只对<b>本次运行中确实靠 login 拿下</b>
-    /// 的目标成立（<see cref="_loggedIn"/>），不影响 redo 模式下重打已控节点的语义。
-    /// </summary>
-    private bool IsRedundantAfterLogin(HackStep step)
-    {
-        if (_loggedIn.Count == 0 || !_loggedIn.Contains(step.Target))
-        {
-            return false;
-        }
-
-        return step.Kind is ActionKind.BypassProxy
-            or ActionKind.OpenPort
-            or ActionKind.SolveFirewall
-            or ActionKind.Escalate;
-    }
-
-    /// <summary>
-    /// 这一步是不是「端口已经破够了，可以不用再破」的端口步。
-    ///
-    /// <b>只对 <see cref="ActionKind.OpenPort"/> 生效。</b>其余步骤都不受端口数量影响 ——
-    /// 尤其是 <see cref="ActionKind.SolveFirewall"/>：porthack 的第二道门禁要求
-    /// <c>firewall.solved</c>（<c>OS.cs:1920-1927</c>），防火墙该解还得解。
-    ///
-    /// <b>两种模式都生效（内置次序与脚本）。</b>与 <see cref="IsRedundantAfterLogin"/> 同一
-    /// 取舍：脚本里写 <c>openPort</c> 的目的是拿下这台机器，而门槛一旦越过，多破的端口对
-    /// 那个目的毫无贡献。若将来要「无论门槛、破满全部」，那是一个<b>新的选项</b>，
-    /// 不该靠脚本模式绕过 —— 否则同一条脚本在内置次序下是另一套行为，更难解释。
-    /// </summary>
-    private bool IsPortQuotaMet(HackStep step)
-    {
-        if (step.Kind != ActionKind.OpenPort)
-        {
-            return false;
-        }
-
-        // 演出开着时把在途动画算进来（v1.40.0）：端口现在由动画的 Completed() 去开，
-        // 而端口步一帧一个入队、不等动画，故走进第 N 步时前 N-1 个都还没落地 ——
-        // 只看 OpenPortCount 会让判据恒假，整台可破端口全排上动画（实测全表多破 163 个）。
-        // noshow 传 0：那时端口在 ApplyOpenPort 里立即开，无在途，判据与原先逐字相同。
-        return HackEngine.PortQuotaMet(step.Target, Options.ShowExes ? NativeExes.InFlight(step.Target) : 0);
-    }
-
-    private void Apply(OS os, HackStep step)
-    {
-        var target = step.Target;
-        Current = target.name + " @ " + target.ip;
-
-        switch (step.Kind)
+        switch (action.Kind)
         {
             case ActionKind.Connect:
-                ApplyConnect(os, step);
+                ApplyConnect(os, action, target);
                 break;
 
             case ActionKind.Neutralize:
                 ApplyNeutralize(os, target);
                 break;
 
-            case ActionKind.BypassProxy:
-                ApplyBypassProxy(os, target);
+            case ActionKind.Probe:
+                ApplyProbe(os, action, target);
                 break;
 
             case ActionKind.Login:
                 ApplyLogin(os, target);
                 break;
 
-            case ActionKind.Probe:
-                ApplyProbe(os, step);
+            case ActionKind.BypassProxy:
+                ApplyBypassProxy(os, target);
                 break;
 
             case ActionKind.OpenPort:
-                ApplyOpenPort(os, step);
+                ApplyOpenPort(os, action, target);
                 break;
 
             case ActionKind.SolveFirewall:
@@ -349,7 +147,7 @@ internal sealed partial class HackRun
                 break;
 
             case ActionKind.Escalate:
-                ApplyEscalate(os, step);
+                ApplyEscalate(os, action, target);
                 break;
 
             case ActionKind.BypassWhitelist:
@@ -365,15 +163,46 @@ internal sealed partial class HackRun
                 break;
 
             case ActionKind.Disconnect:
-                ApplyDisconnect(os, step);
+                ApplyDisconnect(os, action, target);
                 break;
 
             case ActionKind.KillTrace:
                 ApplyKillTrace(os);
                 break;
+
+            case ActionKind.FlushAnimations:
+                NativeExes.Flush(os, target, force: true);
+                break;
         }
     }
 
+    private Computer Resolve(string ip)
+    {
+        if (ip == null)
+        {
+            return null;
+        }
+
+        return _byIp.TryGetValue(ip, out var comp) ? comp : ComputerLookup.Find(ip);
+    }
+
+    private void Index(IReadOnlyList<Computer> computers)
+    {
+        foreach (var comp in computers)
+        {
+            if (comp?.ip != null)
+            {
+                _byIp[comp.ip] = comp;
+            }
+        }
+    }
+
+    /// <summary>
+    /// 读取脚本。<b>构造期</b>解析一次：语法错/文件缺失在这里抛出，由调用方转成终端可见的错误行。
+    /// 放进 Tick 会让错误每帧重复，放进计划构建会让「目标为空」与「脚本坏了」两种情况混在一起。
+    /// </summary>
+    private static HackScript LoadScript(HackOptions options)
+        => string.IsNullOrEmpty(options.Script) ? null : HackScript.Load(options.Script, ContentPaths.Resolve);
     private void Finish(OS os)
     {
         Finished = true;

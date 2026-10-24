@@ -677,7 +677,7 @@ cd /d/git/HacknetMod && dotnet run --project tests/core-tests -c Release
   （`<Compile Include="../../src/AutoHack/Core/**/*.cs" />`），所以核心层一旦误引 `Hacknet` /
   `Pathfinder` / `BepInEx` / `Harmony`，这里立刻编不过 —— 这条比任何注释都硬。
 - 断言手写（`Check(name, ok, detail)` + 失败计数），不引测试框架：本仓硬约束是零 NuGet。
-- 核心层与游戏侧的接缝：纯类型（`PortView`/`PlanStep`/`GameAction`）+ 读模型（`IWorldView`）
+- 核心层与游戏侧的接缝：纯类型（`PortView`/`TargetView`/`GameAction`）+ 读模型（`IWorldView`）
   + 注入的路径委托（`ContentPaths.Resolve`）。测试用假实现，不需要游戏运行时。
 - 覆盖随迁移增长：当前是脚本解析器（动作/别名/分隔符/注释/`dc` 后 `rm`/NPC 动作报错/路径委托）；
   已搬进核心的判据必须同时有对应用例。

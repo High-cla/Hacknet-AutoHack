@@ -17,7 +17,7 @@ internal sealed record TargetOutcome(string Name, int Opened, int Total, bool Es
 /// 三条与游戏时序绑定的硬事实（执行层必须继续尊重，核心不感知）：
 /// 1. <b>管理员反扑</b>：断开时 <c>handleDisconnection</c> 调 <c>admin.disconnectionDetected()</c>，
 ///    0~20 秒后关掉全部端口并把 <c>adminIP</c> 还原 —— 故断开前必须
-///    <see cref="HackEngine.SuppressCounterattack"/>。
+///    <see cref="Counterplay.SuppressCounterattack"/>。
 /// 2. <b>追踪</b>：<c>TraceTracker</c> 只在「连着被追踪目标」时推进，跑完一个目标就断开即等于反追踪。
 /// 3. <b>清痕在断开之前</b>：断开本身会往目标 /log 写一条「玩家 IP Disconnected」。
 /// 这三条都由 <see cref="Planner"/> 的次序表达，执行层只负责照做。
@@ -43,7 +43,7 @@ internal sealed partial class HackRun
         // 它们的池与 visibleNodes 无关，只打这一台却点亮整片连通分量是没人要的副作用。
         if (options.Scope == HackScope.Network && options.AllNodes)
         {
-            HackEngine.RevealWholeMap(os);
+            GraphNavigator.RevealWholeMap(os);
         }
 
         var resolved = HackEngine.ResolveTargets(os, options);
@@ -252,7 +252,7 @@ internal sealed partial class HackRun
 
         NativeExes.StopAll(os);
         TraceTools.Run(os, announce: false);
-        HackEngine.KillForkBombs(os);
+        Counterplay.KillForkBombs(os);
 
         Trace.Write("run aborted: " + error);
         os?.write("[autohack] run aborted - " + error.GetType().Name + ": " + error.Message);
@@ -274,7 +274,7 @@ internal sealed partial class HackRun
         //
         // 只在这一轮确实要清痕时做：keep 是玩家显式要求留痕，不该被收尾兜底绕过。
         // 被跳过（已控）与玩家自己的机器由 WipeNetwork 一并覆盖，不再单独追加。
-        HackEngine.WipeForRun(os, Options);
+        WipeEngine.WipeForRun(os, Options);
 
         // 收尾反追踪 —— 无条件执行，不是选项：止住倒计时 + 清空脱机追踪列表。
         // **不擦追踪者的 /log**：那是目标机的操作史，反追踪不该顺手替玩家做决定。
@@ -285,7 +285,7 @@ internal sealed partial class HackRun
         // 10~20 秒后计时归零端掉玩家。
         //
         // 复发概率已被本版的清痕口径压到很低：CleanLogs 步删的正是「含玩家 IP」的条目
-        // （HackEngine.WipeTraces），那恰好就是这条判据的输入。仍留着这一层是因为
+        // （WipeEngine.WipeTraces），那恰好就是这条判据的输入。仍留着这一层是因为
         // 收尾清痕与断开之间有窗口（换 IP、ResetIP 等），且脚本模式可能不排清痕步。
         //
         // 排在换 IP 之前：语义上「先收拾追踪、再换身份」；且换 IP 会改掉
@@ -307,7 +307,7 @@ internal sealed partial class HackRun
             // 两个数取自同一次快照：分两次查会各分配一份端口表副本
             // （GetAllPortStates 是 ...Values.ToList()），且理论上可能显示
             // opened > total 的不一致比例。PortView 自带 Cracked，无需第二次遍历。
-            var ports = HackEngine.Ports(target);
+            var ports = PortEngine.Ports(target);
             var opened = ports.Count(p => p.Cracked);
 
             // 所有权看 adminIP（肉鸡标记的真身），不看 CanEscalate ——

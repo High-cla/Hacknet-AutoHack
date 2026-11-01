@@ -113,7 +113,7 @@ internal static class ToolRegistry
         Add(ToolDispatch.Ip, "assign this machine a new IP (keeps owned-node tags in sync)",
             "NEW IP", false, (os, _) => IpTools.Run(os));
         Add(ToolDispatch.Wipe, "wipe MY traces  [here]  (/log entries naming your IP; default: whole map)",
-            "WIPE TRACES", true, (os, allNodes) => HackEngine.WipeNetwork(os, allNodes));
+            "WIPE TRACES", true, (os, allNodes) => WipeEngine.WipeNetwork(os, allNodes));
     }
 
     private static void Add(

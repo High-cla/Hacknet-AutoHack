@@ -9,7 +9,7 @@ using Hacknet;
 /// <item><c>os.traceTracker</c>：左下角那个看得见的倒计时（归零崩玩家机）；</item>
 /// <item><c>os.TrackersInProgress</c>：看不见的那批脱机追踪；</item>
 /// <item><c>os.exes</c> 里的 <c>ForkBombExe</c>：追踪链的终点（<c>trackseq</c> + <c>forkbomb</c>），
-/// 吃干 RAM 就崩玩家机器 —— 见 <see cref="HackEngine.KillForkBombs"/>。</item>
+/// 吃干 RAM 就崩玩家机器 —— 见 <see cref="Counterplay.KillForkBombs"/>。</item>
 /// </list>
 /// 两个入口：<c>autohack trace</c>（立即清，是「我现在就要清」的唯一入口）与入侵收尾
 /// （<c>HackRun.Finish</c>，每轮无条件执行）。它们回答的是同一个问题：
@@ -27,7 +27,7 @@ using Hacknet;
 /// /log 是目标机自己的操作史（谁连过它、它读过什么），整个删掉属于改写对方状态。
 ///
 /// <b>但「含玩家 IP 的条目」不在这个取舍之内</b> —— 入侵流程每台机器末尾都会清掉
-/// 它们（<c>ActionKind.CleanLogs</c> → <see cref="HackEngine.WipeTraces"/>），
+/// 它们（<c>ActionKind.CleanLogs</c> → <see cref="WipeEngine.WipeTraces"/>），
 /// 那恰好就是上面那条判据的输入。要连自己的痕迹也留着传 <c>keep</c>。
 ///
 /// 计时列表的语义（OS.cs:823-839）：条目在<b>断线那一刻</b>排入；此后每帧 <c>timeLeft -= dt</c>，
@@ -57,9 +57,9 @@ internal static class TraceTools
             return;
         }
 
-        // 第一套：看得见的倒计时。走 HackEngine.KillTrace —— 与每个目标末尾那步
+        // 第一套：看得见的倒计时。走 Counterplay.KillTrace —— 与每个目标末尾那步
         // 是同一个实现，不复制一份 stop()。
-        var timerStopped = HackEngine.KillTrace(os);
+        var timerStopped = Counterplay.KillTrace(os);
 
         // 第二套：看不见的脱机追踪。只清列表，不碰它们的 /log（理由见类文档）。
         var trackers = os.TrackersInProgress;
@@ -67,9 +67,9 @@ internal static class TraceTools
         trackers?.Clear();
 
         // 第三件：炸弹。追踪链的终点就是它 —— TrackSequence.txt 的 trackseq + forkbomb
-        // 往 os.exes 里加一颗 ForkBombExe，吃干 RAM 就崩玩家机器（见 HackEngine.KillForkBombs）。
+        // 往 os.exes 里加一颗 ForkBombExe，吃干 RAM 就崩玩家机器（见 Counterplay.KillForkBombs）。
         // 与上面两套并列，是因为它们回答同一个问题：「现在有什么东西正在弄死我」。
-        var bombs = HackEngine.KillForkBombs(os);
+        var bombs = Counterplay.KillForkBombs(os);
 
         if (!announce)
         {

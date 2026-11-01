@@ -1,6 +1,6 @@
-// HackEngine.Wipe.cs —— 日志清痕：识别、删除与全网扫描。
+// WipeEngine.cs —— 日志清痕：识别、删除与全网扫描。
 //
-// HackEngine 的分部实现；类型声明、字段与其余职责见 HackEngine.cs。
+// 由 HackEngine 分部拆出（v1.45.0 审计 P1-1）：本文件即完整类型，不含其他职责。
 namespace AutoHack;
 
 using AutoHack.Core;
@@ -9,7 +9,7 @@ using Hacknet;
 using Pathfinder.Port;
 using Pathfinder.Util;
 
-internal static partial class HackEngine
+internal static class WipeEngine
 {
 
     /// <summary>
@@ -37,7 +37,7 @@ internal static partial class HackEngine
     internal static IReadOnlyList<string> WipeTraces(Computer comp, string ipFrom)
     {
         var root = comp?.files?.root;
-        var logFolder = root?.searchForFolder(LogFolderName);
+        var logFolder = root?.searchForFolder(GamePaths.LogFolder);
         if (root == null || logFolder == null || string.IsNullOrEmpty(ipFrom))
         {
             return Array.Empty<string>();
@@ -168,8 +168,8 @@ internal static partial class HackEngine
         }
 
         var pool = allNodes
-            ? ConnectableComputers(os)
-            : SilentClosure(os, os.connectedComp ?? self);
+            ? GraphNavigator.ConnectableComputers(os)
+            : GraphNavigator.SilentClosure(os, os.connectedComp ?? self);
 
         // 玩家机不在连通分量里（Closure 显式剔除），单独补上。
         var comps = new List<Computer>(pool.Length + 1);

@@ -1,13 +1,13 @@
-// HackEngine.Whitelist.cs —— 白名单旁路（WhitelistConnectionDaemon）。
+// WhitelistGate.cs —— 白名单旁路（WhitelistConnectionDaemon）。
 //
-// HackEngine 的分部实现；类型声明、字段与其余职责见 HackEngine.cs。
+// 由 HackEngine 分部拆出（v1.45.0 审计 P1-1）：本文件即完整类型，不含其他职责。
 namespace AutoHack;
 
 using Hacknet;
 using Pathfinder.Port;
 using Pathfinder.Util;
 
-internal static partial class HackEngine
+internal static class WhitelistGate
 {
 
     /// <summary>
@@ -97,7 +97,7 @@ internal static partial class HackEngine
     {
         yield return comp;
 
-        var source = comp?.files?.root?.searchForFolder(WhitelistFolderName)?.searchForFile(WhitelistSourceFilename);
+        var source = comp?.files?.root?.searchForFolder(GamePaths.WhitelistFolder)?.searchForFile(GamePaths.WhitelistSource);
         var remoteIP = source?.data?.Trim();
         if (string.IsNullOrEmpty(remoteIP))
         {
@@ -117,7 +117,7 @@ internal static partial class HackEngine
     /// <param name="isSelf">是否是被保护的本机（只为回显措辞区分）。</param>
     private static string BypassOne(Computer comp, string playerIP, bool isSelf)
     {
-        var folder = comp?.files?.root?.searchForFolder(WhitelistFolderName);
+        var folder = comp?.files?.root?.searchForFolder(GamePaths.WhitelistFolder);
         if (folder == null)
         {
             return null;
@@ -127,7 +127,7 @@ internal static partial class HackEngine
         var tag = isSelf ? "" : "on " + comp.name + " ";
 
         // ① 追加（已在名单则不重复写 —— 幂等是硬要求，每轮都会跑）
-        var list = folder.searchForFile(WhitelistListFilename);
+        var list = folder.searchForFile(GamePaths.WhitelistList);
         if (list != null && !AlreadyAllowed(list.data, playerIP))
         {
             list.data += "\n" + playerIP;
@@ -140,7 +140,7 @@ internal static partial class HackEngine
         //    目标机没有 log 夹时 NRE —— 官方 Extension 的节点常常如此。
         //    这里只需要文件消失，不需要游戏的审计记录。
         var dropped = new List<string>();
-        foreach (var name in new[] { WhitelistAuthFilename, WhitelistListFilename })
+        foreach (var name in new[] { GamePaths.WhitelistAuth, GamePaths.WhitelistList })
         {
             var file = folder.searchForFile(name);
             if (file != null)

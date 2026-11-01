@@ -8,7 +8,7 @@ using Pathfinder.Util;
 /// <summary>
 /// 入侵决策逻辑：目标解析、端口状态、提权判定。全部基于 Pathfinder 框架 API。
 /// </summary>
-internal static partial class HackEngine
+internal static class HackEngine
 {
 
     /// <summary>
@@ -116,7 +116,7 @@ internal static partial class HackEngine
         var pool = options.Scope switch
         {
             HackScope.Connected => ConnectedPool(os),
-            HackScope.Network => options.AllNodes ? ConnectableComputers(os) : ReachableComputers(os),
+            HackScope.Network => options.AllNodes ? GraphNavigator.ConnectableComputers(os) : GraphNavigator.ReachableComputers(os),
             _ => options.Targets
                     .Select(id => ComputerLookup.Find(id))
                     .Where(comp => comp != null)
@@ -206,6 +206,6 @@ internal static partial class HackEngine
     /// </summary>
     internal static Computer[] ToolTargets(OS os, bool allNodes)
         => allNodes
-            ? ConnectableComputers(os)
+            ? GraphNavigator.ConnectableComputers(os)
             : [os.connectedComp ?? os.thisComputer];
 }

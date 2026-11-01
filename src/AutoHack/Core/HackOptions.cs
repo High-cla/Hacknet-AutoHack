@@ -82,7 +82,7 @@ internal sealed partial record HackOptions(
     /// <b>缺省开</b>：留下痕迹会让带 <c>tracker="true"</c> 的机器在断开时自动排一个
     /// 脱机追踪（<c>TrackerCompleteSequence.cs:30-47</c>），那是「留痕 = 自杀」。
     /// 要留着痕迹传 <c>keep</c> / <c>nologs</c>。
-    /// 口径与实现见 <see cref="HackEngine.WipeTraces"/>。
+    /// 口径与实现见 <see cref="WipeEngine.WipeTraces"/>。
     /// </summary>
     bool WipeTraces,
     bool UploadMarker,

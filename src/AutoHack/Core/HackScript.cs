@@ -197,7 +197,7 @@ internal sealed class HackScript
                 ActionKind.Connect => true,
                 ActionKind.Disconnect => false,
 
-                // 清痕本身已不依赖连接（HackEngine.WipeTraces 按 folderPath 直取目标
+                // 清痕本身已不依赖连接（WipeEngine.WipeTraces 按 folderPath 直取目标
                 // /log），但脚本里的 'rm' 仍是玩家写下的**意图** —— 他以为它在目标机上
                 // 执行。dc 之后它落在自己机器上，意图与效果不符，仍属该拒的写法。
                 ActionKind.CleanLogs when !connected => throw new FormatException(

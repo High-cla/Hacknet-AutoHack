@@ -19,7 +19,7 @@ using Pathfinder.Port;
 /// 开的正是自己那个端口，与 <c>PortExploits.cracks</c> 的键逐一对应。
 /// 而 Pathfinder 的 <c>OpenPortPrefix</c> 直接拿<b>调用方传入的原始参数</b>匹配
 /// <c>Record.OriginalPortNumber</c> 后 <c>return false</c>
-/// （ComputerExtensions.cs:184-197），故它与 <c>HackEngine.OpenPort</c> 落在同一个
+/// （ComputerExtensions.cs:184-197），故它与 <c>PortEngine.OpenPort</c> 落在同一个
 /// <c>PortState.Cracked</c> 上。
 /// <b>于是「动画跑完端口才开」不需要造机制 —— 调用方只要不再提前写。</b>
 /// <c>unbreakable</c> 随机过显示端口号也不影响（匹配的是原始终端口号）。
@@ -285,7 +285,7 @@ internal static class NativeExes
         var opened = false;
         if (!IsOpen(pending.Target, pending.Port))
         {
-            HackEngine.OpenPort(pending.Target, pending.Port, os.thisComputer?.ip);
+            PortEngine.OpenPort(pending.Target, pending.Port, os.thisComputer?.ip);
             opened = true;
         }
 
@@ -300,7 +300,7 @@ internal static class NativeExes
     ///
     /// <b>回传 bool 而非时长（v1.33.3 起）。</b>端口不再由调用方提前写 —— 交给动画自己的
     /// <c>Completed()</c>（那 9 个 exe 各自 <c>openPort(&lt;自己的原始终端口号&gt;, ip)</c>，
-    /// 与 <see cref="HackEngine.OpenPort"/> 落在同一个 <c>PortState.Cracked</c> 上，
+    /// 与 <see cref="PortEngine.OpenPort"/> 落在同一个 <c>PortState.Cracked</c> 上，
     /// 见类注释）。故调用方只需要知道一件事：<b>这次有没有动画可等</b>。
     ///
     /// <b>命令回显由本方法代理。</b><paramref name="echo"/> 是「这个动画要回显的那行终端命令」，
@@ -436,7 +436,7 @@ internal static class NativeExes
 
             if (!IsOpen(run.Target, run.Port))
             {
-                HackEngine.OpenPort(run.Target, run.Port, os.thisComputer?.ip);
+                PortEngine.OpenPort(run.Target, run.Port, os.thisComputer?.ip);
             }
 
             Live.RemoveAt(i);
@@ -501,7 +501,7 @@ internal static class NativeExes
     /// 补开（见 <see cref="Flush"/>），补完这里也就返回 true。
     ///
     /// 被截断、被丢弃、或本来就没有程序的端口，调用方已用
-    /// <see cref="HackEngine.OpenPort"/> 直接开掉，故不在等待名单里。
+    /// <see cref="PortEngine.OpenPort"/> 直接开掉，故不在等待名单里。
     /// </summary>
     internal static bool Settled(Computer target) => InFlight(target) == 0;
 
@@ -509,7 +509,7 @@ internal static class NativeExes
     /// 该台目标此刻<b>还在路上</b>的端口数 —— 已经交给动画、但动画尚未开出来的那些。
     ///
     /// <see cref="Settled"/> 就建在它上面（<c>InFlight(target) == 0</c>），故判据只有这一份。
-    /// 给 <c>HackEngine.PortQuotaMet</c> 的第二参用（v1.40.0）：
+    /// 给 <c>PortEngine.PortQuotaMet</c> 的第二参用（v1.40.0）：
     /// 演出模式下端口由动画的 <c>Completed()</c> 去开、端口步却不等动画，故算门槛时
     /// 必须把这批算作已破，否则判据恒假、整台可破端口全排上动画。
     /// </summary>
@@ -543,9 +543,9 @@ internal static class NativeExes
 
     /// <summary>
     /// 该端口此刻是不是已破解。<b>按协议名现查端口表</b>，不用 <see cref="PortView.Cracked"/> ——
-    /// 那是 <c>HackEngine.Ports</c> 在构建步骤时拍的快照，之后动画把端口开了它也不会变。
+    /// 那是 <c>PortEngine.Ports</c> 在构建步骤时拍的快照，之后动画把端口开了它也不会变。
     ///
-    /// 查不到该协议时返回 true（当作「没有可等的」）：那种端口 <c>HackEngine.OpenPort</c>
+    /// 查不到该协议时返回 true（当作「没有可等的」）：那种端口 <c>PortEngine.OpenPort</c>
     /// 也写不进去，等下去只会卡住。
     /// </summary>
     private static bool IsOpen(Computer target, PortView port)
@@ -630,7 +630,7 @@ internal static class NativeExes
 
             if (!IsOpen(run.Target, run.Port))
             {
-                HackEngine.OpenPort(run.Target, run.Port, ip);
+                PortEngine.OpenPort(run.Target, run.Port, ip);
                 opened++;
             }
 
@@ -661,14 +661,14 @@ internal static class NativeExes
     /// 那时入侵的端口步早已跑完，步骤层的任何清理都够不着。只有泵这里能覆盖。
     /// 构造期点火的那三个则在入队当帧就被扑掉。
     ///
-    /// <b>成本为零</b>：未激活时 <see cref="HackEngine.KillTrace"/> 直接返回 false
+    /// <b>成本为零</b>：未激活时 <see cref="Counterplay.KillTrace"/> 直接返回 false
     /// （<c>traceTracker</c> 非 <c>active</c>，TraceTracker.cs:116-120 只置两个字段）。
     /// 队列非空时逐帧调用，不会输出任何东西。
     /// </summary>
     private static void KillTrace(OS os)
     {
         // 不报数：这是每帧都可能发生的维护动作，写终端就是刷屏。
-        HackEngine.KillTrace(os);
+        Counterplay.KillTrace(os);
     }
 
     /// <summary>丢弃所有待播动画，并把「出现次数」清零。换 OS（回主菜单再进档）时调用 ——

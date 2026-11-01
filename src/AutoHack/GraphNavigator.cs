@@ -1,13 +1,13 @@
-// HackEngine.Graph.cs —— 网络图遍历：可达闭包、广度优先展开、揭图。
+// GraphNavigator.cs —— 网络图遍历：可达闭包、广度优先展开、揭图。
 //
-// HackEngine 的分部实现；类型声明、字段与其余职责见 HackEngine.cs。
+// 由 HackEngine 分部拆出（v1.45.0 审计 P1-1）：本文件即完整类型，不含其他职责。
 namespace AutoHack;
 
 using Hacknet;
 using Pathfinder.Port;
 using Pathfinder.Util;
 
-internal static partial class HackEngine
+internal static class GraphNavigator
 {
     /// <summary>
     /// 广度优先：从玩家机与已发现的节点出发，沿 <c>Computer.links</c> 连线展开可达的服务器。

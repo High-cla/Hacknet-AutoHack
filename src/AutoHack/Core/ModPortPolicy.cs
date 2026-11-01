@@ -4,7 +4,7 @@ namespace AutoHack.Core;
 /// <summary>
 /// 「模组端口」白名单：允许自动入侵去开的、由其它插件注册的自定义端口协议。
 ///
-/// <b>为什么需要手动表。</b><c>HackEngine.CrackablePorts</c> 的判据是
+/// <b>为什么需要手动表。</b><c>TargetComposer.Crackable</c> 的判据是
 /// <c>PortExploits.cracks.ContainsKey(codePort)</c>，而 <c>cracks</c> 只含游戏原生的
 /// 36 个端口（<c>PortExploits.cs:51-214</c>）。workshop 模组注册的 16 个端口
 /// （LunarOS 3 / SRPortToolkit 8 / ZeroDayToolKit 5）一个都不在其中，且<b>没有任何模组
@@ -18,7 +18,7 @@ namespace AutoHack.Core;
 /// 端口清单不能自动变成「允许开」—— 这些端口是各模组的剧情拼图，提前开等于替玩家跳过解谜。
 ///
 /// <b>手动表只需要回答「允许开哪些协议」</b>，不需要回答「哪台机器有哪个端口」——
-/// 后者由机器的端口表直接给出（见 <c>HackEngine.Ports</c>）。
+/// 后者由机器的端口表直接给出（见 <c>PortEngine.Ports</c>）。
 ///
 /// <b>默认空 = 完全 opt-in。</b>命令行 <c>modports=mqtt,ntp</c> 逐协议累加；不写则一个都不开，
 /// 行为与本特性不存在时逐位相同。

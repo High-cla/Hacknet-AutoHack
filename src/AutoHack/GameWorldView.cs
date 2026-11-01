@@ -28,7 +28,7 @@ internal sealed class GameWorldView : IWorldView
     public string ConnectedIp => _os?.connectedComp?.ip;
 
     /// <summary>全表已破端口数（与 porthack 门槛同一份数据）。</summary>
-    public int OpenPortCount(string targetIp) => HackEngine.OpenPortCount(Find(targetIp));
+    public int OpenPortCount(string targetIp) => PortEngine.OpenPortCount(Find(targetIp));
 
     /// <summary>该目标是否已被玩家拿下（<c>adminIP</c> 指向玩家）。</summary>
     public bool IsOwned(string targetIp) => HackEngine.IsOwned(Find(targetIp), _os);
@@ -47,20 +47,22 @@ internal sealed class GameWorldView : IWorldView
             return null;
         }
 
-        var ports = HackEngine.CrackablePorts(comp, options.ModPorts);
-        return new TargetView(
+        // 判据在 Core（<see cref="TargetComposer"/>），这里只读字段与端口清单 ——
+        // 唯一无法离线测的部分被压到「纯搬运」，见该类的注释（v1.45.0 审计 P0-3）。
+        return TargetComposer.Compose(
             comp.ip,
             comp.name,
             HackEngine.IsOwned(comp, _os),
             HackEngine.IsEosDevice(comp),
             comp.hasProxy,
-            HackEngine.ProxyActive(comp),
+            PortEngine.ProxyActive(comp),
             comp.firewall != null,
             comp.firewall?.solved ?? false,
-            HackEngine.HasWhitelist(comp),
+            WhitelistGate.HasWhitelist(comp),
             comp.portsNeededForCrack,
-            HackEngine.OpenPortCount(comp),
-            ports);
+            PortEngine.Ports(comp),
+            HasCrackProgram,
+            options.ModPorts);
     }
 
     /// <summary>批量素材化（保持输入顺序）。</summary>
@@ -78,6 +80,12 @@ internal sealed class GameWorldView : IWorldView
 
         return views;
     }
+
+    /// <summary>
+    /// 原生破解程序表查询（<c>PortExploits.cracks</c>）。缓存成委托：每台目标素材化都会用到，
+    /// 而方法组转换每次都会新建一个委托实例。
+    /// </summary>
+    private static readonly Func<int, bool> HasCrackProgram = PortEngine.HasCrackProgram;
 
     private Computer Find(string ip)
     {

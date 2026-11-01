@@ -76,7 +76,7 @@ internal sealed partial class HackRun
         // 此前只在连着目标时回显，理由是「未连接时 Programs.probe 的目标是
         // os.connectedComp ?? os.thisComputer（Programs.cs:1387），回显是假命令」。
         // 那个顾虑对**游戏原语**成立，对本步不成立：端口报告取自目标对象本身
-        // （HackEngine.ProbeReport），不看连接 —— 侦察确实发生了，就该看得见。
+        // （PortEngine.ProbeReport），不看连接 —— 侦察确实发生了，就该看得见。
         // 缺了它，玩家只看到端口被破，看不到在探什么。
         Echo(os, step.Echo ?? HackCommands.Probe);
         // 端口报告**无条件**打（v1.34.0 修正）。
@@ -86,7 +86,7 @@ internal sealed partial class HackRun
         // 挂进 RAM 面板，而 probe 报告是**侦察结果**（目标开了哪些端口、
         // 要破几个才够提权门槛），属于战果本身，不是过程演出。
         // 没有它，noshow 下玩家只能看到一串 sshcrack，看不到在打什么。
-        foreach (var line in HackEngine.ProbeReport(target))
+        foreach (var line in PortEngine.ProbeReport(target))
         {
             os.write(line);
         }
@@ -100,7 +100,7 @@ internal sealed partial class HackRun
     private void ApplyOpenPort(OS os, GameAction step, Computer target)
     {
         // 端口交给动画去开（v1.33.3）：那 9 个 exe 各自在 Completed() 里调
-        // openPort(<自己的原始终端口号>, ip)，与这里调 HackEngine.OpenPort 落在
+        // openPort(<自己的原始终端口号>, ip)，与这里调 PortEngine.OpenPort 落在
         // 同一个 PortState.Cracked 上（ComputerExtensions.cs:184-197 的 Prefix
         // 直接拿调用方传入的原始端口号匹配 Record.OriginalPortNumber）。
         // 故「动画跑完端口才开」不需要造机制 —— 只要不再提前写。
@@ -112,14 +112,14 @@ internal sealed partial class HackRun
         // Show 返回 false 的每一种情形（未连接 / 已控 / 该端口没有可安全演出的程序，
         // 实测 73/642 / 队列满被丢弃）都走下面这一支：立即回显 + 补开端口 ——
         // 端口不补则永远不开，命令不补则终端与战果对不上。
-        var command = HackEngine.CrackCommand(step.Port);
+        var command = PortEngine.CrackCommand(step.Port);
         if (Options.ShowExes && NativeExes.Show(os, target, step.Port, () => Echo(os, command)))
         {
             return;
         }
 
         Echo(os, command);
-        HackEngine.OpenPort(target, step.Port, os.thisComputer.ip);
+        PortEngine.OpenPort(target, step.Port, os.thisComputer.ip);
     }
 
     /// <summary>解目标防火墙：回显 solve 后无条件解除。</summary>
@@ -154,13 +154,13 @@ internal sealed partial class HackRun
         // 13 台普通机器破满端口也差 1~6 个），留一个「默认开、关了就打不下」
         // 的开关，等于给唯一出路配了个自毁按钮。
         //
-        if (HackEngine.CanEscalate(target))
+        if (PortEngine.CanEscalate(target))
         {
             target.giveAdmin(os.thisComputer.ip);
         }
         else
         {
-            HackEngine.ForceEscalate(target, os);
+            PortEngine.ForceEscalate(target, os);
         }
 
         // 补上游戏自己的收尾文案（用户定，v1.40.0）：PortHackExe.Completed() 写完
@@ -195,7 +195,7 @@ internal sealed partial class HackRun
 
         // 这一步不是终端指令（未连接状态下 append 的「当前目录」是玩家自己的
         // 文件系统），故不发 Echo —— 它自己写 /Whitelist/list.txt 并重连。
-        if (HackEngine.BypassWhitelist(os, target, os.thisComputer.ip) == null)
+        if (WhitelistGate.BypassWhitelist(os, target, os.thisComputer.ip) == null)
         {
             return;
         }
@@ -225,11 +225,11 @@ internal sealed partial class HackRun
         // 不回显 rm，也不报统计（v1.34.0，用户定：终端里只要具体的命令行输出）。
         //
         // 不回显 rm：这一步已不是「敲一条终端命令」，而是按 IP 逐条点名删日志条目
-        // （见 HackEngine.WipeTraces）。回显 rm log/* 反而误导 —— 玩家会以为整个
+        // （见 WipeEngine.WipeTraces）。回显 rm log/* 反而误导 —— 玩家会以为整个
         // /log 被清空了，实际只删了提到自己 IP 的那些。
         //
         // 不需要连接：目标机与目录都由参数给定，不读 os.connectedComp。
-        HackEngine.WipeTraces(target, os.thisComputer.ip);
+        WipeEngine.WipeTraces(target, os.thisComputer.ip);
     }
 
     /// <summary>断开连接：由 Leave 解除反扑、回显并静默断开；未连接时是空操作。</summary>
@@ -245,8 +245,8 @@ internal sealed partial class HackRun
 
         // 炸弹一起清（v1.41.0，用户定）：这一步是流程里唯一的止血点，
         // 追踪链若在中途把 forkbomb 送进来，不在这里杀就要等收尾 ——
-        // 而它会先把玩家机器吃掉再崩掉（见 HackEngine.KillForkBombs）。
-        HackEngine.KillForkBombs(os);
+        // 而它会先把玩家机器吃掉再崩掉（见 Counterplay.KillForkBombs）。
+        Counterplay.KillForkBombs(os);
     }
 
     /// <summary>
@@ -272,8 +272,8 @@ internal sealed partial class HackRun
         Echo(os, command);
 
         // 静默断开的全部理由（为什么静音、为什么多人不静音）见
-        // <see cref="HackEngine.SilentDisconnect"/> —— 面板的 drop 工具走同一条。
-        HackEngine.SilentDisconnect(os);
+        // <see cref="Counterplay.SilentDisconnect"/> —— 面板的 drop 工具走同一条。
+        Counterplay.SilentDisconnect(os);
     }
 
     /// <summary>
@@ -283,25 +283,25 @@ internal sealed partial class HackRun
     /// </summary>
     private static void KillTrace(OS os)
     {
-        HackEngine.KillTrace(os);
+        Counterplay.KillTrace(os);
     }
 
     /// <summary>解除目标的延迟反扑（静默 —— 这不是终端指令，也不报状态）。</summary>
     private static void Neutralize(OS os, Computer target)
     {
-        HackEngine.SuppressCounterattack(target);
+        Counterplay.SuppressCounterattack(target);
     }
 
     /// <summary>解目标防火墙（静默 —— 指令本身已由 ApplySolveFirewall 回显）。</summary>
     private static void SolveFirewall(OS os, Computer target)
     {
-        HackEngine.SolveFirewall(target, os);
+        PortEngine.SolveFirewall(target, os);
     }
 
     /// <summary>解除跳板（静默 —— 这不是终端指令）。</summary>
     private static void BypassProxy(OS os, Computer target)
     {
-        HackEngine.BypassProxy(target);
+        Counterplay.BypassProxy(target);
     }
 
     /// <summary>

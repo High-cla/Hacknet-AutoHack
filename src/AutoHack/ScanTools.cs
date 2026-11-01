@@ -13,9 +13,9 @@ using Hacknet;
 ///    而 <c>&lt;link&gt;</c> 与 <c>&lt;dlink&gt;</c> 都只写自己那一侧的出边
 ///    （ComputerLoader.cs:344-373 —— dlink 只是延迟解析，方向不变），于是
 ///    「别的机器指向当前节点」的入边永远扫不到。闭包口径复用
-///    <see cref="HackEngine.ReachableFrom"/>（同一套 BFS，只是<b>单源</b>），
+///    <see cref="GraphNavigator.ReachableFrom"/>（同一套 BFS，只是<b>单源</b>），
 ///    含 EOS 设备那批 <c>attatchedDeviceIDs</c> 反向补边，不另立第二套遍历。
-///    <b>必须单源</b>：多源口径（<see cref="HackEngine.ReachableComputers"/>，供 <c>run</c>）
+///    <b>必须单源</b>：多源口径（<see cref="GraphNavigator.ReachableComputers"/>，供 <c>run</c>）
 ///    以玩家机 + 全部 visibleNodes 播种，取到的是所有已发现分量的并集，不是一张分量。</item>
 /// <item>不睡。原生逐条 <c>Thread.Sleep(400)</c>（Programs.cs:1291），扫 30 台就卡死
 ///    12 秒，而这是在游戏线程上。发现动作本身只是内存写，不需要节流。</item>
@@ -27,9 +27,9 @@ using Hacknet;
 /// </list>
 ///
 /// <para><b>全表口径与「连线」无关。</b>它逐个标记 <c>os.netMap.nodes</c> 全表，
-/// 走 <see cref="HackEngine.RevealWholeMap"/> —— 与 <c>autohack run allnodes</c> 的
+/// 走 <see cref="GraphNavigator.RevealWholeMap"/> —— 与 <c>autohack run allnodes</c> 的
 /// 「先揭图后入侵」是同一份实现，不另立第二套。语义见
-/// <see cref="HackEngine.ConnectableComputers"/>：<c>visibleNodes</c> 只是原版 <c>scan</c>
+/// <see cref="GraphNavigator.ConnectableComputers"/>：<c>visibleNodes</c> 只是原版 <c>scan</c>
 /// 维护的「已发现」展示标记，不是连接许可，<c>Programs.connect</c> 全程不检查它。</para>
 ///
 /// <para><b>全表口径不需要已连接</b>，分量口径需要（没连接就没有「当前节点」）。</para>
@@ -50,7 +50,7 @@ internal static class ScanTools
 
         if (allNodes)
         {
-            var marked = HackEngine.RevealWholeMap(os);
+            var marked = GraphNavigator.RevealWholeMap(os);
             os.write("[autohack] scan: whole map :: " + marked + " node(s) revealed.");
             return;
         }
@@ -72,7 +72,7 @@ internal static class ScanTools
         }
 
         var before = os.netMap.visibleNodes?.Count ?? 0;
-        var reachable = HackEngine.ReachableFrom(os, origin);
+        var reachable = GraphNavigator.ReachableFrom(os, origin);
         var added = (os.netMap.visibleNodes?.Count ?? 0) - before;
 
         os.write("[autohack] scan: " + origin.name

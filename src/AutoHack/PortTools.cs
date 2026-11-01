@@ -9,7 +9,7 @@ using Hacknet;
 /// 协议名、显示端口、显示名、**原始端口号**，以及破解状态与「是不是模组端口」。
 ///
 /// <b>补的是哪一个缺口</b>：终端里唯一能看到端口的地方是 <c>probe</c>，而它只打
-/// <c>Port#: {PortNumber} - {DisplayName}</c>（见 <see cref="HackEngine.ProbeReport"/>
+/// <c>Port#: {PortNumber} - {DisplayName}</c>（见 <see cref="PortEngine.ProbeReport"/>
 /// 与 Pathfinder 的 <c>Programs.probe</c> 替换），**没有协议名、没有原始端口号、没有状态**。
 /// 而这三样恰恰是玩家判断「还剩几个端口没破」「`modports=` 该写哪个协议名」的全部依据 ——
 /// 后者按**协议名**匹配（见 <see cref="ModPortPolicy"/>），此前只能靠反编译模组才知道。
@@ -35,7 +35,7 @@ internal static class PortTools
             return;
         }
 
-        var ports = HackEngine.Ports(target);
+        var ports = PortEngine.Ports(target);
         if (ports.Count == 0)
         {
             os.write("[autohack] ports: " + target.ip + " has no port table.");
@@ -56,7 +56,7 @@ internal static class PortTools
 
             // 「原生还是模组」是游戏数据的事实（PortExploits.cracks 只含原生 36 个端口，
             // 模组注册的一个都不在其中），与白名单无关，故这里如实分开报。
-            var isNative = HackEngine.HasCrackProgram(port.CodePort);
+            var isNative = PortEngine.HasCrackProgram(port.CodePort);
             if (isNative)
             {
                 native++;
@@ -73,14 +73,14 @@ internal static class PortTools
         var mods = new List<string>();
         foreach (var port in ports)
         {
-            // 判据与 HackEngine.CrackablePorts 逐条对齐，否则会给出**点了没用的**建议：
+            // 判据与 TargetComposer.Crackable 逐条对齐，否则会给出**点了没用的**建议：
             // · 有原生破解程序的端口本来就参与自动入侵，写进 modports= 是多余的
             //   （白名单只对「原生表里没有」的协议起作用）；
             // · CodePort <= 0 的端口（ZeroDayToolKit 的 backdoor 缺省就是 0）
-            //   在 CrackablePorts 里被显式排除 —— 端口号 0 开了也匹配不到任何东西。
+            //   在 TargetComposer.Crackable 里被显式排除 —— 端口号 0 开了也匹配不到任何东西。
             // 去重按协议名：同一协议在一台机器上只出现一次，但防御性挡一下。
             if (port.CodePort > 0
-                && !HackEngine.HasCrackProgram(port.CodePort)
+                && !PortEngine.HasCrackProgram(port.CodePort)
                 && !mods.Contains(port.Protocol))
             {
                 mods.Add(port.Protocol);

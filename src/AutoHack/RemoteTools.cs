@@ -158,7 +158,7 @@ internal static class RemoteTools
     /// （游戏版每文件 200ms×3~26，Programs.cs:1017）。
     /// 未连接时作用于玩家自己的机器（与 <c>rm</c> 的作用域规则一致）。
     ///
-    /// 动作与清痕共用 <see cref="HackEngine.RemoveFiles"/>：同一个「删光一个目录」
+    /// 动作与清痕共用 <see cref="WipeEngine.RemoveFiles"/>：同一个「删光一个目录」
     /// 的动作只该有一份实现。本方法此前自带一份、且没有兜底，于是
     /// <c>deleteFile</c> 权限门禁一拒就静默什么都不删，表现为「按了没反应」。
     /// </summary>
@@ -188,7 +188,7 @@ internal static class RemoteTools
         }
 
         var before = dir.files.Count;
-        var removed = HackEngine.RemoveFiles(comp, os.thisComputer.ip, dir, path);
+        var removed = WipeEngine.RemoveFiles(comp, os.thisComputer.ip, dir, path);
         var left = dir.files.Count;
 
         // 如实复核，不看返回值：RemoveFiles 的兜底保证「文件必被清空」，
@@ -217,9 +217,9 @@ internal static class RemoteTools
     ///
     /// 边界（如实记录，不假装更强）：节点仍在 <c>map.nodes</c> 里，只是不在
     /// <c>visibleNodes</c>。默认口径 <c>ReachableComputers</c> 以 visibleNodes 为种子
-    /// 沿 links 展开（HackEngine.cs:490-498），故摘掉后**默认扫描再也够不着它**；
+    /// 沿 links 展开（GraphNavigator.cs），故摘掉后**默认扫描再也够不着它**；
     /// 但显式 <c>allnodes</c> 走 <c>ConnectableComputers</c>，那是刻意的全表口径
-    /// （HackEngine.cs:600-602 记录了这个设计），仍会看到它。
+    /// （GraphNavigator.cs 记录了这个设计），仍会看到它。
     ///
     /// 不设 <c>comp.disabled</c>：<c>NetworkMap.Update</c> 每帧对 disabled 节点调
     /// <c>bootupTick</c>（NetworkMap.cs:126-131），而 <c>bootTimer</c> 缺省 0，
@@ -246,7 +246,7 @@ internal static class RemoteTools
         var ip = comp.ip;
 
         // 先断开：连着的时候摘节点，游戏自己的状态机（追踪、延迟反扑）还在跑。
-        HackEngine.SilentDisconnect(os);
+        Counterplay.SilentDisconnect(os);
 
         if (index < 0)
         {

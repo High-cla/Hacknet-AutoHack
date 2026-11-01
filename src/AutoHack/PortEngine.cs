@@ -1,6 +1,6 @@
-// HackEngine.Ports.cs —— 端口状态、破解命令与提权判定。
+// PortEngine.Ports.cs —— 端口状态、破解命令与提权判定。
 //
-// HackEngine 的分部实现；类型声明、字段与其余职责见 HackEngine.cs。
+// 由 HackEngine 分部拆出（v1.45.0 审计 P1-1）：本文件即完整类型，不含其他职责。
 namespace AutoHack;
 
 using AutoHack.Core;
@@ -9,27 +9,22 @@ using Hacknet;
 using Pathfinder.Port;
 using Pathfinder.Util;
 
-internal static partial class HackEngine
+internal static class PortEngine
 {
-    private const string LogFolderName = "log";
 
     /// <summary>白名单 daemon 的文件夹名（WhitelistConnectionDaemon.cs:26/29）。</summary>
-    private const string WhitelistFolderName = "Whitelist";
 
     /// <summary>白名单文件名（WhitelistConnectionDaemon.ListFilename，:12）。</summary>
-    private const string WhitelistListFilename = "list.txt";
 
     /// <summary>
     /// 认证器文件名（WhitelistConnectionDaemon.SystemFilename，:10）。
     /// 它缺失即 <c>IPCanPassWhitelist</c> 无条件放行（:142-145）。
     /// </summary>
-    private const string WhitelistAuthFilename = "authenticator.dll";
 
     /// <summary>
     /// 认证源文件名（WhitelistConnectionDaemon.SourceFilename，:14）。
     /// 其内容 = 裁决本机白名单的那台机器的 IP（loadInit，:62-65）。
     /// </summary>
-    private const string WhitelistSourceFilename = "source.txt";
 
     /// <summary>
     /// 读取目标的端口表。
@@ -109,46 +104,8 @@ internal static partial class HackEngine
         return fallback;
     }
 
-    /// <summary>
-    /// 该机器上可自动攻破的端口 = 原生有破解程序的（<c>PortExploits.cracks</c>，不硬编码）
-    /// ∪ 玩家在 <c>modports=</c> 里显式点名的模组协议。
-    ///
-    /// 后一半需要手动表：<c>cracks</c> 只含原生 36 个端口，workshop 注册的 16 个一个都不在其中，
-    /// 且没有任何模组往 <c>cracks</c> 写过。理由与取舍见 <see cref="ModPortPolicy"/>。
-    /// </summary>
-    /// <param name="modPorts">允许开模组端口的协议名；<c>null</c>/空 = 一个都不开（缺省）。</param>
-    internal static IReadOnlyList<PortView> CrackablePorts(Computer comp, IReadOnlyCollection<string> modPorts = null)
-    {
-        var ports = Ports(comp);
-        if (ports.Count == 0)
-        {
-            return Array.Empty<PortView>();
-        }
-
-        var found = new List<PortView>(ports.Count);
-        var seen = new HashSet<int>();
-        foreach (var port in ports)
-        {
-            // CodePort <= 0 一律排除：ZeroDayToolKit 注册的 "backdoor" 缺省端口就是 0
-            // （ZeroDayToolKit.decompiled.cs:148），端口号 0 在游戏里无意义，开了也匹配不到任何东西。
-            if (port.Cracked || port.CodePort <= 0)
-            {
-                continue;
-            }
-
-            if (!HasCrackProgram(port.CodePort) && !ModPortPolicy.Allows(modPorts, port.Protocol))
-            {
-                continue;
-            }
-
-            if (seen.Add(port.CodePort))
-            {
-                found.Add(port);
-            }
-        }
-
-        return found;
-    }
+    // 「哪些端口可破」的判据已移入 Core（TargetComposer.Crackable，v1.45.0 审计 P0-3）——
+    // 它在裸进程里可测，而这里的方法要引用 Computer，测不了。
 
     /// <summary>
     /// 跳板是否处于激活状态。激活期间，所有 <c>needsProxyAccess</c> 的破解程序都会被

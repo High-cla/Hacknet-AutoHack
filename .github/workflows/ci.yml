@@ -1,0 +1,31 @@
+name: ci
+
+# 只有核心层可以在这里跑：插件工程编 net472，且六个引用程序集全部来自
+# 本机游戏目录（<HacknetDir> = D:\steam\...\Hacknet\）—— 干净检出上没有它们，
+# 无法构建。故本工作流编的是 tests/core-tests（net10，直接链接 src/AutoHack/Core
+# 源码，零 NuGet、零项目引用），它同时充当「核心层不得引用游戏类型」的编译期守卫。
+on:
+  push:
+  pull_request:
+
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      # 架构守卫：Core 一旦 using Hacknet / Pathfinder，就再也不能在裸进程里测。
+      # 这条用 grep 而不是 rg —— 不假设 runner 装了什么。
+      - name: core stays game-free
+        run: |
+          if grep -rnE '^\s*using (Hacknet|Pathfinder)' src/AutoHack/Core; then
+            echo '::error::src/AutoHack/Core 引用了游戏/框架类型，核心层必须保持零游戏引用'
+            exit 1
+          fi
+
+      - name: build + run core tests
+        run: dotnet run --project tests/core-tests -c Release -warnaserror

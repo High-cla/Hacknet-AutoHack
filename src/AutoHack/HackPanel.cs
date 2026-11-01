@@ -349,19 +349,19 @@ internal static partial class HackPanel
 
         // ── 标题栏 ──────────────────────────────────────────────
         var status = Status(run, c);
-        Fill(new Rectangle(px + 12, py + 15, 6, 6), status.Color);
-        DrawText(Loc.T("AUTOHACK"), px + 24, py + 9, c.Text, 1.3f);
+        PanelCanvas.Fill(new Rectangle(px + 12, py + 15, 6, 6), status.Color);
+        PanelCanvas.DrawText(Loc.T("AUTOHACK"), px + 24, py + 9, c.Text, 1.3f);
 
         if (state.Collapsed)
         {
-            DrawText(status.Text, px + 134, py + 10, status.Color, 0.9f);
+            PanelCanvas.DrawText(status.Text, px + 134, py + 10, status.Color, 0.9f);
 
-            if (Glyph(state.IdBase + 1, new Rectangle(right - 44, py + 5, 20, 20), "v", c.Accent, c))
+            if (PanelCanvas.Glyph(state.IdBase + 1, new Rectangle(right - 44, py + 5, 20, 20), "v", c.Accent, c))
             {
                 state.Collapsed = false;
             }
 
-            if (Glyph(state.IdBase + 2, new Rectangle(right - 20, py + 5, 20, 20), "x", c.Bad, c))
+            if (PanelCanvas.Glyph(state.IdBase + 2, new Rectangle(right - 20, py + 5, 20, 20), "x", c.Bad, c))
             {
                 action = PanelAction.Close;
             }
@@ -369,14 +369,14 @@ internal static partial class HackPanel
             return action;
         }
 
-        DrawText(status.Text, right - 64, py + 10, status.Color, 0.9f);
+        PanelCanvas.DrawText(status.Text, right - 64, py + 10, status.Color, 0.9f);
 
-        if (Glyph(state.IdBase + 1, new Rectangle(right - 20, py + 7, 20, 20), "-", c.Dim, c))
+        if (PanelCanvas.Glyph(state.IdBase + 1, new Rectangle(right - 20, py + 7, 20, 20), "-", c.Dim, c))
         {
             state.Collapsed = true;
         }
 
-        if (Glyph(state.IdBase + 2, new Rectangle(right - 44, py + 7, 20, 20), "x", c.Bad, c))
+        if (PanelCanvas.Glyph(state.IdBase + 2, new Rectangle(right - 44, py + 7, 20, 20), "x", c.Bad, c))
         {
             action = PanelAction.Close;
         }
@@ -405,7 +405,7 @@ internal static partial class HackPanel
                 action = PanelAction.Start;
             }
         }
-        else if (PrimaryButton(state.IdBase + 6, new Rectangle(left, y, ContentWidth, ButtonHeight), Loc.T("RUN"), c.Accent, c.Ink))
+        else if (PanelCanvas.PrimaryButton(state.IdBase + 6, new Rectangle(left, y, ContentWidth, ButtonHeight), Loc.T("RUN"), c.Accent, c.Ink))
         {
             action = PanelAction.Start;
         }
@@ -429,16 +429,16 @@ internal static partial class HackPanel
     {
         var half = ContentWidth / 2;
 
-        Section(Loc.T("SCOPE"), left, y, c);
+        PanelCanvas.Section(Loc.T("SCOPE"), left, y, c);
         y += SectionHeight;
 
-        if (Segment(state.IdBase + 10, new Rectangle(left, y, half - 2, SegmentHeight),
+        if (PanelCanvas.Segment(state.IdBase + 10, new Rectangle(left, y, half - 2, SegmentHeight),
                 state.Scope == HackScope.Network, Loc.T("NETWORK SWEEP"), c))
         {
             state.Scope = HackScope.Network;
         }
 
-        if (Segment(state.IdBase + 11, new Rectangle(left + half + 2, y, ContentWidth - half - 2, SegmentHeight),
+        if (PanelCanvas.Segment(state.IdBase + 11, new Rectangle(left + half + 2, y, ContentWidth - half - 2, SegmentHeight),
                 state.Scope == HackScope.Connected, Loc.T("CURRENT NODE"), c))
         {
             state.Scope = HackScope.Connected;
@@ -453,33 +453,33 @@ internal static partial class HackPanel
     /// </summary>
     private static void DrawCheckboxes(HackPanelState state, int left, ref int y, Palette c)
     {
-        state.UseCredentials = Check(state.IdBase + 16, left, y, ColumnWidth, state.UseCredentials, Loc.T("use known creds"), c);
-        state.AllNodes = Check(state.IdBase + 17, left + ColumnWidth + 8, y, ColumnWidth, state.AllNodes, Loc.T("whole map"), c);
+        state.UseCredentials = PanelCanvas.Check(state.IdBase + 16, left, y, ColumnWidth, state.UseCredentials, Loc.T("use known creds"), c);
+        state.AllNodes = PanelCanvas.Check(state.IdBase + 17, left + ColumnWidth + 8, y, ColumnWidth, state.AllNodes, Loc.T("whole map"), c);
         y += CheckRowHeight;
 
-        state.SkipOwned = Check(state.IdBase + 18, left, y, ColumnWidth, state.SkipOwned, Loc.T("skip owned"), c);
-        state.WipeTraces = Check(state.IdBase + 19, left + ColumnWidth + 8, y, ColumnWidth, state.WipeTraces, Loc.T("wipe my traces"), c);
+        state.SkipOwned = PanelCanvas.Check(state.IdBase + 18, left, y, ColumnWidth, state.SkipOwned, Loc.T("skip owned"), c);
+        state.WipeTraces = PanelCanvas.Check(state.IdBase + 19, left + ColumnWidth + 8, y, ColumnWidth, state.WipeTraces, Loc.T("wipe my traces"), c);
         y += CheckRowHeight;
 
-        state.ConnectFirst = Check(state.IdBase + 20, left, y, ColumnWidth, state.ConnectFirst, Loc.T("connect first"), c);
+        state.ConnectFirst = PanelCanvas.Check(state.IdBase + 20, left, y, ColumnWidth, state.ConnectFirst, Loc.T("connect first"), c);
 
         // 这个控件只管断开。清追踪（TraceTracker 倒计时 + TrackersInProgress
         // 脱机追踪；不碰对方 /log）已改为每轮收尾无条件执行，不再由这里控制 ——
         // 理由见 HackPanelState.Disconnect 与 TraceTools 的文档注释；手动即时清除
         // 是独立的 ANTI-TRACE 按钮（v1.41.0，同一次清掉 os.exes 里的 ForkBombExe）。
-        state.Disconnect = Check(state.IdBase + 21, left + ColumnWidth + 8, y, ColumnWidth, state.Disconnect, Loc.T("disconnect when done"), c);
+        state.Disconnect = PanelCanvas.Check(state.IdBase + 21, left + ColumnWidth + 8, y, ColumnWidth, state.Disconnect, Loc.T("disconnect when done"), c);
         y += CheckRowHeight;
 
-        state.UploadMarker = Check(state.IdBase + 22, left, y, ColumnWidth, state.UploadMarker, Loc.T("upload marker"), c);
-        state.ShowExes = Check(state.IdBase + 24, left + ColumnWidth + 8, y, ColumnWidth, state.ShowExes, Loc.T("native exes"), c);
+        state.UploadMarker = PanelCanvas.Check(state.IdBase + 22, left, y, ColumnWidth, state.UploadMarker, Loc.T("upload marker"), c);
+        state.ShowExes = PanelCanvas.Check(state.IdBase + 24, left + ColumnWidth + 8, y, ColumnWidth, state.ShowExes, Loc.T("native exes"), c);
         y += CheckRowHeight;
 
-        state.ResetIP = Check(state.IdBase + 25, left, y, ColumnWidth, state.ResetIP, Loc.T("new IP after run"), c);
-        state.AutoModPorts = Check(state.IdBase + 26, left + ColumnWidth + 8, y, ColumnWidth, state.AutoModPorts, Loc.T("auto mod ports"), c);
+        state.ResetIP = PanelCanvas.Check(state.IdBase + 25, left, y, ColumnWidth, state.ResetIP, Loc.T("new IP after run"), c);
+        state.AutoModPorts = PanelCanvas.Check(state.IdBase + 26, left + ColumnWidth + 8, y, ColumnWidth, state.AutoModPorts, Loc.T("auto mod ports"), c);
         y += CheckRowHeight;
 
         // 诊断计数（v1.45.0 审计 P0-1）：勾上后每 300 帧写一行帧时间分位。
-        state.Diagnostics = Check(state.IdBase + 27, left, y, ColumnWidth, state.Diagnostics, Loc.T("diagnostics"), c);
+        state.Diagnostics = PanelCanvas.Check(state.IdBase + 27, left, y, ColumnWidth, state.Diagnostics, Loc.T("diagnostics"), c);
         y += CheckRowHeight;
 
         // 这里曾有「force escalate」复选框（旧 IdBase + 26），v1.33.2 起常驻 ——
@@ -496,7 +496,7 @@ internal static partial class HackPanel
     /// </summary>
     private static PanelAction DrawTools(HackPanelState state, int left, ref int y, Palette c)
     {
-        Section(Loc.T("TOOLS"), left, y, c);
+        PanelCanvas.Section(Loc.T("TOOLS"), left, y, c);
         var top = y + SectionHeight;
 
         var width = (ContentWidth - ToolGap * (ToolColumns - 1)) / ToolColumns;
@@ -512,7 +512,7 @@ internal static partial class HackPanel
                 width,
                 ToolButtonHeight);
 
-            if (PrimaryButton(state.IdBase + 30 + i, rect, Loc.T(label), danger ? c.Warn : c.Raised, danger ? c.Ink : c.Text))
+            if (PanelCanvas.PrimaryButton(state.IdBase + 30 + i, rect, Loc.T(label), danger ? c.Warn : c.Raised, danger ? c.Ink : c.Text))
             {
                 action = PanelAction.Tool(verb);
             }
@@ -556,17 +556,17 @@ internal static partial class HackPanel
         var right = left + ContentWidth;
         var ratio = run.Total == 0 ? 0f : Math.Min(1f, run.Done / (float)run.Total);
 
-        DrawText(run.Phase ?? Loc.T("ENGAGING"), left, y, c.Accent, 1f);
+        PanelCanvas.DrawText(run.Phase ?? Loc.T("ENGAGING"), left, y, c.Accent, 1f);
         var percent = PercentText((int)(ratio * 100));
-        DrawText(percent, right - Measure(percent, 1f).X, y, c.Text, 1f);
+        PanelCanvas.DrawText(percent, right - PanelCanvas.Measure(percent, 1f).X, y, c.Text, 1f);
         y += PhaseRowHeight;
 
-        Progress(new Rectangle(left, y, ContentWidth, 10), ratio, c.Ok, c);
+        PanelCanvas.Progress(new Rectangle(left, y, ContentWidth, 10), ratio, c.Ok, c);
         y += ProgressRowHeight;
 
-        DrawText(Ellipsize(run.Current, ContentWidth - 76), left, y, c.Text, 1f);
+        PanelCanvas.DrawText(PanelCanvas.Ellipsize(run.Current, ContentWidth - 76), left, y, c.Text, 1f);
         var count = CountText(run.Done, run.Total);
-        DrawText(count, right - Measure(count, 1f).X, y, c.Dim, 1f);
+        PanelCanvas.DrawText(count, right - PanelCanvas.Measure(count, 1f).X, y, c.Dim, 1f);
         y += CurrentRowHeight;
 
         for (var i = 0; i < Math.Min(run.Outcomes.Count, MaxOutcomeRows); i++)
@@ -580,7 +580,7 @@ internal static partial class HackPanel
     {
         var right = left + ContentWidth;
 
-        Section(Loc.LastRun(run.Outcomes.Count), left, y, c);
+        PanelCanvas.Section(Loc.LastRun(run.Outcomes.Count), left, y, c);
         y += SectionHeight;
 
         for (var i = 0; i < Math.Min(run.Outcomes.Count, MaxOutcomeRows); i++)
@@ -591,20 +591,20 @@ internal static partial class HackPanel
 
         if (run.Outcomes.Count > MaxOutcomeRows)
         {
-            DrawText(Loc.More(run.Outcomes.Count - MaxOutcomeRows), left, y, c.Dim, 1f);
+            PanelCanvas.DrawText(Loc.More(run.Outcomes.Count - MaxOutcomeRows), left, y, c.Dim, 1f);
             y += OutcomeRowHeight;
         }
 
         next = y + Gap;
-        return PrimaryButton(state.IdBase + 6, new Rectangle(left, next, ContentWidth, ButtonHeight), Loc.T("RUN AGAIN"), c.Accent, c.Ink);
+        return PanelCanvas.PrimaryButton(state.IdBase + 6, new Rectangle(left, next, ContentWidth, ButtonHeight), Loc.T("RUN AGAIN"), c.Accent, c.Ink);
     }
 
     private static void Outcome(TargetOutcome outcome, int left, int right, int y, Palette c)
     {
-        DrawText(Ellipsize(outcome.Name, ContentWidth - 110), left, y, outcome.Escalated ? c.Ok : c.Warn, 1f);
+        PanelCanvas.DrawText(PanelCanvas.Ellipsize(outcome.Name, ContentWidth - 110), left, y, outcome.Escalated ? c.Ok : c.Warn, 1f);
 
         var stats = Loc.Ports(outcome.Opened, outcome.Total) + (outcome.Escalated ? Loc.AdminTag() : string.Empty);
-        DrawText(stats, right - Measure(stats, 1f).X, y, outcome.Escalated ? c.Ok : c.Dim, 1f);
+        PanelCanvas.DrawText(stats, right - PanelCanvas.Measure(stats, 1f).X, y, outcome.Escalated ? c.Ok : c.Dim, 1f);
     }
 
     // ── 自绘控件 ────────────────────────────────────────────────
@@ -618,7 +618,7 @@ internal static partial class HackPanel
         var x = state.X == int.MinValue ? screen.Right - Width - 18 : state.X;
         var y = state.Y == int.MinValue ? screen.Bottom - height - 18 : state.Y;
 
-        return (ClampInt(x, screen.Left + 4, MaxX(screen)), ClampInt(y, screen.Top + 4, MaxY(screen, height)));
+        return (PanelCanvas.ClampInt(x, screen.Left + 4, MaxX(screen)), PanelCanvas.ClampInt(y, screen.Top + 4, MaxY(screen, height)));
     }
 
     private static int MaxX(Rectangle screen)
@@ -653,79 +653,8 @@ internal static partial class HackPanel
 
     // ── 基础绘制 ────────────────────────────────────────────────
 
-    /// <summary>
-    /// 测量缓存的容量上限，超过即整体清空。
-    ///
-    /// 必须设上限：面板上的标签几乎全是常量串（跨帧重复测量同样的串纯属浪费，正是本缓存要
-    /// 解决的），但运行期还有不断变化的串 —— 进度 "3 / 128"、当前目标名、战果行 —— 它们
-    /// 每帧都产生新键，不设上限字典会随运行时间无界增长。选择整体清空而不是逐条淘汰：
-    /// 绘制路径上不能维护链表或做遍历，丢弃的代价只是下一帧重测少量串。
-    /// </summary>
-    private const int MeasureCacheCapacity = 256;
-
-    /// <summary>
-    /// 同帧内有效的测量缓存：键 = (文本, 缩放)，值 = 已乘缩放的尺寸。
-    ///
-    /// <b>失效条件</b>：<see cref="GuiData.smallfont"/> 的<b>引用</b>变化即整体换一张新字典。
-    /// locale 切换、字体/分辨率重载都会换掉这个 SpriteFont 实例，旧度量随之作废；用引用比较
-    /// 而不是比较字体属性，是因为前者 O(1) 且不会漏掉任何换字体的路径。
-    ///
-    /// <b>线程模型：仅游戏线程</b>。本类的唯一入口是 <c>HackOverlay</c> 的 <c>OS.Draw</c> Postfix，
-    /// 故读写都在游戏线程、无并发。注释里刻意不宣称线程安全：未命中路径是
-    /// <c>cache[key] = size</c> 的<b>原地写入</b>，并非「整体换引用」，宣称并发安全会误导后人。
-    /// （<see cref="ResetMeasureCache"/> 换引用只是为了在容量超限/换字体时让旧字典整体作废，
-    /// 不是为了并发。）
-    /// </summary>
-    private static Dictionary<MeasureKey, Vector2> _measureCache = new Dictionary<MeasureKey, Vector2>(MeasureCacheCapacity);
-
-    /// <summary>建立当前缓存时所用的字体，用于检测 <see cref="GuiData.smallfont"/> 是否换了实例。</summary>
-    private static SpriteFont _measureCacheFont;
-
-    /// <summary>
-    /// 测量缓存的键：文本 + 缩放。
-    ///
-    /// 必须实现 <see cref="IEquatable{T}"/>：不实现的话 <see cref="Dictionary{TKey, TValue}"/>
-    /// 会退回 <see cref="ValueType.Equals(object)"/> —— 反射比较并给每个字段装箱，在每帧的绘制
-    /// 路径上比重新测量还贵。
-    /// </summary>
-    private readonly struct MeasureKey : IEquatable<MeasureKey>
-    {
-        private readonly string _text;
-        private readonly float _scale;
-
-        internal MeasureKey(string text, float scale)
-        {
-            _text = text;
-            _scale = scale;
-        }
-
-        public bool Equals(MeasureKey other)
-            => string.Equals(_text, other._text, StringComparison.Ordinal) && _scale == other._scale;
-
-        public override bool Equals(object obj) => obj is MeasureKey other && Equals(other);
-
-        public override int GetHashCode()
-        {
-            // net472 没有 System.HashCode，手工组合两个字段的哈希。
-            unchecked
-            {
-                return (_text.GetHashCode() * 397) ^ _scale.GetHashCode();
-            }
-        }
-    }
-
-    /// <summary>
-    /// <see cref="Mid"/> 的线程本地暂存缓冲。
-    ///
-    /// 用 <c>[ThreadStatic]</c> 而不是普通静态字段：普通静态缓冲会被并发的调用方互相覆盖
-    /// （写进去的字符还没拷成 string 就被下一方换掉），加锁又要在每帧路径上付同步代价。
-    /// 线程本地让每个线程各持一份，无需同步。
-    /// </summary>
-    [ThreadStatic]
-    private static char[] _midBuffer;
-
     /// <summary>配色取自游戏当前主题，换主题时面板跟随。</summary>
-    private readonly struct Palette
+    internal readonly struct Palette
     {
         internal Palette(OS os)
         {

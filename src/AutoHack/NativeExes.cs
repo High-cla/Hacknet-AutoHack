@@ -488,6 +488,10 @@ internal static class NativeExes
     /// <summary>
     /// 等待某一台上「交给动画去开」的端口全部开完；返回是否已经全部开完。
     ///
+    /// <b>实现是 <c>InFlight(target) == 0</c>：同一份名单（Live + Queue）、同一条
+    /// <see cref="IsOpen"/> 判据，只写一遍。</b>此前是两个各自遍历一遍的循环 ——
+    /// 「同一条道理只落实一半」在本仓库已经出过一次事（见 llms.txt 坑 27 的 v1.40.0 修正）。
+    ///
     /// <b>判据是「那个端口是否已 Cracked」，不是 exe 内部字段。</b>九种程序的完成标志
     /// 各不相同（<c>complete</c> / <c>hasCompleted</c> / <c>isComplete</c> /
     /// <c>sucsessTimer</c> / <c>elapsedTime</c>），读它们就得写一张九分支的表；
@@ -499,37 +503,13 @@ internal static class NativeExes
     /// 被截断、被丢弃、或本来就没有程序的端口，调用方已用
     /// <see cref="HackEngine.OpenPort"/> 直接开掉，故不在等待名单里。
     /// </summary>
-    internal static bool Settled(Computer target)
-    {
-        if (target == null)
-        {
-            return true;
-        }
-
-        foreach (var run in Live)
-        {
-            if (ReferenceEquals(run.Target, target) && !IsOpen(target, run.Port))
-            {
-                return false;
-            }
-        }
-
-        foreach (var pending in Queue)
-        {
-            if (ReferenceEquals(pending.Target, target) && !IsOpen(target, pending.Port))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
+    internal static bool Settled(Computer target) => InFlight(target) == 0;
 
     /// <summary>
     /// 该台目标此刻<b>还在路上</b>的端口数 —— 已经交给动画、但动画尚未开出来的那些。
     ///
-    /// 与 <see cref="Settled"/> 同一份名单、同一条 <see cref="IsOpen"/> 判据，只是不早退，
-    /// 把条数数出来。给 <c>HackEngine.PortQuotaMet</c> 的第二参用（v1.40.0）：
+    /// <see cref="Settled"/> 就建在它上面（<c>InFlight(target) == 0</c>），故判据只有这一份。
+    /// 给 <c>HackEngine.PortQuotaMet</c> 的第二参用（v1.40.0）：
     /// 演出模式下端口由动画的 <c>Completed()</c> 去开、端口步却不等动画，故算门槛时
     /// 必须把这批算作已破，否则判据恒假、整台可破端口全排上动画。
     /// </summary>

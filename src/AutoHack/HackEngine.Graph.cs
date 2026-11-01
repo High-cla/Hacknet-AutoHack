@@ -52,9 +52,10 @@ internal static partial class HackEngine
     /// 与 <c>autohack scan allnodes</c> 工具（见 ScanTools）。</para>
     ///
     /// <para>标记一律走原生 <c>NetworkMap.discoverNode</c>（NetworkMap.cs:415-423），
-    /// 与游戏自身的「已发现」同源。它内部是 <c>visibleNodes.Contains(nodes.IndexOf(c))</c>，
-    /// 两次线性扫描，故这里是 O(V²)。实测存档 167 台无感；千级地图才需要改走哈希集
-    /// （本次不做，YAGNI）。</para>
+    /// 与游戏自身的「已发现」同源。它内部是 <c>visibleNodes.Contains(nodes.IndexOf(c))</c>
+    /// —— 两次线性扫描，别无脑整表调用就是 O(V²)（v1.45.0 审计 P2-1 前的状态）。
+    /// 现在先用 <c>HashSet</c> 判「是否已发现」，只对未发现的节点调原生 API，
+    /// 复杂度 O(V)；已发现节点被跳过是等价变换，因为 discoverNode 对它们本就是空操作。</para>
     /// </summary>
     internal static int RevealWholeMap(OS os)
     {
@@ -64,15 +65,29 @@ internal static partial class HackEngine
             return 0;
         }
 
+        // discoverNode 的判重是 visibleNodes（List<int>）.Contains —— 每次 O(V)，
+        // 整表走一遍就是 O(V²)：bench 实测 10 000 台 105 ms（docs/TOOLCHAIN.md 扩展性表）。
+        // 先拍成哈希集，只对**真的还没被发现**的节点调原生 API：语义逐字不变
+        // （discoverNode 对已发现节点本来就是空操作），复杂度降到 O(V)。
+        // 返回值的口径保持原样 —— 数的是「本表里参与遍历的节点数」，不是新增发现数。
+        var visible = map.visibleNodes;
+        var seen = visible == null ? new HashSet<int>() : new HashSet<int>(visible);
+
         var revealed = 0;
-        foreach (var comp in map.nodes)
+        for (var i = 0; i < map.nodes.Count; i++)
         {
+            var comp = map.nodes[i];
             if (comp == null || comp.disabled)
             {
                 continue;
             }
 
-            map.discoverNode(comp);
+            if (!seen.Contains(i))
+            {
+                map.discoverNode(comp);
+                seen.Add(i);
+            }
+
             revealed++;
         }
 

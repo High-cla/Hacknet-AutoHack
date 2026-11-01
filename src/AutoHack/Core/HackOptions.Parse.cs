@@ -135,7 +135,7 @@ internal sealed partial record HackOptions
                     case Opt.ResetIP: resetIP = true; break;
                     case Opt.NoResetIP: resetIP = false; break;
                     default:
-                        throw new ArgumentOutOfRangeException(nameof(opt), opt, "别名动作未在 Parse 中分派");
+                        throw new InvalidOperationException("别名动作未在 Parse 中分派: " + opt);
                 }
 
                 continue;

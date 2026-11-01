@@ -111,13 +111,53 @@ internal static class HackOverlay
     [HarmonyPatch(typeof(OS), nameof(OS.Draw))]
     private static void OnOSDraw(OS __instance)
     {
-        if (Visible(__instance))
+        // <b>异常边界画在整条绘制链上，而不是 spriteBatch 批次上。</b>面板与 HUD 读的是
+        // 游戏与第三方数据（netMap / TrackersInProgress / 本地化表），任何一处 NRE 或越界
+        // 都会穿透 Harmony Postfix 打断整个绘制帧 —— 那是「面板一开就崩」的形状。
+        // 两段各自 try：HUD 坏了不该连带面板，反之亦然。
+        try
         {
-            DrawPanel(__instance);
+            if (Visible(__instance))
+            {
+                DrawPanel(__instance);
+            }
+        }
+        catch (Exception ex)
+        {
+            ReportDrawFault(__instance, "panel", ex);
         }
 
         // 与面板无关：自己读 OS.TrackersInProgress，不共享上面任何状态。
-        TraceHud.Draw(__instance);
+        try
+        {
+            TraceHud.Draw(__instance);
+        }
+        catch (Exception ex)
+        {
+            ReportDrawFault(__instance, "hud", ex);
+        }
+    }
+
+    /// <summary>上一次绘制异常的上报时刻（<c>OS.timer</c> 秒）。</summary>
+    private static double _lastDrawFaultAt = double.NegativeInfinity;
+
+    /// <summary>
+    /// 绘制异常只上报一次/5 秒：这条路径每帧都跑，不限制就会把终端刷满 ——
+    /// 而故障本身通常是「某一帧的数据坏了」，重复行没有信息量。
+    /// 诊断细节始终写 <see cref="Trace"/>（编译期才生成）。
+    /// </summary>
+    private static void ReportDrawFault(OS os, string where, Exception error)
+    {
+        Trace.Write("draw fault in " + where + ": " + error);
+
+        var now = os?.timer ?? 0;
+        if (now - _lastDrawFaultAt < DrawFaultLogSeconds)
+        {
+            return;
+        }
+
+        _lastDrawFaultAt = now;
+        os?.write("[autohack] draw fault (" + where + ") - " + error.GetType().Name + ": " + error.Message);
     }
 
     /// <summary>面板的绘制与按钮动作。仅在面板可见时调用。</summary>
@@ -198,6 +238,9 @@ internal static class HackOverlay
         ToolDispatch.Run(_os, verb, allNodes);
     }
 
+    /// <summary>绘制异常的最小上报间隔（秒）。见 <see cref="ReportDrawFault"/>。</summary>
+    private const double DrawFaultLogSeconds = 5.0;
+
     private static bool Visible(OS instance)
         => _state is { Open: true } && instance != null && instance == _os && instance.IsActive;
 
@@ -216,32 +259,18 @@ internal static class HackOverlay
             return;
         }
 
-        HackRun run;
-        try
+        // <b>只入队，不在这里构造运行。</b>构造要做揭图（写 netMap.visibleNodes）、
+        // 目标解析与规划（实测 169 台约 0.28 ms / 331 KB），而本方法跑在 OS.Draw 的
+        // Postfix 里 —— 在绘制帧改地图状态是不该有的副作用，尖峰也落在最敏感的帧上。
+        // 命令行入口早就是「命令线程只入队、游戏线程再构造」（PendingRuns），
+        // 面板入口走同一条时序；脚本错误也在那里转成终端一行。
+        if (!PendingRuns.TryEnqueue(_os, _state.ToOptions()))
         {
-            run = new HackRun(_os, _state.ToOptions());
-        }
-        catch (Exception ex) when (ex is FormatException or IOException or UnauthorizedAccessException)
-        {
-            // 与命令入口同一道护栏（PendingRuns.Tick 的 catch）：脚本语法错/读不到
-            // 必须变成终端里一行，而不是从 OS.Draw 的 Postfix 冒出去打断绘制帧。
-            _os.write("[autohack] Script error: " + ex.Message);
-            return;
+            _os.write("[autohack] A run is already in progress - wait for it to finish.");
         }
 
-        if (run.Total == 0)
-        {
-            _os.write("[autohack] No eligible targets - nothing to do.");
-            _os.write(HackEngine.NoTargetHint);
-            return;
-        }
-
-        // 运行由零 RAM 的隐藏可执行体承载：生命周期交给游戏自己的 exe 循环，
-        // 不再由本类的每帧补丁认领（见 AutoHackExecutable 的类注释）。
-        AutoHackExecutable.Create(_os, run);
-
-        // 这里曾有「Engaging N target(s)」汇总行，已删（用户定：终端里只要具体的
-        // 命令行输出，不要战果报告）。面板运行视图本来就有进度条与计数。
+        // 运行由零 RAM 的隐藏可执行体承载，挂载发生在 PendingRuns.Tick（游戏线程）；
+        // 面板的进度视图通过 AutoHackExecutable.Find(os) 读到它，不需要本地字段。
     }
 
 }

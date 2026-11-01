@@ -59,26 +59,59 @@ internal static class PanelSettings
             return;
         }
 
-        s.Scope = Entry("scope", s.Scope).Value;
+        s.Scope = Read("scope", s.Scope);
 
         // 键名从 clear_logs / clear_own_logs 改为 wipe_traces：口径变了（只删含玩家 IP
         // 的条目），旧键存的是「整目录清空」的意图，不能悄悄套用到新语义上 ——
         // 旧的 true 在新口径下过宽、旧的 false 又会把新缺省（开）压成关。
         // 故换键、不迁移：玩家沿用新缺省即可。
-        s.WipeTraces = Entry("wipe_traces", s.WipeTraces).Value;
-        s.UploadMarker = Entry("upload_marker", s.UploadMarker).Value;
-        s.ConnectFirst = Entry("connect_first", s.ConnectFirst).Value;
-        s.Disconnect = Entry("disconnect_when_done", s.Disconnect).Value;
-        s.SkipOwned = Entry("skip_owned", s.SkipOwned).Value;
-        s.AutoModPorts = Entry("auto_mod_ports", s.AutoModPorts).Value;
-        s.AllNodes = Entry("all_nodes", s.AllNodes).Value;
-        s.UseCredentials = Entry("use_credentials", s.UseCredentials).Value;
-        s.ShowExes = Entry("native_exes", s.ShowExes).Value;
-        s.ResetIP = Entry("new_ip", s.ResetIP).Value;
+        s.WipeTraces = Read("wipe_traces", s.WipeTraces);
+        s.UploadMarker = Read("upload_marker", s.UploadMarker);
+        s.ConnectFirst = Read("connect_first", s.ConnectFirst);
+        s.Disconnect = Read("disconnect_when_done", s.Disconnect);
+        s.SkipOwned = Read("skip_owned", s.SkipOwned);
+        s.AutoModPorts = Read("auto_mod_ports", s.AutoModPorts);
+        s.AllNodes = Read("all_nodes", s.AllNodes);
+        s.UseCredentials = Read("use_credentials", s.UseCredentials);
+        s.ShowExes = Read("native_exes", s.ShowExes);
+        s.ResetIP = Read("new_ip", s.ResetIP);
 
-        s.X = Entry("panel_x", s.X).Value;
-        s.Y = Entry("panel_y", s.Y).Value;
-        s.Collapsed = Entry("collapsed", s.Collapsed).Value;
+        s.X = Read("panel_x", s.X);
+        s.Y = Read("panel_y", s.Y);
+        s.Collapsed = Read("collapsed", s.Collapsed);
+    }
+
+    /// <summary>
+    /// 读一项：**非法值不静默**。手改 cfg 写成不存在的枚举名、越界的数字时，BepInEx 的
+    /// 转换会抛 —— 抛在 <see cref="Load"/> 里就是「面板打不开」，而它通常在命令线程被调用。
+    /// 这里逐项兜住：记一行警告、回退该项缺省，其余项照常读。
+    /// </summary>
+    private static T Read<T>(string key, T fallback)
+    {
+        try
+        {
+            return Entry(key, fallback).Value;
+        }
+        catch (Exception ex) when (ex is FormatException or ArgumentException or InvalidCastException
+                                       or OverflowException or NotSupportedException)
+        {
+            Warn(key, ex);
+            return fallback;
+        }
+    }
+
+    /// <summary>非法配置只报一次/键，避免每次开面板刷屏。</summary>
+    private static readonly HashSet<string> WarnedKeys = new(StringComparer.Ordinal);
+
+    private static void Warn(string key, Exception error)
+    {
+        if (!WarnedKeys.Add(key))
+        {
+            return;
+        }
+
+        _log?.LogWarning("[autohack] config '" + Section + ":" + key + "' is invalid ("
+                         + error.GetType().Name + "); using the default. " + error.Message);
     }
 
     /// <summary>把当前状态写回 cfg 并落盘。写失败只记日志：设置存不下不该影响游戏。</summary>

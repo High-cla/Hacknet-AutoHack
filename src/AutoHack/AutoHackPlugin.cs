@@ -186,7 +186,7 @@ public sealed class AutoHackPlugin : BepInEx.Hacknet.HacknetPlugin
         // · dec / mem —— 显式传 allnodes 才扫地图全表，缺省只碰当前节点；
         // · wipe —— 缺省就是地图全表（命令行没有 SCOPE 段，而「我的痕迹」铺在
         //   哪些机器上与当前连着谁无关），要收窄到当前节点所在的连线分量传 here。
-        var allNodes = verb.ToLowerInvariant() == ToolDispatch.Wipe
+        var allNodes = string.Equals(verb, ToolDispatch.Wipe, StringComparison.OrdinalIgnoreCase)
             ? !args.Skip(2).Any(a => a.Equals("here", StringComparison.OrdinalIgnoreCase))
             : args.Skip(2).Any(a => a.Equals("allnodes", StringComparison.OrdinalIgnoreCase));
 

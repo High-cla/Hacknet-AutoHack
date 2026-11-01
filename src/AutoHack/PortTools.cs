@@ -1,5 +1,7 @@
 namespace AutoHack;
 
+using System.Globalization;
+
 using Hacknet;
 
 /// <summary>
@@ -101,7 +103,8 @@ internal static class PortTools
     }
 
     /// <summary>左对齐补白；超宽不截断 —— 宁可排版跑偏，也不吞掉名字。</summary>
-    private static string Pad(int value, int width) => Pad(value.ToString(), width);
+    private static string Pad(int value, int width)
+        => Pad(value.ToString(CultureInfo.InvariantCulture), width);
 
     private static string Pad(string text, int width)
     {

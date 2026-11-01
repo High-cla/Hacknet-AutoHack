@@ -508,13 +508,42 @@ internal static partial class HackPanel
         return action;
     }
 
+    // 进度百分比与「已完成 / 总数」：每帧同样的值，缓存一份即可。
+    // 面板同一时刻只画一个运行，故单槽缓存就够（不需要字典）。
+    private static int _percentKey = int.MinValue;
+    private static string _percentText;
+    private static (int Done, int Total) _countKey;
+    private static string _countText;
+
+    private static string PercentText(int value)
+    {
+        if (value != _percentKey)
+        {
+            _percentKey = value;
+            _percentText = value + "%";
+        }
+
+        return _percentText;
+    }
+
+    private static string CountText(int done, int total)
+    {
+        if (done != _countKey.Done || total != _countKey.Total)
+        {
+            _countKey = (done, total);
+            _countText = done + " / " + total;
+        }
+
+        return _countText;
+    }
+
     private static void DrawRunning(HackRun run, int left, int y, Palette c)
     {
         var right = left + ContentWidth;
         var ratio = run.Total == 0 ? 0f : Math.Min(1f, run.Done / (float)run.Total);
 
         DrawText(run.Phase ?? Loc.T("ENGAGING"), left, y, c.Accent, 1f);
-        var percent = (int)(ratio * 100) + "%";
+        var percent = PercentText((int)(ratio * 100));
         DrawText(percent, right - Measure(percent, 1f).X, y, c.Text, 1f);
         y += PhaseRowHeight;
 
@@ -522,7 +551,7 @@ internal static partial class HackPanel
         y += ProgressRowHeight;
 
         DrawText(Ellipsize(run.Current, ContentWidth - 76), left, y, c.Text, 1f);
-        var count = run.Done + " / " + run.Total;
+        var count = CountText(run.Done, run.Total);
         DrawText(count, right - Measure(count, 1f).X, y, c.Dim, 1f);
         y += CurrentRowHeight;
 

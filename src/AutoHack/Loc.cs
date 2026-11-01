@@ -197,13 +197,56 @@ internal static class Loc
     internal static string Ports(int opened, int total)
         => F("{0}/{1} ports", "{0}/{1} 端口", opened, total);
 
-    /// <summary>战果行里的提权成功标记（前置两个空格作分隔）。</summary>
-    internal static string AdminTag()
-        => UseChinese ? "  管理员" : "  admin";
+    /// <summary>战果行里的提权成功标记（前置两个空格作分隔）。这两个串是常量，不必每次新建。</summary>
+    internal static string AdminTag() => UseChinese ? ChineseAdminTag : EnglishAdminTag;
+
+    private const string ChineseAdminTag = "  管理员";
+    private const string EnglishAdminTag = "  admin";
 
     /// <summary>按当前语言取格式串，不做替换。</summary>
     private static string Template(string english, string chinese)
         => UseChinese ? chinese : english;
+
+    /// <summary>
+    /// 「模板 + 参数」的结果缓存。
+    ///
+    /// 运行态文案（<c>RUNNING 3/128</c>、<c>12/20 端口</c>…）每帧都要同一批串，
+    /// 而 <see cref="string.Replace(string, string)"/> 每次都新建。参数组合有限
+    /// （进度 + 战果行），命中率接近 100%；容量上限与测量缓存同量级，超了整体清空 ——
+    /// 绘制路径上不维护淘汰链表。
+    ///
+    /// <b>失效键是语言</b>：换语言后同一模板的译文不同，必须整体丢弃。
+    /// 本方法只在绘制路径调用（游戏线程），不加锁。
+    /// </summary>
+    private static readonly Dictionary<(string Template, int A0, int A1), string> FormatCache = new();
+    private static string _formatLocale;
+    private const int FormatCacheCapacity = 256;
+
+    private static string Format(string template, int a0, int a1)
+    {
+        if (!string.Equals(_formatLocale, Settings.ActiveLocale, StringComparison.Ordinal))
+        {
+            FormatCache.Clear();
+            _formatLocale = Settings.ActiveLocale;
+        }
+
+        var key = (template, a0, a1);
+        if (FormatCache.TryGetValue(key, out var cached))
+        {
+            return cached;
+        }
+
+        if (FormatCache.Count >= FormatCacheCapacity)
+        {
+            FormatCache.Clear();
+        }
+
+        var value = template
+            .Replace("{0}", a0.ToString(CultureInfo.InvariantCulture))
+            .Replace("{1}", a1.ToString(CultureInfo.InvariantCulture));
+        FormatCache[key] = value;
+        return value;
+    }
 
     /// <summary>
     /// 单数字文案。用 <see cref="string.Replace(string, string)"/> 替掉 <c>string.Format</c>：
@@ -211,11 +254,9 @@ internal static class Loc
     /// 格式串里只有 <c>{0}</c>/<c>{1}</c>，替换值只含数字与负号，不会引入新的占位符。
     /// </summary>
     private static string F(string english, string chinese, int arg0)
-        => Template(english, chinese).Replace("{0}", arg0.ToString(CultureInfo.InvariantCulture));
+        => Format(Template(english, chinese), arg0, 0);
 
     /// <summary>双数字文案：<c>{0}</c> 先于 <c>{1}</c> 替换，数字不含占位符，故次序无歧义。</summary>
     private static string F(string english, string chinese, int arg0, int arg1)
-        => Template(english, chinese)
-            .Replace("{0}", arg0.ToString(CultureInfo.InvariantCulture))
-            .Replace("{1}", arg1.ToString(CultureInfo.InvariantCulture));
+        => Format(Template(english, chinese), arg0, arg1);
 }

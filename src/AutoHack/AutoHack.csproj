@@ -5,6 +5,10 @@
     <LangVersion>13</LangVersion>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>disable</Nullable>
+    <!-- 内置分析器（SDK 自带，零 NuGet）。档位钉死而不是 latest-recommended：
+         浮动档位会让「同一次提交在不同 SDK 上警告数不同」。升级 SDK 时手动调这一行。 -->
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>10.0</AnalysisLevel>
     <AssemblyName>AutoHack</AssemblyName>
     <RootNamespace>AutoHack</RootNamespace>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>

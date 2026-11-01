@@ -1,0 +1,44 @@
+root = true
+
+# 仅声明本项目实际遵守的约定；不打开 EnforceCodeStyleInBuild（会与既有代码大量冲突）。
+# 目的是让 IDE 与 `dotnet format` 有一份共同口径，而不是再造一台告警机器。
+
+[*]
+charset = utf-8
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.cs]
+# 分析器分级：只保留能指出真问题的规则。
+# · CA1822/CA1805 是纯风格（可静态化、显式初始化为默认值），本仓大量存在且无价值；
+# · CA2255 是有意为之：BootBoost 用 [ModuleInitializer] 抢在插件 Load 之前覆写开机常量；
+# · CA1016 与 GenerateAssemblyInfo=false 冲突（程序集特性由 BepInEx 插件元数据提供）。
+dotnet_diagnostic.CA1822.severity = suggestion
+dotnet_diagnostic.CA1805.severity = suggestion
+dotnet_diagnostic.CA2255.severity = none
+dotnet_diagnostic.CA1016.severity = none
+
+indent_style = space
+indent_size = 4
+tab_width = 4
+csharp_new_line_before_open_brace = all
+csharp_new_line_before_else = true
+csharp_new_line_before_catch = true
+csharp_new_line_before_finally = true
+dotnet_sort_system_directives_first = true
+dotnet_separate_import_directive_groups = false
+
+# 命名：私有字段 `_camelCase`，常量 PascalCase（全仓既有事实）。
+dotnet_naming_rule.private_fields_underscore.severity = suggestion
+dotnet_naming_rule.private_fields_underscore.symbols = private_fields
+dotnet_naming_rule.private_fields_underscore.style = underscore_camel
+dotnet_naming_symbols.private_fields.applicable_kinds = field
+dotnet_naming_symbols.private_fields.applicable_accessibilities = private
+dotnet_naming_style.underscore_camel.required_prefix = _
+dotnet_naming_style.underscore_camel.capitalization = camel_case
+
+[*.{md,txt}]
+trim_trailing_whitespace = false
+
+[*.{csproj,props,targets}]
+indent_size = 2

@@ -28,6 +28,9 @@ internal sealed class AutoHackRuntime
     /// <summary>当前运行（由 exe 宿主持有）。</summary>
     internal HackRun Run => AutoHackExecutable.Find(Os);
 
+    /// <summary>本局的帧时间统计（诊断计数开关打开时才会往终端报告）。</summary>
+    internal PerfMeter Perf { get; } = new PerfMeter();
+
     /// <summary>上一次绘制异常的上报时刻（<c>OS.timer</c> 秒）。</summary>
     internal double LastDrawFaultAt { get; set; } = double.NegativeInfinity;
 

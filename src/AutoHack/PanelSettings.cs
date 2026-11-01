@@ -46,6 +46,9 @@ internal static class PanelSettings
         // 赋值不落盘 —— 落盘时机由 Persist 独家决定。
         config.SaveOnConfigSet = false;
         _config = config;
+
+        // 绘制链要在面板打开之前就能读到它，故这里先取一次。
+        Diagnostics = Read("diagnostics", false);
     }
 
     /// <summary>
@@ -75,6 +78,8 @@ internal static class PanelSettings
         s.UseCredentials = Read("use_credentials", s.UseCredentials);
         s.ShowExes = Read("native_exes", s.ShowExes);
         s.ResetIP = Read("new_ip", s.ResetIP);
+
+        s.Diagnostics = Read("diagnostics", s.Diagnostics);
 
         s.X = Read("panel_x", s.X);
         s.Y = Read("panel_y", s.Y);
@@ -114,6 +119,16 @@ internal static class PanelSettings
                          + error.GetType().Name + "); using the default. " + error.Message);
     }
 
+    /// <summary>
+    /// 性能计数开关的当前值（cfg 键 <c>diagnostics</c>）。
+    ///
+    /// 单独暴露一份<b>只读缓存</b>：绘制链每 300 帧要判一次，而那时面板状态可能还没建立
+    /// （<see cref="AutoHackRuntime.State"/> 为 null 表示本局没开过面板），不能为了读一个
+    /// 布尔值去 <c>EnsureState</c> —— 那会顺带把面板变成可见。故由本类在
+    /// <see cref="Bind"/> / <see cref="Load"/> / <see cref="Persist"/> 三处同步。
+    /// </summary>
+    internal static bool Diagnostics { get; private set; }
+
     /// <summary>把当前状态写回 cfg 并落盘。写失败只记日志：设置存不下不该影响游戏。</summary>
     internal static void Persist(HackPanelState s)
     {
@@ -133,6 +148,8 @@ internal static class PanelSettings
         Entry("use_credentials", s.UseCredentials).Value = s.UseCredentials;
         Entry("native_exes", s.ShowExes).Value = s.ShowExes;
         Entry("new_ip", s.ResetIP).Value = s.ResetIP;
+        Entry("diagnostics", s.Diagnostics).Value = s.Diagnostics;
+        Diagnostics = s.Diagnostics;
         Entry("panel_x", s.X).Value = s.X;
         Entry("panel_y", s.Y).Value = s.Y;
         Entry("collapsed", s.Collapsed).Value = s.Collapsed;

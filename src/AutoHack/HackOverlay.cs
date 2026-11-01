@@ -2,6 +2,8 @@ namespace AutoHack;
 
 using AutoHack.Core;
 
+using System.Diagnostics;
+
 using Hacknet;
 using Hacknet.Gui;
 using HarmonyLib;
@@ -119,28 +121,52 @@ internal static class HackOverlay
         // 游戏与第三方数据（netMap / TrackersInProgress / 本地化表），任何一处 NRE 或越界
         // 都会穿透 Harmony Postfix 打断整个绘制帧 —— 那是「面板一开就崩」的形状。
         // 两段各自 try：HUD 坏了不该连带面板，反之亦然。
+        // 帧时间统计（v1.45.0 审计 P0-1）：整条绘制链一条样本，面板另有一条。
+        // 计时零分配，故无论诊断开关开不开都测 —— 关掉时只是不报告。
+        var started = Stopwatch.GetTimestamp();
+        var runtime = __instance == null ? null : Runtime(__instance);
+
         try
         {
-            if (Visible(__instance))
+            try
             {
-                DrawPanel(__instance);
+                if (Visible(__instance))
+                {
+                    DrawPanel(__instance);
+                }
+            }
+            catch (Exception ex)
+            {
+                ReportDrawFault(__instance, "panel", ex);
+            }
+
+            // 与面板无关：自己读 OS.TrackersInProgress，不共享上面任何状态。
+            try
+            {
+                TraceHud.Draw(__instance);
+            }
+            catch (Exception ex)
+            {
+                ReportDrawFault(__instance, "hud", ex);
             }
         }
-        catch (Exception ex)
+        finally
         {
-            ReportDrawFault(__instance, "panel", ex);
-        }
-
-        // 与面板无关：自己读 OS.TrackersInProgress，不共享上面任何状态。
-        try
-        {
-            TraceHud.Draw(__instance);
-        }
-        catch (Exception ex)
-        {
-            ReportDrawFault(__instance, "hud", ex);
+            if (runtime != null)
+            {
+                runtime.Perf.AddDraw(Elapsed(started));
+                var due = runtime.Perf.Due();
+                if (due && PanelSettings.Diagnostics && __instance != null)
+                {
+                    __instance.write(runtime.Perf.Report());
+                }
+            }
         }
     }
+
+    /// <summary>把 <see cref="Stopwatch.GetTimestamp"/> 的差值换算成毫秒。</summary>
+    private static double Elapsed(long started)
+        => (Stopwatch.GetTimestamp() - started) * 1000.0 / Stopwatch.Frequency;
 
     /// <summary>
     /// 绘制异常只上报一次/5 秒：这条路径每帧都跑，不限制就会把终端刷满 ——
@@ -184,7 +210,9 @@ internal static class HackOverlay
             spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend);
             begun = true;
             var runtime = Runtime(__instance);
+            var panelStarted = Stopwatch.GetTimestamp();
             action = HackPanel.Draw(runtime.State, runtime.Run, __instance, screen);
+            runtime.Perf.AddPanel(Elapsed(panelStarted));
         }
         catch (InvalidOperationException)
         {

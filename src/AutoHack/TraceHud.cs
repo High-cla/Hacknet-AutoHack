@@ -63,8 +63,7 @@ internal static class TraceHud
 
         // 小数分隔符随 locale 变（zh-cn 是 "."，但 de-de 是 ","），
         // 而这是 HUD 不是本地化文案 —— 固定用不变文化，免得同一条读数的样子跟着语言漂。
-        var text = Loc.T("TRACKERS") + " : " + count + "   "
-                   + nearest.ToString("0.0", CultureInfo.InvariantCulture) + "s";
+        var text = HudText(count, nearest);
         var y = spriteBatch.GraphicsDevice.Viewport.Height - BottomOffset;
 
         // 与 HackOverlay.OnOSDraw（HackOverlay.cs:94-114）同一路数：此处上一批 spriteBatch
@@ -91,6 +90,34 @@ internal static class TraceHud
             }
         }
     }
+
+    /// <summary>
+    /// 本帧那行文案 —— <b>只在与上一帧不同时重建</b>。
+    ///
+    /// 原实现每帧串接 4 次（<c>Loc.T</c> + 台数 + 秒数 + 后缀），60 fps 下约 300 次分配/秒，
+    /// 全落在绘制帧里。读数只有「台数」与「最近剩余 0.1 秒」两个自变量，组合极少，
+    /// 故用单槽缓存：命中时零分配，未命中时才重建一次（v1.45.0 审计 P2-2）。
+    ///
+    /// 量化到 0.1 秒是刻意的 —— 与显示精度一致，量化后同一串反复命中；
+    /// 若按原始浮点比较，每帧都是新值，缓存等于没有。
+    /// </summary>
+    private static string HudText(int count, float nearest)
+    {
+        var tenths = (int)Math.Round(nearest * 10f, MidpointRounding.AwayFromZero);
+        if (tenths != _tenths || count != _count)
+        {
+            _count = count;
+            _tenths = tenths;
+            _text = Loc.T("TRACKERS") + " : " + count + "   "
+                    + (tenths / 10f).ToString("0.0", CultureInfo.InvariantCulture) + "s";
+        }
+
+        return _text;
+    }
+
+    private static int _count = int.MinValue;
+    private static int _tenths = int.MinValue;
+    private static string _text;
 
     /// <summary>
     /// 读一次追踪表。<c>count</c> 是台数，<c>nearest</c> 是最近的一台还剩几秒

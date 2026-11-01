@@ -53,6 +53,7 @@ internal static class Loc
             ["wipe my traces"] = "清除我的痕迹",
             ["native exes"] = "原生演出",
             ["new IP after run"] = "跑完换 IP",
+            ["diagnostics"] = "诊断计数",
 
             // TOOLS —— 键必须与 ToolRegistry 的 Label 逐字一致（那个才是按钮文案）
             ["TOOLS"] = "工具",
@@ -137,7 +138,14 @@ internal static class Loc
         }
 
         var cache = Volatile.Read(ref _cache);
-        if (cache != null && cache.IsFresh && cache.Entries.TryGetValue(english, out var cached))
+        if (cache == null || !cache.IsFresh)
+        {
+            // 换语言 / 词表条目数变了：整体重建（含预热），不是逐条复制（见 Rebuild）。
+            cache = Rebuild();
+            Volatile.Write(ref _cache, cache);
+        }
+
+        if (cache.Entries.TryGetValue(english, out var cached))
         {
             return cached;
         }
@@ -176,6 +184,33 @@ internal static class Loc
 
         next.Entries[english] = resolved;
         return next;
+    }
+
+    /// <summary>
+    /// 建立新快照并<b>预热本表全部键</b>（v1.45.0 审计 P2-4）。
+    ///
+    /// 原实现是「逐条复制」：面板首帧要解析约 200 条文案，每条未命中都复制一份完整字典，
+    /// 合计 O(N²) 次条目写入。预热只做一遍 O(N)。
+    ///
+    /// <b>语义逐字保持</b>：每条都走与 <see cref="T(string)"/> 相同的解析次序 ——
+    /// 命中游戏词表的<b>不</b>入缓存（同 <see cref="T(string)"/> 的既有约定：
+    /// workshop mod 会原地覆盖 <c>ActiveTerms</c>，缓存命中项会一直发旧译文）。
+    /// </summary>
+    private static Cache Rebuild()
+    {
+        var fresh = new Cache(Settings.ActiveLocale, LocaleTerms.ActiveTerms.Count);
+        foreach (var pair in Chinese)
+        {
+            var fromGame = LocaleTerms.Loc(pair.Key);
+            if (!string.Equals(fromGame, pair.Key, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            fresh.Entries[pair.Key] = UseChinese ? pair.Value : pair.Key;
+        }
+
+        return fresh;
     }
 
     // ── 带数字的文案 ────────────────────────────────────────────

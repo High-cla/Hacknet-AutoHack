@@ -105,6 +105,15 @@ internal sealed class HackPanelState
     internal bool ShowExes { get; set; } = true;
 
     /// <summary>
+    /// 是否每 300 帧往终端写一行帧时间分位（p50/p95/p99，缺省<b>关</b>）。
+    ///
+    /// 只读绘制与推进的耗时，不改任何行为；关着时热路径只多一次数组写入。
+    /// 这是 v1.45.0 审计的 P0-1：此前全仓没有任何运行期度量，性能结论只能靠
+    /// <c>tools/bench.mts</c> 的离线等价模型推断，真实帧时间无从验证。
+    /// </summary>
+    internal bool Diagnostics { get; set; } = false;
+
+    /// <summary>
     /// 全网扫描时跳过已拿下的机器（肉鸡），不重复入侵（缺省**开**）。
     /// **只对全网扫描生效** —— 「当前节点」是刻意选择，连上再点 START 就是要打它。
     /// </summary>
@@ -165,6 +174,7 @@ internal sealed class HackPanelState
         bool UseCredentials,
         bool ShowExes,
         bool ResetIP,
+        bool Diagnostics,
         int X,
         int Y,
         bool Collapsed);
@@ -179,7 +189,7 @@ internal sealed class HackPanelState
     /// <summary>当前设置快照。供 <see cref="HackPanel.Draw"/> 比对是否发生了改动。</summary>
     internal Settings Fingerprint => new(
         Scope, WipeTraces, UploadMarker, ConnectFirst, Disconnect,
-        SkipOwned, AutoModPorts, AllNodes, UseCredentials, ShowExes, ResetIP, X, Y, Collapsed);
+        SkipOwned, AutoModPorts, AllNodes, UseCredentials, ShowExes, ResetIP, Diagnostics, X, Y, Collapsed);
 
     internal HackOptions ToOptions() => new(
         Scope,
@@ -267,11 +277,11 @@ internal static partial class HackPanel
     /// **这里曾有一个 22px 的偏差**（v1.33.1 及更早）：常量按 5 行复选框算，
     /// <see cref="DrawOptions"/> 实际画了 6 行（第 6 行是 force escalate 复选框），
     /// 面板底边比内容矮一行。v1.33.2 删掉那一行后，两边的数字才对上 ——
-    /// 现在 5 行，常量也是 5，改动任一侧都必须同步另一侧。
+    /// 现在 6 行（v1.45.0 加了一行 diagnostics），常量也是 6，改动任一侧都必须同步另一侧。
     /// </summary>
     private const int OptionsBlockHeight =
         SectionHeight + SegmentHeight + Gap
-        + CheckRowHeight * 5 + Gap;
+        + CheckRowHeight * 6 + Gap;
 
     /// <summary>本帧面板占据的矩形。供 Update 阶段提前阻断下层控件点击。</summary>
     internal static Rectangle LastFrame { get; private set; }
@@ -438,7 +448,7 @@ internal static partial class HackPanel
     }
 
     /// <summary>
-    /// 5 行复选框：凭据 / 全网 / 跳过肉鸡 / 清痕 / 先连接 / 断开 / 标记 / 演出 / 换 IP / 模组端口。
+    /// 6 行复选框：凭据 / 全网 / 跳过肉鸡 / 清痕 / 先连接 / 断开 / 标记 / 演出 / 换 IP / 模组端口 / 诊断计数。
     /// 每行两个，右列在最后一行留空。
     /// </summary>
     private static void DrawCheckboxes(HackPanelState state, int left, ref int y, Palette c)
@@ -466,6 +476,10 @@ internal static partial class HackPanel
 
         state.ResetIP = Check(state.IdBase + 25, left, y, ColumnWidth, state.ResetIP, Loc.T("new IP after run"), c);
         state.AutoModPorts = Check(state.IdBase + 26, left + ColumnWidth + 8, y, ColumnWidth, state.AutoModPorts, Loc.T("auto mod ports"), c);
+        y += CheckRowHeight;
+
+        // 诊断计数（v1.45.0 审计 P0-1）：勾上后每 300 帧写一行帧时间分位。
+        state.Diagnostics = Check(state.IdBase + 27, left, y, ColumnWidth, state.Diagnostics, Loc.T("diagnostics"), c);
         y += CheckRowHeight;
 
         // 这里曾有「force escalate」复选框（旧 IdBase + 26），v1.33.2 起常驻 ——

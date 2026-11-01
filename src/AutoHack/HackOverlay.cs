@@ -158,7 +158,7 @@ internal static class HackOverlay
                 var due = runtime.Perf.Due();
                 if (due && PanelSettings.Diagnostics && __instance != null)
                 {
-                    __instance.write(runtime.Perf.Report());
+                    __instance.write(runtime.Perf.Report() + " | " + WebRenderGuard.TakeStats());
                 }
             }
         }

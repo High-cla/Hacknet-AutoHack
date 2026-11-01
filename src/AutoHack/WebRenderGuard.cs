@@ -3,6 +3,7 @@ namespace AutoHack;
 using System;
 using System.IO;
 using System.Text;
+using System.Threading;
 using Hacknet;
 using HarmonyLib;
 using Microsoft.Xna.Framework.Graphics;
@@ -80,6 +81,8 @@ internal static class WebRenderGuard
     [HarmonyPatch(typeof(WebRenderer), nameof(WebRenderer.setSize))]
     private static bool BeforeSetSize(int frameWidth, int frameHeight)
     {
+        Interlocked.Increment(ref _setSizeCalls);
+
         if (!WebRenderer.Enabled)
         {
             return true;
@@ -101,6 +104,7 @@ internal static class WebRenderGuard
         // 而那正是竞态的来源。跳过它就是本补丁的全部目的。
         if (frameWidth == WebRenderer.width && frameHeight == WebRenderer.height)
         {
+            Interlocked.Increment(ref _sameSize);
             return false;
         }
 
@@ -138,14 +142,20 @@ internal static class WebRenderGuard
             {
                 _defers++;
                 ThemeManager.framesTillWebUpdate = DeferFrames;
+                Interlocked.Increment(ref _deferred);
                 return false;
             }
+
+            // 延后额度用尽 —— 这一个分支就是「竞态窗口重新打开」的位置，单独计数。
+            Interlocked.Increment(ref _forced);
         }
         else
         {
             _defers = 0;
         }
 
+        // 走到这里 = 真的允许重建（这正是竞态窗口）。
+        Interlocked.Increment(ref _rebuilt);
         return true;
     }
 
@@ -157,6 +167,39 @@ internal static class WebRenderGuard
 
     /// <summary>已连续延后的次数。真正放行时清零。</summary>
     private static int _defers;
+
+    // ── 频次计数（v1.45.0 审计 P0-2）─────────────────────────────
+    //
+    // 本类是**唯一**能把进程带走的故障点：原生侧 use-after-free 抛的是
+    // AccessViolationException，在未开 legacyCorruptedStateExceptionsPolicy 的宿主里
+    // 不可捕获，直接终止进程。补丁把窗口压窄了，但「压窄了多少」此前没有数字 ——
+    // 于是既没法判断还该不该继续改，也没法验证改动是否真的有效。
+    //
+    // 计数刻意放在**决策点**而不是入口：`forced` 就是「延后额度用尽、竞态窗口重新打开」
+    // 的那一次，是唯一需要盯的数字；`framesDropped` 是「若无本补丁就会崩在原生回调里」
+    // 的帧数。全部 Interlocked —— TextureUpdated 跑在 CEF 的线程上。
+    private static int _setSizeCalls;
+    private static int _sameSize;
+    private static int _deferred;
+    private static int _forced;
+    private static int _rebuilt;
+    private static int _framesDropped;
+    private static int _writeAtomic;
+    private static int _writeFallback;
+
+    /// <summary>
+    /// 取出并清零自上次调用以来的计数。由 <see cref="HackOverlay"/> 在诊断计数打开时
+    /// 与帧时间报告一起写出（每 300 帧一行）。
+    /// </summary>
+    internal static string TakeStats()
+        => "web setSize=" + Interlocked.Exchange(ref _setSizeCalls, 0)
+           + " same=" + Interlocked.Exchange(ref _sameSize, 0)
+           + " deferred=" + Interlocked.Exchange(ref _deferred, 0)
+           + " forced=" + Interlocked.Exchange(ref _forced, 0)
+           + " rebuilt=" + Interlocked.Exchange(ref _rebuilt, 0)
+           + " dropped=" + Interlocked.Exchange(ref _framesDropped, 0)
+           + " write=" + Interlocked.Exchange(ref _writeAtomic, 0)
+           + "/" + Interlocked.Exchange(ref _writeFallback, 0);
 
 
     /// <summary>
@@ -177,6 +220,7 @@ internal static class WebRenderGuard
     {
         if (buffer == IntPtr.Zero)
         {
+            Interlocked.Increment(ref _framesDropped);
             return false;
         }
 
@@ -184,6 +228,7 @@ internal static class WebRenderGuard
         var target = WebRenderer.texBuffer;
         if (texture == null || texture.IsDisposed || target == null || target.Length == 0)
         {
+            Interlocked.Increment(ref _framesDropped);
             return false;
         }
 
@@ -192,7 +237,13 @@ internal static class WebRenderGuard
         // 中间存在「新纹理 + 旧缓冲」的窗口；CEF 的回调正好落在这里时，
         // Marshal.Copy 会按旧缓冲的长度去读新尺寸的数据 —— 读多读少都是错的。
         // 自洽判据（字节数 = 宽 × 高 × 4）不成立就丢帧，下一帧重来。
-        return target.Length == texture.Width * texture.Height * 4;
+        if (target.Length != texture.Width * texture.Height * 4)
+        {
+            Interlocked.Increment(ref _framesDropped);
+            return false;
+        }
+
+        return true;
     }
 
     /// <summary>网页缓存文件名（<c>WebServerDaemon.TEMP_WEBPAGE_CACHE_FILENAME</c> 的末段）。</summary>
@@ -224,10 +275,13 @@ internal static class WebRenderGuard
         try
         {
             WriteAtomic(data, filename);
+            Interlocked.Increment(ref _writeAtomic);
             return false;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
         {
+            Interlocked.Increment(ref _writeFallback);
+
             // 原子写失败就退回原实现 —— 它至少还能写出内容，
             // 而这里失败的原因（占位冲突、只读、路径过长）原实现同样会失败，
             // 交给它去抛，异常语义与打补丁前一致。

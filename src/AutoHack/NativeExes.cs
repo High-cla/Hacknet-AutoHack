@@ -188,36 +188,7 @@ internal static class NativeExes
     /// </summary>
     internal readonly record struct Life(float CrackSeconds, float TotalSeconds);
 
-    /// <summary>白名单 + 时长表。见 <see cref="Life"/>。</summary>
-    private static readonly Dictionary<string, Life> Lifetimes = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["TorrentStreamInjector.exe"] = new(4.8f, 18.5f),
-        ["PacificPortcrusher.exe"] = new(6f, 8.2f),
-        ["SSHcrack.exe"] = new(8f, 10f),
-        ["SQL_MemCorrupt.exe"] = new(12.2f, 14.2f),
-        ["SMTPoverflow.exe"] = new(12f, 14.5f),
-        ["WebServerWorm.exe"] = new(14f, 17f),
-        ["FTPBounce.exe"] = new(15f, 17f),
-        ["KBT_PortTest.exe"] = new(22f, 26f),
-        ["RTSPCrack.exe"] = new(6.3f, 32.5f),
-    };
 
-    /// <summary>内存分档宽度（mb）。ramCost 落在 190~400，按 100 分即 4 档。</summary>
-    private const int RamTierMb = 100;
-
-    /// <summary>时长分档宽度（秒）。实际存活 8.2~32.5 秒，按 10 分即 4 档。</summary>
-    private const int SecondTierSec = 10;
-
-    /// <summary>时长档数 —— 内存档的权重。取 4 是因为 <see cref="SecondTierSec"/>
-    /// 把时长分成了 4 档，相乘即「内存档优先、时长档次之」的二维编号。</summary>
-    private const int SecondTierCount = 4;
-
-    /// <summary>
-    /// <see cref="Tier"/> 的取值上界，排序键用它当进制（实测档号落在 4~19，取 32 留足余量）。
-    /// 必须<b>严格大于</b>档号最大值，否则次数差 1 的两项可能被档号差吃掉，
-    /// 「没出现过的优先」就不再成立。
-    /// </summary>
-    private const int TierSpan = 32;
 
     /// <summary>
     /// 每个 exe 名<b>已经播出过多少次</b>。调度以它为主序（少者先），
@@ -253,20 +224,19 @@ internal static class NativeExes
     }
 
     /// <summary>
-    /// 排序键 = <b>已播出次数 × <see cref="TierSpan"/> + 代价档</b>。
+    /// 排序键 = <b>已播出次数 × <see cref="ExeCatalog.TierSpan"/> + 代价档</b>。
     ///
     /// 次数乘一个大于档号上界的进制，是为了让「没出现过」压倒一切：次数为 0 时键 ≤ 19，
     /// 而任何播出过一次的键 ≥ 32 —— 无论它的代价档多小，都排不到前面去。
     /// 代价档只在<b>同次数</b>时才起区分作用，这正是「加权」二字的位置。
     /// </summary>
-    private static int SortKey(Pending p) => Count(p.ExeName) * TierSpan + Tier(p);
+    private static int SortKey(Pending p) => Count(p.ExeName) * ExeCatalog.TierSpan + Tier(p);
 
     private static int Count(string exeName)
         => ShownCount.TryGetValue(exeName, out var n) ? n : 0;
 
     /// <summary>代价档号：内存档为主、时长档为辅（见 <see cref="SortKey"/>）。</summary>
-    private static int Tier(Pending p)
-        => p.RamCost / RamTierMb * SecondTierCount + (int)(p.Life.TotalSeconds / SecondTierSec);
+    private static int Tier(Pending p) => ExeCatalog.Tier(p.RamCost, p.Life.TotalSeconds);
 
     /// <summary>
     /// 给一个<b>从队列里清掉、再也不会播出</b>的动画清账：补开它负责的端口，并回显它那行命令。
@@ -344,7 +314,7 @@ internal static class NativeExes
             return false;
         }
 
-        if (!Lifetimes.TryGetValue(exeName, out var life))
+        if (!ExeCatalog.TryGetLife(exeName, out var life))
         {
             Trace.Write("show " + exeName + " skipped: not in the animation whitelist");
             return false;

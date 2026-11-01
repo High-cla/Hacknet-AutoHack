@@ -662,7 +662,7 @@ BENCH_SAVE=<path> node tools/bench.mts              # 换存档
 | 50 000 | 712 | **2 648 831** | 3 719× |
 
 结论：`scan allnodes` 在千级地图上无感（1.6 ms），**万级地图会卡 100 ms 以上** —— 那时才该
-把 `RevealWholeMap` 里的 `discoverNode` 换成自己的哈希集标记（`HackEngine.Graph.cs` 的注释已写明这条待办）。
+把 `RevealWholeMap` 里的 `discoverNode` 换成自己的哈希集标记 —— v1.45.0 已做（`GraphNavigator.cs` 先用 HashSet 判「已发现」，只对未发现节点调原生 API；返回口径不变）。
 ## 离线单测（`tests/core-tests`）
 
 核心层（`src/AutoHack/Core/`）的纯逻辑单测。**与 `tools/` 不同，本目录入库** —— 它是长期资产，

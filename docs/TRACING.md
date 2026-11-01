@@ -435,16 +435,16 @@ public override void disconnectionDetected(Computer c, OS os)
 
 | 游戏机制 | mod 实现 | 位置 |
 |---|---|---|
-| `TraceTracker` | `HackEngine.KillTrace(os)` → `traceTracker.stop()` | `HackEngine.Counter.cs:94-103` |
+| `TraceTracker` | `Counterplay.KillTrace(os)` → `traceTracker.stop()` | `Counterplay.cs:94-103` |
 | `TrackersInProgress` | `TraceTools.Run` 里 `trackers.Clear()` | `TraceTools.cs:58-60` |
 | 两套一起清 | 面板 `ANTI-TRACE` 按钮 / `autohack trace`（立即）/ `HackRun.Finish`（每轮无条件） | `TraceTools.cs`、`HackRun.cs:408` |
-| 追踪链送来的 forkbomb | `HackEngine.KillForkBombs(os)`：`Killed()` + `needsRemoval`，由游戏线程当帧移除 | `HackEngine.Counter.cs` |
-| 脱机追踪的复发源 | `HackStepKind.CleanLogs` → `HackEngine.WipeTraces`，只删含玩家 IP 的行 | `HackRun.Plan.cs:161`、`HackEngine.Wipe.cs` |
-| 管理员反扑 | `SuppressCounterattack`：`computer.admin = null` | `HackEngine.Counter.cs` |
+| 追踪链送来的 forkbomb | `Counterplay.KillForkBombs(os)`：`Killed()` + `needsRemoval`，由游戏线程当帧移除 | `Counterplay.cs` |
+| 脱机追踪的复发源 | `HackStepKind.CleanLogs` → `WipeEngine.WipeTraces`，只删含玩家 IP 的行 | `HackRun.Plan.cs:161`、`WipeEngine.cs` |
+| 管理员反扑 | `SuppressCounterattack`：`computer.admin = null` | `Counterplay.cs` |
 | 换 IP | `IpTools.Reset`：原生三步 + 归属迁移 + 重建 Pathfinder 查找表 | `IpTools.cs` |
 | 演出动画点燃追踪 | `NativeExes.Tick` 每帧 `KillTrace` | `NativeExes.cs:539-542` |
 
-`KillTrace` 刻意**不照抄** `TraceKillExe` 的逐帧续期：`stop()` 是彻底终止，`TraceTracker.Update` 开头的 `if (!active) return;` 让后续帧零开销（`HackEngine.Counter.cs:80-92` 已说明）。代价是不走 `trace_close` 成就分支。
+`KillTrace` 刻意**不照抄** `TraceKillExe` 的逐帧续期：`stop()` 是彻底终止，`TraceTracker.Update` 开头的 `if (!active) return;` 让后续帧零开销（`Counterplay.cs:80-92` 已说明）。代价是不走 `trace_close` 成就分支。
 
 ### 7.1 「演出动画」与追踪的关系（补 §1.3）
 

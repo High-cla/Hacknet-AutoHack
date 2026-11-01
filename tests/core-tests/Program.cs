@@ -271,6 +271,34 @@ var ownedActions = Runner.Run(ownedSession, ownedWorld, _ => { });
 Check("session.login.owned.port.kept", ownedActions.Exists(a => a.Kind == ActionKind.OpenPort), string.Join(",", ownedActions.Select(a => a.Kind)));
 Check("session.login.owned.not.flagged", !ownedSession.LoggedIn.Contains("10.0.0.9"));
 
+// ⑦ 目标组装（TargetComposer）：这两条判据原先在适配器里，裸进程测不了；搬到核心层后可以断言。
+PortView Port(string protocol, int codePort, bool cracked = false)
+    => new PortView(protocol, codePort, codePort, protocol, cracked);
+bool IsCracker(int code) => code is 22 or 21 or 80;
+
+var composed = TargetComposer.Compose(
+    "1.2.3.4", "host", true, false, false, false, true, true, false, 3,
+    new[] { Port("ssh", 22), Port("ftp", 21, cracked: true), Port("smtp", 25), Port("backdoor", 0), Port("ssh", 22) },
+    IsCracker, null);
+Check("compose.open.count.all", composed.OpenPortCount == 1, "got " + composed.OpenPortCount);
+Check("compose.crackable.excludes.cracked", composed.Ports.All(p => p.CodePort != 21));
+Check("compose.crackable.excludes.no.program", composed.Ports.All(p => p.CodePort != 25));
+Check("compose.crackable.excludes.zero.port", composed.Ports.All(p => p.CodePort > 0));
+Check("compose.crackable.dedupes.by.port", composed.Ports.Count(p => p.CodePort == 22) == 1, "got " + composed.Ports.Count);
+Check("compose.crackable.count", composed.Ports.Count == 1, "got " + composed.Ports.Count);
+Check("compose.facts.passthrough", composed.IsOwned && composed.FirewallSolved && !composed.HasWhitelist && composed.PortsNeeded == 3);
+
+var noTable = TargetComposer.Compose("1.2.3.4", "h2", false, false, false, false, false, false, false, 0,
+    new[] { Port("mqtt", 1883) }, null, null);
+Check("compose.null.cracker.table", noTable.Ports.Count == 0);
+
+var withModPorts = TargetComposer.Compose("1.2.3.4", "h3", false, false, false, false, false, false, false, 0,
+    new[] { Port("mqtt", 1883), Port("ssh", 22) }, IsCracker, new[] { "mqtt" });
+Check("compose.modports.allows", withModPorts.Ports.Count == 2, "got " + withModPorts.Ports.Count);
+Check("compose.modports.keeps.native.too", withModPorts.Ports.Any(p => p.Protocol == "ssh"));
+
+Check("compose.empty.ports", TargetComposer.Compose("i", "n", false, false, false, false, false, false, false, 0, null, IsCracker, null).Ports.Count == 0);
+Check("compose.count.open.null", TargetComposer.CountOpen(null) == 0);
 Console.WriteLine(failures == 0
     ? $"PASS {total} checks"
     : $"FAILED {failures}/{total}");

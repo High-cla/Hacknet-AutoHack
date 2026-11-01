@@ -47,6 +47,7 @@ autohack -h                                     # 帮助
 | `disconnect when done` | 每个目标跑完是否 `dc`（缺省**关**）—— 断开会终止会话、清空 `navigationPath`，属行为选择。**只管断开**：清追踪已是每轮收尾的恒定动作，不再由开关控制 |
 | `skip owned` | 全网扫描时跳过已拿下的肉鸡（缺省**开**）。**只对全网扫描生效** —— 「当前节点」是刻意选择，连上再点 START 就是要打它 |
 | `auto mod ports` | 允许自动入侵去开**全部已注册的模组端口**（缺省**关**），等价于命令行 `modports=*`。勾上后不必再逐个点名协议 —— 这些端口由插件直接开，不跑模组自己的破解程序 |
+| `diagnostics` | 勾上后每 300 帧往终端写一行帧时间分位（`perf draw p50/p95/p99/max` + `web setSize/same/deferred/forced/rebuilt/dropped`）。缺省**关**；只读不动任何行为（v1.45.0）。cfg 键 `diagnostics` |
 | — | **强行提权已常驻**（v1.33.2 起，不再是开关）：porthack 门禁过不了时直接给目标写 `adminIP`。防护机（`portsToCrack=9999998`）与端口表凑不够门槛的机器只有这条路拿得下。提权落定后补一行原生收尾文案 `--Porthack Complete--`（v1.40.0，与 `PortHackExe.Completed()` 同串） |
 | `RUN` | 按当前设置执行 |
 | TOOLS 区 `扫描网络` / `解密 DEC` / `内存转储` / `填充程序` / `模组程序` / `端口列表` | 单击**立即执行**，无二次确认（见下表）。按钮文案跟随游戏语言 —— 中文 locale 显示中文，其它 locale 显示注册表里的英文原名（此前有 6 个按钮漏译，现已全部中文） |
@@ -187,17 +188,20 @@ src/AutoHack/
 ├── ToolRegistry.cs     工具注册表：内置 14 个 + 其它插件经 AutoHackApi 登记的工具
 ├── AutoHackApi.cs      公开扩展入口（扩展在自己的 PostLoad 里调用）
 ├── ToolDispatch.cs     工具的查表入口：命令行与面板共用一份实现
-├── HackPanel.cs        面板绘制：布局、绘制入口、状态与常量
-├── HackPanel.Draw.cs   　└ 自绘控件与绘制原语（Segment/Track/Measure 等）
+├── HackPanel.cs        面板：布局、状态机、动作与常量
+├── HackPanel.Draw.cs   　└ 面板边框与拖动（与面板状态强耦合）
+├── PanelCanvas.cs      　└ 自绘控件、绘制原语与文本度量缓存
 ├── HackRun.cs          执行器：执行核心给出的动作 + 收尾（与绘制解耦）
 ├── HackRun.Steps.cs    　└ 动作执行：唯一大量调用游戏 API 的区域
 ├── NativeExes.cs       原生演出：破解程序的排队、挂载、回显与补开端口
-├── HackEngine.cs       决策逻辑入口：目标解析与选择（含 ToolTargets）
-├── HackEngine.Graph.cs 　└ 网络图遍历：可达闭包、广度优先展开、揭图
-├── HackEngine.Ports.cs 　└ 端口表读取、破解命令、提权门槛（含端口容量）、防火墙
-├── HackEngine.Wipe.cs  　└ 日志清痕：识别、删除与全网扫描
-├── HackEngine.Whitelist.cs └ 白名单绕过
-├── HackEngine.Counter.cs　└ 反追踪、抑制管理员反扑、跳板拆除、静默断开
+├── HackEngine.cs       目标归属与选择：谁算已拿下、目标池怎么取（含 ToolTargets）
+├── GraphNavigator.cs   　└ 网络图遍历：可达闭包、广度优先展开、揭图
+├── PortEngine.cs       　└ 端口表读取、破解命令、提权门槛（含端口容量）、防火墙
+├── WipeEngine.cs       　└ 日志清痕：识别、删除与全网扫描
+├── WhitelistGate.cs    　└ 白名单探测与绕过
+├── Counterplay.cs      　└ 反追踪、杀炸弹、抑制管理员反扑、跳板拆除、静默断开
+├── ExeCatalog.cs       　└ 可播原生程序的时长表与代价档号（白名单即表内条目）
+├── GamePaths.cs        　└ 游戏目录/文件名常量（端口、清痕、白名单三块共用）
 ├── ModPortProbe.cs     模组端口白名单的未注册提示（查 PortManager，属适配层）
 ├── PortTools.cs        端口清单：显示端口 / 协议名 / 原始端口号 / 破解状态（只读）
 ├── PendingRuns.cs      无面板运行的调度：命令线程只传参数，游戏线程构造并推进（按 OS 键控的 ConcurrentDictionary）

@@ -21,7 +21,7 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    **绝不下载 Release 附件回来比对** —— 需要确认部署新鲜度时只看构建输出目录那份。
 3. **`gh release create` 绝不自动执行** —— 等用户显式发令。`git push` 可以直接做。
 
-**五十六条最容易踩的坑 / 最该知道的机制**（都带行号，可直接 grep）
+**五十七条最容易踩的坑 / 最该知道的机制**（都带行号，可直接 grep）
 
 1. `Computer.portsOpen` 恒为 0 —— Pathfinder 用 Harmony Prefix 接管 `openPort`/`openPorts`
    并 `return false`，状态改存 `PortState.Cracked`。任何读 `portsOpen` 的判断都是错的，
@@ -1122,6 +1122,32 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    （组合有限）；`FormatCache` 换语言整体失效。审计面同时确认：依赖环 0、每帧路径 LINQ 0 处、
    所有 `catch` 都带 `when` 过滤器、`NativeExes.OnPanel` 复用集合零每帧分配。
 
+57. **先有度量再优化；判据只能有一处；结构按内聚拆而不是按文件拆**（v1.45.0 审计记）——
+
+   **度量**：此前全仓 `Stopwatch` 计数为 0，一切性能结论只能靠离线等价模型（`tools/bench.mts`）
+   推断。现在绘制链有 `PerfMeter`（128 帧环形样本、p50/p95/p99/max），面板勾「诊断计数」
+   （cfg 键 `diagnostics`，缺省关）后每 300 帧写一行；同一行带 `WebRenderGuard.TakeStats()` 的
+   原生渲染计数（`same/deferred/forced/rebuilt/dropped`）—— `forced` 就是「延后额度用尽、
+   竞态窗口重新打开」的次数，是判断那个崩溃补丁还该不该继续改的唯一数字。
+   **判定性能必须先看 p95/p99**：120 帧里 2 帧卡 8 ms 会被平均值抹平（+0.13 ms），却是玩家能感知的掉帧。
+
+   **判据收口**：`Settled` 与 `InFlight` 曾各自遍历 `Live` + `Queue`、各写一遍 `IsOpen` 判据；
+   现在 `Settled(target) => InFlight(target) == 0`。「同一条道理只落实一半」在本仓库已出过两次事
+   （坑 27 的 v1.40.0 修正、这里是第三次的预防）—— 新增同族判据时先问「能不能复用已有的那一份」。
+
+   **结构**：`HackEngine` 曾是 1685 行、6 个 `partial` 的万能静态类。`partial` 只是文件级切分，
+   类型面与耦合没变。按内聚拆成 `PortEngine` / `WipeEngine` / `GraphNavigator` / `Counterplay` /
+   `WhitelistGate`，共用常量进 `GamePaths`（原先 `private const` 被迫共享，拆分后必须显式共享，
+   否则复制出来的那份迟早与游戏真名漂移）；`HackPanel` 的绘制原语进 `PanelCanvas`；
+   `NativeExes` 的时长表与代价档号进 `ExeCatalog`。**Harmony 补丁点一律不动** —— 装配面是
+   外部契约，重排它换来的是「补丁次序依赖」这种查不出的故障。
+
+   **测不了的部分要主动收窄**：`GameWorldView` 引用 `Hacknet` 类型，裸进程连 `new Computer(...)`
+   都会崩，「哪些端口可破 / 已破几个」这两条判据于是永远无法离线验证。现在它们搬进
+   `Core/TargetComposer.cs`（纯函数、12 条单测），适配器只做字段与端口清单的搬运。
+   **CI 只跑核心层**（`tests/core-tests`，net10 链接源码、零 NuGet）：插件工程编 net472 且六个引用
+   程序集全在本机游戏目录，干净检出上根本编不了；工作流另加一条 grep 守卫 —— `Core` 一旦
+   `using Hacknet/Pathfinder` 就失败，那是分层的前提。
 ## README 已精简掉的内容（原样保留于此）
 
 README 在 v1.32.6 之后被刻意精简过一轮（删了 94 行），只留使用者需要的东西。
@@ -1244,7 +1270,7 @@ passcode = 头部第 4 段首个密文数字 - 158485
 - [src/AutoHack/ExeTools.cs](src/AutoHack/ExeTools.cs): 程序补全 —— 幂等填充 `/bin`
 - [src/AutoHack/HardenTools.cs](src/AutoHack/HardenTools.cs): 自身加固（不可逆）
 - [src/AutoHack/ToolFiles.cs](src/AutoHack/ToolFiles.cs): 工具的落盘公共部分
-- [src/AutoHack/HackEngine.cs](src/AutoHack/HackEngine.cs): 决策层入口 —— 目标解析与选择（含 `ToolTargets`）；`partial` 分部：`HackEngine.Graph.cs`（图遍历）/ `HackEngine.Ports.cs`（端口与提权）/ `HackEngine.Wipe.cs`（清痕）/ `HackEngine.Whitelist.cs`（白名单）/ `HackEngine.Counter.cs`（反追踪、杀炸弹与反扑）
+- [src/AutoHack/HackEngine.cs](src/AutoHack/HackEngine.cs): 目标归属与选择（`IsOwned` / `IsEosDevice` / `TryLogin` / `ResolveTargets` / `ToolTargets`）。v1.45.0 拆掉 1685 行的 6 个 partial，按内聚分成独立类型：`PortEngine.cs`（端口与提权）/ `WipeEngine.cs`（清痕）/ `GraphNavigator.cs`（图遍历）/ `Counterplay.cs`（反追踪、杀炸弹与反扑）/ `WhitelistGate.cs`（白名单）/ `GamePaths.cs`（三块共用的目录名常量）/ `ExeCatalog.cs`（可播程序的时长表与代价档号）
 - [src/AutoHack/RefusedWhitelist.cs](src/AutoHack/RefusedWhitelist.cs): 记下「刚被白名单拒的那台」，供 `here` 在池空时回落（见坑 32）
 - [src/AutoHack/PanelSettings.cs](src/AutoHack/PanelSettings.cs): 面板设置的落盘层（ConfigFile 读写，无 UI；见坑 33）
 - [src/AutoHack/ReplaceFeedback.cs](src/AutoHack/ReplaceFeedback.cs): 给原生 `replace` 补「失败要说出来」（见坑 34）
@@ -1254,7 +1280,7 @@ passcode = 头部第 4 段首个密文数字 - 158485
 - [src/AutoHack/Core/ModPortPolicy.cs](src/AutoHack/Core/ModPortPolicy.cs): 模组端口白名单的**纯策略**（解析、命中判定、通配）；查 `PortManager` 的未注册提示在 `ModPortProbe.cs`（见坑 48）
 - [src/AutoHack/IpTools.cs](src/AutoHack/IpTools.cs): 收尾换 IP —— 原生三步 + 肉鸡归属迁移 + 重建 Pathfinder 查找表（见坑 30）
 - [src/SaveFix/SaveFixPlugin.cs](src/SaveFix/SaveFixPlugin.cs): 独立插件 HacknetSaveFix，修游戏本体存档 NRE
-- [src/AutoHack/HackPanel.cs](src/AutoHack/HackPanel.cs): 自绘控制面板（布局与入口）；`partial` 分部 `HackPanel.Draw.cs` 是绘制原语与文本度量
+- [src/AutoHack/HackPanel.cs](src/AutoHack/HackPanel.cs): 自绘控制面板（布局、状态机、动作）；绘制原语与文本度量已拆到 `PanelCanvas.cs`（v1.45.0），`HackPanel.Draw.cs` 只留面板边框与拖动
 - [src/AutoHack/HackOverlay.cs](src/AutoHack/HackOverlay.cs): 叠加层 —— patch `OS.Draw` / `OS.Update`（全仓仅此一处挂这两个补丁点，见坑 53）
 - [src/AutoHack/WebRenderGuard.cs](src/AutoHack/WebRenderGuard.cs): 原生网页渲染器（CEF）的三处稳定性补丁 —— `setSize` 尺寸未变不重建、`TextureUpdated` 空判、网页缓存原子写（见坑 53）
 - [src/AutoHack/LocalizationFix.cs](src/AutoHack/LocalizationFix.cs): 在 `StringExtensions.ContentFilePath` 出口补本地化查表，修 Pathfinder 重写 Action 加载器后 DLC 对话不翻译（见坑 53）

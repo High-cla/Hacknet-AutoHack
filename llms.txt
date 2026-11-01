@@ -1107,7 +1107,19 @@ D:\steam\steamapps\common\Hacknet\BepInEx\plugins\AutoHack.dll
    正确判据是 `!TargetView.IsOwned && world.IsOwned` —— `TargetView` 就是为此存在的。
 
    **指令原文收进 `Core/HackCommands`**：`connect`/`probe`/`porthack`/`dc`/`login` 必须与
-   游戏命令名逐字一致，散落即失同步风险。审计面同时确认：依赖环 0、每帧路径 LINQ 0 处、
+   游戏命令名逐字一致，散落即失同步风险。
+
+   **同轮审计的其余四条**（v1.44.0 记）：
+   ① **绘制链要有**自己的**异常边界** —— `HackOverlay.OnOSDraw` 是 Harmony Postfix，
+   里面抛异常直接打断 `OS.Draw`；面板与 HUD 各自 try，故障 5 秒内只上报一次。
+   ② **点 RUN 不要在 `OS.Draw` 帧里构造运行**：`new HackRun` 会揭图（写 `visibleNodes`）+
+   解析目标 + 规划，实测 169 台约 0.28 ms / 331 KB；改为 `PendingRuns.TryEnqueue`，
+   与命令行入口同一条时序。
+   ③ **运行期状态按 OS 实例化**：`AutoHackRuntime` + `ConditionalWeakTable<OS, …>`，
+   旧局随 OS 回收，不再靠「换局时清理」的静态规则；`PendingRuns.ForgetExcept` 兜住
+   排队表里对旧 OS 的强引用。
+   ④ **每帧文案要缓存**：面板进度/战果串与 `Loc.F` 的 `Replace` 结果都按参数缓存
+   （组合有限）；`FormatCache` 换语言整体失效。审计面同时确认：依赖环 0、每帧路径 LINQ 0 处、
    所有 `catch` 都带 `when` 过滤器、`NativeExes.OnPanel` 复用集合零每帧分配。
 
 ## README 已精简掉的内容（原样保留于此）

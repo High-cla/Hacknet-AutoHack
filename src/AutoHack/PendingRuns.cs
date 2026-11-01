@@ -27,12 +27,19 @@ internal static class PendingRuns
     /// <summary>该 OS 上是否已有运行在排队、在跑或正在收尾。供面板入口做互斥。</summary>
     internal static bool BusyFor(OS os) => Pending.ContainsKey(os) || AutoHackExecutable.FindActive(os) != null;
 
-    /// <summary>清掉某个 OS 的排队。由 <see cref="HackOverlay.Open"/> 在换局时调用。</summary>
-    internal static void Forget(OS os)
+    /// <summary>
+    /// 清掉除 <paramref name="keep"/> 以外所有 OS 的排队。由 <see cref="HackOverlay.Open"/>
+    /// 在本局第一次打开面板时调用 —— 换过局（回主菜单再进档）后，旧 OS 既不会再有
+    /// <c>OSUpdateEvent</c>，其排队也永远不会被推进，留着只会钉住旧实例（键是强引用）。
+    /// </summary>
+    internal static void ForgetExcept(OS keep)
     {
-        if (os != null)
+        foreach (var key in Pending.Keys)
         {
-            Pending.TryRemove(os, out _);
+            if (!ReferenceEquals(key, keep))
+            {
+                Pending.TryRemove(key, out _);
+            }
         }
     }
 

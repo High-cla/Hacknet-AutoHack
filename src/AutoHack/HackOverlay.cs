@@ -31,48 +31,52 @@ using Microsoft.Xna.Framework.Graphics;
 [HarmonyPatch]
 internal static class HackOverlay
 {
-    private static HackPanelState _state;
-    /// <summary>当前运行（由 exe 宿主持有，见 <see cref="AutoHackExecutable"/>）。</summary>
-    private static HackRun CurrentRun => AutoHackExecutable.Find(_os);
-    private static OS _os;
+    /// <summary>
+    /// 每个 OS 一份运行时。<see cref="System.Runtime.CompilerServices.ConditionalWeakTable{TKey,TValue}"/>
+    /// 的键是 OS 实例：换局后旧条目随旧 OS 一起被回收，不需要「换局时清理」这条规则。
+    /// </summary>
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<OS, AutoHackRuntime> Runtimes = new();
 
-    internal static bool IsOpen => _state is { Open: true };
+    private static AutoHackRuntime Runtime(OS os) => Runtimes.GetValue(os, key => new AutoHackRuntime(key));
+
+    /// <summary>指定 OS 上是否已打开面板。</summary>
+    internal static bool IsOpen(OS os)
+        => os != null && Runtimes.TryGetValue(os, out var runtime) && runtime.IsOpen;
 
     /// <summary>面板运行是否正在推进。供命令入口做互斥。</summary>
-    internal static bool IsRunning => CurrentRun is { Finished: false };
+    internal static bool IsRunning(OS os) => Runtime(os).Run is { Finished: false };
 
     internal static void Open(OS os)
     {
-        // 换过 OS（回主菜单再开档）就是新的一局：重新从 cfg 读设置，
-        // 免得上一局的改动把新一局带偏。同一 OS 内重复开关面板不动状态。
-        // 注意：只有 Open 会创建 _state —— 面板因此保持「开局不显示」。
-        if (_state == null || !ReferenceEquals(_os, os))
+        if (os == null)
         {
-            var fresh = new HackPanelState();
-            PanelSettings.Load(fresh);
-            _state = fresh;
-
-            // 换局即清全部跨局队列（都只有这里清；此刻 _os 还是**旧**实例，正是要忘掉的那个）：
-            // · 演出队列 —— 否则上一局排的动画会漏进新一局，且旧 OS 的 exe 引用
-            //   会卡住等待判据（见 NativeExes.Tick）；
-            // · headless 队列 —— 上一局排的运行不该在新一局执行。
-            NativeExes.Reset();
-            PendingRuns.Forget(_os);
-
-            // 追踪 HUD 不在此列：它每帧现读 OS.TrackersInProgress，没有需要清的缓存。
-            // 白名单拒绝记录也不在此列：它是 ConditionalWeakTable，键就是 OS，
-            // 旧实例被回收时条目自动消失（见 RefusedWhitelist 的字段注释）。
+            return;
         }
 
-        _os = os;
-        _state.Open = true;
+        var runtime = Runtime(os);
+
+        // 本局第一次打开：从 cfg 读设置，并清掉跨局队列。
+        // · 演出队列是全局的（动画挂在 OS 的 exes 上，但队列本身不分局）——重置为妙，
+        //   否则上一局排的动画会漏进新一局，旧 OS 的 exe 引用还会卡住等待判据；
+        // · headless 队列里其它 OS 的排队同样作废：旧局已经不可能再推进。
+        if (runtime.State == null)
+        {
+            runtime.EnsureState();
+            NativeExes.Reset();
+            PendingRuns.ForgetExcept(os);
+        }
+
+        runtime.Open();
+
+        // 追踪 HUD 不在此列：它每帧现读 OS.TrackersInProgress，没有需要清的缓存。
+        // 白名单拒绝记录也不在此列：它是 ConditionalWeakTable，键就是 OS。
     }
 
     internal static void Toggle(OS os)
     {
-        if (IsOpen)
+        if (IsOpen(os))
         {
-            _state.Open = false;
+            Runtime(os).Close();
             return;
         }
 
@@ -138,9 +142,6 @@ internal static class HackOverlay
         }
     }
 
-    /// <summary>上一次绘制异常的上报时刻（<c>OS.timer</c> 秒）。</summary>
-    private static double _lastDrawFaultAt = double.NegativeInfinity;
-
     /// <summary>
     /// 绘制异常只上报一次/5 秒：这条路径每帧都跑，不限制就会把终端刷满 ——
     /// 而故障本身通常是「某一帧的数据坏了」，重复行没有信息量。
@@ -150,13 +151,17 @@ internal static class HackOverlay
     {
         Trace.Write("draw fault in " + where + ": " + error);
 
+        var runtime = os == null ? null : Runtime(os);
         var now = os?.timer ?? 0;
-        if (now - _lastDrawFaultAt < DrawFaultLogSeconds)
+        if (runtime != null && now - runtime.LastDrawFaultAt < DrawFaultLogSeconds)
         {
             return;
         }
 
-        _lastDrawFaultAt = now;
+        if (runtime != null)
+        {
+            runtime.LastDrawFaultAt = now;
+        }
         os?.write("[autohack] draw fault (" + where + ") - " + error.GetType().Name + ": " + error.Message);
     }
 
@@ -178,7 +183,8 @@ internal static class HackOverlay
         {
             spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend);
             begun = true;
-            action = HackPanel.Draw(_state, CurrentRun, __instance, screen);
+            var runtime = Runtime(__instance);
+            action = HackPanel.Draw(runtime.State, runtime.Run, __instance, screen);
         }
         catch (InvalidOperationException)
         {
@@ -197,15 +203,15 @@ internal static class HackOverlay
         switch (action.Kind)
         {
             case HackPanel.PanelKind.Start:
-                Start();
+                Start(__instance);
                 break;
 
             case HackPanel.PanelKind.Close:
-                _state.Open = false;
+                Runtime(__instance).Close();
                 break;
 
             case HackPanel.PanelKind.Tool:
-                RunTool(action.Verb);
+                RunTool(__instance, action.Verb);
                 break;
         }
     }
@@ -214,48 +220,52 @@ internal static class HackOverlay
     /// 执行一个工具。工具在游戏线程上同步跑完 —— 与入侵流程共用同一个
     /// os.connectedComp，故运行中一律拒绝，避免两边互相换掉对方的目标。
     /// </summary>
-    private static void RunTool(string verb)
+    private static void RunTool(OS os, string verb)
     {
-        if (_os == null)
+        if (os == null)
         {
             return;
         }
 
-        if (PendingRuns.BusyFor(_os) || IsRunning)
+        if (PendingRuns.BusyFor(os) || IsRunning(os))
         {
-            _os.write("[autohack] " + verb + ": a run is in progress - wait for it to finish.");
+            os.write("[autohack] " + verb + ": a run is in progress - wait for it to finish.");
             return;
         }
 
         // wipe 的范围随 SCOPE 段走（「当前节点」= 当前节点所在的连线分量，其余 = 地图全表），
         // 与 dec / mem 的「whole map」复选框不是一个口径 —— 那两个问的是「工具作用在
         // 哪些机器上」，而 wipe 问的是「我的痕迹铺得多远」，后者本就该跟着 SCOPE。
+        var state = Runtime(os).State;
         var allNodes = verb == ToolDispatch.Wipe
-            ? _state.Scope != HackScope.Connected
-            : _state.AllNodes;
+            ? state.Scope != HackScope.Connected
+            : state.AllNodes;
 
         // 护栏在 ToolDispatch.Run 内 —— 两个入口共用一份，此处不再重复包一层。
-        ToolDispatch.Run(_os, verb, allNodes);
+        ToolDispatch.Run(os, verb, allNodes);
     }
 
     /// <summary>绘制异常的最小上报间隔（秒）。见 <see cref="ReportDrawFault"/>。</summary>
     private const double DrawFaultLogSeconds = 5.0;
 
     private static bool Visible(OS instance)
-        => _state is { Open: true } && instance != null && instance == _os && instance.IsActive;
+        => instance != null
+           && instance.IsActive
+           && Runtimes.TryGetValue(instance, out var runtime)
+           && runtime.IsOpen;
 
-    private static void Start()
+    private static void Start(OS os)
     {
-        if (_os == null)
+        if (os == null)
         {
             return;
         }
 
         // 单写者：两条运行会同时 connect/disconnect 同一个 os.connectedComp，
         // 互相把对方的目标换掉。已在跑的运行先跑完。
-        if (PendingRuns.BusyFor(_os) || IsRunning)
+        if (PendingRuns.BusyFor(os) || IsRunning(os))
         {
-            _os.write("[autohack] A run is already in progress - wait for it to finish.");
+            os.write("[autohack] A run is already in progress - wait for it to finish.");
             return;
         }
 
@@ -264,9 +274,9 @@ internal static class HackOverlay
         // Postfix 里 —— 在绘制帧改地图状态是不该有的副作用，尖峰也落在最敏感的帧上。
         // 命令行入口早就是「命令线程只入队、游戏线程再构造」（PendingRuns），
         // 面板入口走同一条时序；脚本错误也在那里转成终端一行。
-        if (!PendingRuns.TryEnqueue(_os, _state.ToOptions()))
+        if (!PendingRuns.TryEnqueue(os, Runtime(os).State.ToOptions()))
         {
-            _os.write("[autohack] A run is already in progress - wait for it to finish.");
+            os.write("[autohack] A run is already in progress - wait for it to finish.");
         }
 
         // 运行由零 RAM 的隐藏可执行体承载，挂载发生在 PendingRuns.Tick（游戏线程）；

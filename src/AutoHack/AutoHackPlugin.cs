@@ -197,7 +197,7 @@ public sealed class AutoHackPlugin : BepInEx.Hacknet.HacknetPlugin
     private static void TogglePanel(OS os)
     {
         HackOverlay.Toggle(os);
-        os.write(HackOverlay.IsOpen
+        os.write(HackOverlay.IsOpen(os)
             ? "[autohack] Panel opened - 'autohack' again to close."
             : "[autohack] Panel closed.");
     }
@@ -207,7 +207,7 @@ public sealed class AutoHackPlugin : BepInEx.Hacknet.HacknetPlugin
     {
         // 单写者：面板运行与 headless 运行互斥 —— 两条会同时 connect/disconnect
         // 同一个 os.connectedComp，互相把对方的目标换掉。
-        if (HackOverlay.IsRunning)
+        if (HackOverlay.IsRunning(os))
         {
             os.write("[autohack] A panel run is still in progress - wait for it to finish.");
             return;
